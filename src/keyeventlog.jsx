@@ -505,20 +505,38 @@ export default function KeyEventLog(props) {
       }
     );
   };
-
+  const other_kell = kels[other_kel_id];
+  const showSendRequest = other_kell
+    ? other_kell.kel.length < 2 ||
+      (other_kell.kel.length > 1 &&
+        other_kell.kel[other_kell.kel.length - 2].outputs[0].to !==
+          kel.kel[kel.kel.length - 1].public_key_hash)
+    : false;
   return (
     <>
       <div style={{ display: "flex", flexDirection: "column" }}>
         <h3>{id}</h3>
-        <button onClick={handleChangeAddress}>Rotate Key</button>
-        <button onClick={handleSendYada}>Send Yada</button>
-        <button onClick={handleSendRelationshipRequest}>
-          Send Relationship Request
-        </button>
-        <button onClick={handleAcceptRelationshipRequest}>
-          Accept Relationship Request
-        </button>
-        <button onClick={handleSendMessage}>Send Private Message</button>
+        {kel.hidden === false && (
+          <button onClick={handleChangeAddress}>Rotate Key</button>
+        )}
+        {/* <button onClick={handleSendYada}>Send Yada</button> */}
+        {kel.hidden === false && showSendRequest && (
+          <button onClick={handleSendRelationshipRequest}>
+            Send Relationship Request
+          </button>
+        )}
+        {kel.hidden === false &&
+          other_kell &&
+          other_kell.kel.length > 1 &&
+          other_kell.kel[other_kell.kel.length - 2].outputs[0].to ==
+            kel.kel[kel.kel.length - 1].public_key_hash && (
+            <button onClick={handleAcceptRelationshipRequest}>
+              Accept Relationship Request
+            </button>
+          )}
+        {kel.hidden === true && (
+          <button onClick={handleSendMessage}>Send Private Message</button>
+        )}
 
         <p>Import WIF</p>
         <input
