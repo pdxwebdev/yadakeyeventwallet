@@ -82,6 +82,9 @@ export default function KeyEventLog(props) {
     const c = await deriveSecurePath(b, mfa); //0/0/0 --> //0/0/0/0
     const txn = new Transaction({
       public_key: Buffer.from(a.publicKey).toString("hex"), //0/0
+      twice_prerotated_key_hash: getP2PKH(
+        c.publicKey //0/0/0
+      ),
       prerotated_key_hash: getP2PKH(
         b.publicKey //0/0/0
       ),
@@ -100,6 +103,9 @@ export default function KeyEventLog(props) {
     const f = await deriveSecurePath(e, mfa); //0/0/0/0/0/0/0
     const ke = new Transaction({
       public_key: Buffer.from(d.publicKey).toString("hex"), // NOT rotated
+      twice_prerotated_key_hash: getP2PKH(
+        f.publicKey //0/0/0
+      ),
       prerotated_key_hash: getP2PKH(
         e.publicKey //0/0/0
       ),
@@ -197,6 +203,9 @@ export default function KeyEventLog(props) {
 
     const privateKeyEvent = new Transaction({
       public_key: Buffer.from(za.publicKey).toString("hex"), // NOT rotated
+      twice_prerotated_key_hash: getP2PKH(
+        zc.publicKey //0/0/0
+      ),
       prerotated_key_hash: getP2PKH(
         zb.publicKey //0/0/0
       ),
@@ -216,6 +225,8 @@ export default function KeyEventLog(props) {
         other_kel_id: `Session for ${other_kel_id}`,
         kel: [privateKeyEvent],
         default_wallet: za,
+        parent: kels[id],
+        parent_key: b,
       };
     }
     setHdWallet(b);
@@ -236,12 +247,23 @@ export default function KeyEventLog(props) {
     const other_key_most_recent_unconfirmed_event =
       other_kel[other_kel.length - 2];
     console.log(getP2PKH(hdWallet.publicKey));
-    const decrypted = JSON.parse(
-      await decryptMessage(
-        Buffer.from(hdWallet.privateKey),
-        deserializeFromHex(other_key_most_recent_unconfirmed_event.relationship)
-      )
-    );
+    let decrypted = {};
+    if (other_key_most_recent_unconfirmed_event.relationship !== "") {
+      decrypted = JSON.parse(
+        await decryptMessage(
+          Buffer.from(hdWallet.privateKey),
+          deserializeFromHex(
+            other_key_most_recent_unconfirmed_event.relationship
+          )
+        )
+      );
+    } else {
+      decrypted = {
+        public_key: getP2PKH(
+          Buffer.from(other_key_most_recent_unconfirmed_event.public_key, "hex")
+        ),
+      };
+    }
     console.log(decrypted);
     console.log(getP2PKH(Buffer.from(decrypted.public_key, "hex")));
 
@@ -267,7 +289,10 @@ export default function KeyEventLog(props) {
       mfa: decrypted.mfa,
     });
     const encrypted = serializeToBinary(
-      await encryptMessage(Buffer.from(decrypted.public_key, "hex"), message)
+      await encryptMessage(
+        Buffer.from(other_key_most_recent_event.public_key, "hex"),
+        message
+      )
     );
     console.log(Buffer.from(za.publicKey).toString("hex"));
     const txn = new Transaction({
@@ -281,7 +306,7 @@ export default function KeyEventLog(props) {
       outputs: [
         {
           to: getP2PKH(
-            Buffer.from(decrypted.public_key, "hex") // rotated once
+            Buffer.from(other_key_most_recent_event.public_key, "hex") // rotated once
           ),
         },
       ],
@@ -313,15 +338,17 @@ export default function KeyEventLog(props) {
 
     const privateKeyEvent = new Transaction({
       public_key: Buffer.from(za.publicKey).toString("hex"), // NOT rotated
+      twice_prerotated_key_hash: getP2PKH(
+        zc.publicKey //0/0/0
+      ),
       prerotated_key_hash: getP2PKH(
         zb.publicKey //0/0/0
       ),
       outputs: [
         {
-          to: getP2PKH(Buffer.from(decrypted.public_key, "hex")),
+          to: getP2PKH(zb.publicKey, "hex"),
         },
       ],
-      relationship: encrypted,
     });
     privateKeyEvent.public_key_hash = getP2PKH(za.publicKey);
 
@@ -332,6 +359,8 @@ export default function KeyEventLog(props) {
         other_kel_id: `Session for ${other_kel_id}`,
         kel: [privateKeyEvent],
         default_wallet: za,
+        parent: kels[id],
+        parent_key: b,
       };
     }
     setKels({ ...kels, [new_id]: kels[new_id], [id]: kels[id] });
@@ -345,26 +374,44 @@ export default function KeyEventLog(props) {
 
     const other_kel = kels[other_kel_id].kel;
     const other_key_most_recent_event = other_kel[other_kel.length - 1];
+    const other_key_most_recent_unconfirmed_event =
+      other_kel[other_kel.length - 2] ||
+      kels[other_kel_id].parent.kel[kels[other_kel_id].parent.kel.length - 2];
     const decrypted = JSON.parse(
       await decryptMessage(
-        Buffer.from(hdWallet.privateKey),
-        deserializeFromHex(other_key_most_recent_event.relationship)
+        Buffer.from(
+          other_kel.length > 1
+            ? hdWallet.privateKey
+            : kels[id].parent_key.privateKey
+        ),
+        deserializeFromHex(other_key_most_recent_unconfirmed_event.relationship)
       )
     );
+
     const a = await deriveSecurePath(hdWallet, mfa + decrypted.mfa); //0/0 --> //0/0/0
     const b = await deriveSecurePath(a, mfa + decrypted.mfa); //0/0/0 --> //0/0/0/0
+    const c = await deriveSecurePath(b, mfa + decrypted.mfa); //0/0/0 --> //0/0/0/0
+    const d = await deriveSecurePath(c, mfa + decrypted.mfa); //0/0/0 --> //0/0/0/0
+
     console.log(decrypted);
     const message = JSON.stringify({
+      twice_prerotated_key_hash: getP2PKH(
+        c.publicKey //0/0/0
+      ),
       prerotated_key_hash: getP2PKH(b.publicKey),
-      public_key: Buffer.from(a.publicKey).toString("hex"),
+      public_key: Buffer.from(b.publicKey).toString("hex"),
       mfa: decrypted.mfa,
     });
+
     const encrypted = serializeToBinary(
       await encryptMessage(Buffer.from(decrypted.public_key, "hex"), message)
     );
     console.log(decrypted.public_key);
     const txn = new Transaction({
       public_key: Buffer.from(a.publicKey).toString("hex"), //0/0
+      twice_prerotated_key_hash: getP2PKH(
+        c.publicKey //0/0/0
+      ),
       prerotated_key_hash: getP2PKH(
         b.publicKey //0/0/0
       ),
@@ -380,8 +427,28 @@ export default function KeyEventLog(props) {
     txn.public_key_hash = getP2PKH(a.publicKey);
     await sendTransaction(a, txn);
     kels[id].kel.push(txn);
+
+    const txn2 = new Transaction({
+      public_key: Buffer.from(b.publicKey).toString("hex"), //0/0
+      twice_prerotated_key_hash: getP2PKH(
+        d.publicKey //0/0/0
+      ),
+      prerotated_key_hash: getP2PKH(
+        c.publicKey //0/0/0
+      ),
+      outputs: [
+        {
+          to: getP2PKH(
+            c.publicKey //0/0/0
+          ),
+        },
+      ],
+    });
+    txn2.public_key_hash = getP2PKH(b.publicKey);
+    await sendTransaction(b, txn);
+    kels[id].kel.push(txn2);
     setKels({ ...kels, [id]: kels[id] });
-    setHdWallet(a);
+    setHdWallet(b);
   }, [hdWallet, kel, mfa, kels]);
 
   const [wif, setWif] = useState("");
@@ -390,16 +457,14 @@ export default function KeyEventLog(props) {
   };
 
   const verify = (prev2, prev1, txn) => {
-    if (!prev1 && txn.public_key_hash) return "Inception";
-
     if (
-      prev1 &&
-      !prev2 &&
-      (txn.outputs.length > 1 ||
-        txn.outputs[0].to !== prev1.prerotated_key_hash ||
-        txn.relationship !== "")
+      !prev1 &&
+      txn.public_key_hash &&
+      txn.outputs.length === 1 &&
+      txn.outputs[0].to === txn.prerotated_key_hash &&
+      txn.relationship === ""
     )
-      return "Requires confirmation";
+      return "Inception";
 
     if (
       prev1 &&
@@ -414,6 +479,14 @@ export default function KeyEventLog(props) {
       prev1.prerotated_key_hash === txn.public_key_hash
     )
       return "Confirmed";
+
+    if (
+      prev1 &&
+      (txn.outputs.length > 1 ||
+        txn.outputs[0].to !== prev1.prerotated_key_hash ||
+        txn.relationship !== "")
+    )
+      return "Requires confirmation";
 
     return "False";
   };
