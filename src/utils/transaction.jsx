@@ -21,6 +21,9 @@ class MissingInputTransactionException extends Error {
 
 export class Transaction {
   constructor(options = {}) {
+    if (!options.status) {
+      this.status = "pending";
+    }
     if (!options.txn_time) {
       this.txn_time = 0;
     }
@@ -84,6 +87,8 @@ export class Transaction {
     this.exact_match = options.exact_match;
     this.prerotated_key_hash = options.prerotated_key_hash;
     this.twice_prerotated_key_hash = options.twice_prerotated_key_hash;
+    this.public_key_hash = options.public_key_hash;
+    this.prev_public_key_hash = options.prev_public_key_hash || "";
   }
 
   async generateHash() {
@@ -101,7 +106,9 @@ export class Transaction {
       this.getOutputHashes() +
       String(this.version) +
       this.prerotated_key_hash +
-      this.twice_prerotated_key_hash;
+      this.twice_prerotated_key_hash +
+      this.public_key_hash +
+      this.prev_public_key_hash;
 
     this.hash = await generateSHA256(concatenatedString);
   }
