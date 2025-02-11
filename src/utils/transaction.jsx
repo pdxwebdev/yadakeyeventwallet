@@ -38,7 +38,7 @@ export class Transaction {
         ? options.txn_time
         : parseFloat(options.txn_time || Math.floor(Date.now() / 1000));
     this.rid = options.rid || "";
-    this.transaction_signature = options.transaction_signature;
+    this.id = options.id;
     this.relationship = options.relationship || "";
     this.relationship_hash = options.relationship_hash || "";
     this.public_key = options.public_key || "";
@@ -130,6 +130,30 @@ export class Transaction {
     return outputsSorted
       .map((output) => `${output.to}${output.value.toFixed(8)}`)
       .join("");
+  }
+
+  toJson() {
+    return JSON.stringify({
+      public_key: this.public_key,
+      time: this.time,
+      dh_public_key: this.dh_public_key,
+      rid: this.rid,
+      inputs: this.inputs,
+      outputs: this.outputs,
+      relationship: this.relationship,
+      relationship_hash: this.relationship_hash,
+      fee: this.fee,
+      masternode_fee: this.masternode_fee,
+      requester_rid: this.requester_rid,
+      requested_rid: this.requested_rid,
+      version: this.version,
+      prerotated_key_hash: this.prerotated_key_hash,
+      twice_prerotated_key_hash: this.twice_prerotated_key_hash,
+      public_key_hash: this.public_key_hash,
+      prev_public_key_hash: this.prev_public_key_hash,
+      hash: this.hash,
+      id: this.id,
+    });
   }
 }
 
