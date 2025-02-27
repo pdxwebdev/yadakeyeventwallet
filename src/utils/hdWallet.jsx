@@ -9,7 +9,6 @@ import * as shajs from "sha.js";
 import bs58 from "bs58";
 import { useAppContext } from "../context/AppContext";
 import axios from "axios";
-import { API_URL } from "../config";
 
 // Function to generate a mnemonic phrase
 export const generateMnemonic = () => {
@@ -104,7 +103,9 @@ export const initWalletFromMnemonic = async (mnemonic) => {
 export const getKeyEventLog = async (wallet) => {
   const pk = Buffer.from(wallet.publicKey).toString("hex");
   const res = await axios.get(
-    `${API_URL}/key-event-log?username_signature=asdf&public_key=${pk}`
+    `${
+      import.meta.env.VITE_API_URL
+    }/key-event-log?username_signature=asdf&public_key=${pk}`
   );
   return res.data.key_event_log;
 };

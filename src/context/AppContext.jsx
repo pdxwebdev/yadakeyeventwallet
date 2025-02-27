@@ -2,7 +2,6 @@
 import axios from "axios";
 import React, { createContext, useState, useContext } from "react";
 import { getP2PKH } from "../utils/hdWallet";
-import { API_URL } from "../config";
 
 const AppContext = createContext();
 
@@ -20,7 +19,7 @@ export const AppProvider = ({ children }) => {
 
   const getBalance = async () => {
     const res = await axios.get(
-      `${API_URL}/get-graph-wallet?address=${getP2PKH(
+      `${import.meta.env.VITE_API_URL}/get-graph-wallet?address=${getP2PKH(
         wallet.publicKey
       )}&amount_needed=1`
     );
@@ -28,13 +27,15 @@ export const AppProvider = ({ children }) => {
   };
   const getWifBalance = async () => {
     const res = await axios.get(
-      `${API_URL}/get-graph-wallet?address=${getP2PKH(wifWallet.publicKey)}`
+      `${import.meta.env.VITE_API_URL}/get-graph-wallet?address=${getP2PKH(
+        wifWallet.publicKey
+      )}`
     );
     setWifBalance(() => res.data);
   };
   const getKeyEventLog = async () => {
     const res = await axios.get(
-      `${API_URL}/key-event-log?public_key=${Buffer.from(
+      `${import.meta.env.VITE_API_URL}/key-event-log?public_key=${Buffer.from(
         wallet.publicKey
       ).toString("hex")}`
     );
@@ -42,9 +43,11 @@ export const AppProvider = ({ children }) => {
   };
   const hasKEL = async () => {
     const res = await axios.get(
-      `${API_URL}/has-key-event-log?public_key=${Buffer.from(
-        wallet.publicKey
-      ).toString("hex")}`
+      `${
+        import.meta.env.VITE_API_URL
+      }/has-key-event-log?public_key=${Buffer.from(wallet.publicKey).toString(
+        "hex"
+      )}`
     );
     setHasKel(() => res.data.status);
   };

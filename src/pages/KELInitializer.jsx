@@ -10,7 +10,6 @@ import {
   getP2PKH,
 } from "../utils/hdWallet";
 import { Transaction } from "../utils/transaction";
-import { API_URL } from "../config";
 import { Wallet } from "ethers";
 
 export default function KELInitializer() {
@@ -31,7 +30,7 @@ export default function KELInitializer() {
     await txn.generateHash();
     txn.id = await generateSignatureWithPrivateKey(wallet.privateKey, txn.hash);
     const res = await axios.post(
-      `${API_URL}/transaction?username_signature=asdf`,
+      `${import.meta.env.VITE_API_URL}/transaction?username_signature=asdf`,
       txn.toJson(),
       {
         headers: {
@@ -42,7 +41,7 @@ export default function KELInitializer() {
     if (res.data && res.data[0] && res.data[0].id) {
       const id = setInterval(async () => {
         const res2 = await axios.get(
-          `${API_URL}/get-transaction-by-id?id=${txn.id}`
+          `${import.meta.env.VITE_API_URL}/get-transaction-by-id?id=${txn.id}`
         );
         if (res2.data.id) {
           if (res2.data.mempool === true) {

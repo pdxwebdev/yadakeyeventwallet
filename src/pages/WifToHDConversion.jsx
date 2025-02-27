@@ -24,7 +24,6 @@ import {
 import { useNavigate } from "react-router-dom";
 import { Transaction } from "../utils/transaction";
 import axios from "axios";
-import { API_URL } from "../config";
 
 const WifToHdConversion = () => {
   // State for the WIF wallet inputs and display values.
@@ -74,7 +73,9 @@ const WifToHdConversion = () => {
       await getBalance();
       const hexPubkey = Buffer.from(wallet.publicKey).toString("hex");
       const res = await axios.get(
-        `${API_URL}/has-key-event-log?public_key=${hexPubkey}`
+        `${
+          import.meta.env.VITE_API_URL
+        }/has-key-event-log?public_key=${hexPubkey}`
       );
       setHasKel(res.data.status);
     };
@@ -192,7 +193,7 @@ const WifToHdConversion = () => {
     await txn.generateHash();
     txn.id = await generateSignatureWithPrivateKey(wallet.privateKey, txn.hash);
     const res = await axios.post(
-      `${API_URL}/transaction?username_signature=asdf`,
+      `${import.meta.env.VITE_API_URL}/transaction?username_signature=asdf`,
       txn.toJson(),
       {
         headers: {
@@ -203,7 +204,7 @@ const WifToHdConversion = () => {
     if (res.data && res.data[0] && res.data[0].id) {
       const id = setInterval(async () => {
         const res2 = await axios.get(
-          `${API_URL}/get-transaction-by-id?id=${txn.id}`
+          `${import.meta.env.VITE_API_URL}/get-transaction-by-id?id=${txn.id}`
         );
         if (res2.data.id) {
           if (res2.data.mempool === true) {
@@ -285,7 +286,9 @@ const WifToHdConversion = () => {
       let a = await deriveSecurePath(newWallet, mfa); //0/0 --> //0/0/0
       const pk = Buffer.from(a.publicKey).toString("hex");
       const res = await axios.get(
-        `${API_URL}/key-event-log?username_signature=asdf&public_key=${pk}`
+        `${
+          import.meta.env.VITE_API_URL
+        }/key-event-log?username_signature=asdf&public_key=${pk}`
       );
       console.log(res.data);
       for (let i = 1; i < res.data.key_event_log.length; i++) {
@@ -327,7 +330,10 @@ const WifToHdConversion = () => {
         />
         <Text>
           <strong>Address:</strong>{" "}
-          <a href={`${API_URL}/explorer?term=${wifAddress}`} target="_blank">
+          <a
+            href={`${import.meta.env.VITE_API_URL}/explorer?term=${wifAddress}`}
+            target="_blank"
+          >
             {wifAddress}
           </a>
         </Text>
@@ -388,7 +394,12 @@ const WifToHdConversion = () => {
             )}
             <Text mt="sm">
               <strong>Address: </strong>
-              <a href={`${API_URL}/explorer?term=${address}`} target="_blank">
+              <a
+                href={`${
+                  import.meta.env.VITE_API_URL
+                }/explorer?term=${address}`}
+                target="_blank"
+              >
                 {address}
               </a>
             </Text>

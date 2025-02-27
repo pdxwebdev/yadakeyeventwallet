@@ -26,7 +26,6 @@ import WalletInitializer from "./WalletInitializer";
 import KeyEventLogTable from "../components/keyeventlogtable";
 import axios from "axios";
 import KELInitializer from "./KELInitializer";
-import { API_URL } from "../config";
 
 const Wallet = () => {
   const {
@@ -94,7 +93,7 @@ const Wallet = () => {
 
   const sendTransactions = async (items) => {
     const res = await axios.post(
-      `${API_URL}/transaction?username_signature=asdf`,
+      `${import.meta.env.VITE_API_URL}/transaction?username_signature=asdf`,
       JSON.stringify(items.map((item) => item.toJson())),
       {
         headers: {
@@ -106,7 +105,7 @@ const Wallet = () => {
     if (res.data && res.data[0] && res.data[0].id) {
       const id = setInterval(async () => {
         const res2 = await axios.get(
-          `${API_URL}/get-transaction-by-id?id=${txn.id}`
+          `${import.meta.env.VITE_API_URL}/get-transaction-by-id?id=${txn.id}`
         );
         if (res2.data.id) {
           if (res2.data.mempool === true) {
@@ -137,7 +136,9 @@ const Wallet = () => {
     }
 
     const res = await axios.get(
-      `${API_URL}/get-graph-wallet?address=${getP2PKH(wallet.publicKey)}`
+      `${import.meta.env.VITE_API_URL}/get-graph-wallet?address=${getP2PKH(
+        wallet.publicKey
+      )}`
     );
     const inputs = res.data.unspent_transactions.reduce(
       (accumulator, utxo) => {

@@ -15,7 +15,6 @@ import {
   generateSHA256,
 } from "../utils/hdWallet";
 import { Transaction } from "../utils/transaction";
-import { API_URL } from "../config";
 import { memoize } from "@mantine/core";
 
 export default function KeyEventLog(props) {
@@ -57,7 +56,7 @@ export default function KeyEventLog(props) {
         kel.kel.forEach(async (txn, index) => {
           if (txn.status !== "pending") return;
           const res = await axios.get(
-            `${API_URL}/get-transaction-by-id?id=${txn.id}`
+            `${import.meta.env.VITE_API_URL}/get-transaction-by-id?id=${txn.id}`
           );
           if (res.data.id) {
             if (res.data.mempool === true) {
@@ -693,7 +692,9 @@ export default function KeyEventLog(props) {
 
     const pk = Buffer.from(a.publicKey).toString("hex");
     const res = await axios.get(
-      `${API_URL}/key-event-log?username_signature=asdf&public_key=${pk}`
+      `${
+        import.meta.env.VITE_API_URL
+      }/key-event-log?username_signature=asdf&public_key=${pk}`
     );
     console.log(res.data);
     if (res.data.key_event_log) {
