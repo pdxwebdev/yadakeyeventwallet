@@ -1,0 +1,57 @@
+# **YadaCoin Open Source License (YOSL) v1.1**
+
+_(Last updated: February 2025)_
+
+## **1. License Grant**
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to use, copy, modify, merge, publish, and distribute the Software **solely for personal or research purposes**, subject to the restrictions below.
+
+## **2. Restrictions**
+
+### **2.1 No Unauthorized Commercial Use**
+
+You may **not** use the Software, in whole or in part, for any commercial purpose **without a separate commercial license** from the original author. This includes, but is not limited to:
+
+- Selling, licensing, or distributing the Software as part of a paid service or product.
+- Using the Software to generate revenue, whether directly or indirectly.
+- Incorporating the Software into any product, service, or system intended for commercial deployment.
+
+### **2.2 Commercial License Availability**
+
+Entities or individuals wishing to use the Software for commercial purposes **must obtain a separate paid license** by contacting the original author at:  
+📧 **info@yadacoin.io**
+
+### **2.3 No Blockchain Forks or Competing Cryptocurrencies**
+
+You may **not** use the Software, in whole or in part, to:
+
+- Create, develop, launch, or operate another cryptocurrency, token, blockchain, or distributed ledger technology.
+- Modify and deploy the Software as a separate blockchain-based system, whether public or private.
+- Use the Software as the basis for any competing product or service related to cryptocurrency or blockchain technology.
+
+### **2.4 No Trademark or Branding Use**
+
+- You may **not** use the name "YadaCoin," its logo, or any associated branding in any derivative project without explicit written permission from the original author.
+
+### **2.5 No Bypassing of License Terms**
+
+- You may **not** sublicense, relicense, or otherwise modify this License in a way that circumvents its restrictions.
+- Attempts to obfuscate, strip, or remove license headers from source code to evade compliance are explicitly prohibited.
+
+## **3. Derivative Works & Contributions**
+
+- You may modify the Software for **personal or research use**.
+- Any contributions to this Software must also comply with this License.
+- Any public modifications must be shared under the same license terms and **must not be used to create or operate a competing blockchain**.
+
+## **4. Enforcement & Termination**
+
+Violation of any part of this License **automatically terminates** your rights to use the Software. The original author retains the right to seek legal action against unauthorized use.
+
+## **5. Disclaimer of Warranty**
+
+THE SOFTWARE IS PROVIDED "AS IS," WITHOUT WARRANTY OF ANY KIND. IN NO EVENT SHALL THE AUTHORS BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY ARISING FROM THE USE OF THE SOFTWARE.
+
+## **6. Copyright Information**
+
+Copyright (c) 2017-2025 Matthew Vogel, Reynold Vogel, Inc.
