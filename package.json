@@ -23,6 +23,7 @@
     "@mantine/nprogress": "^7.16.2",
     "@mantine/spotlight": "^7.16.2",
     "@mantine/tiptap": "^7.16.2",
+    "@tabler/icons-react": "^3.30.0",
     "@tiptap/extension-link": "^2.11.5",
     "@tiptap/pm": "^2.11.5",
     "@tiptap/react": "^2.11.5",
@@ -42,10 +43,12 @@
     "react-dom": "^18.3.1",
     "react-router-dom": "^7.1.5",
     "recharts": "2",
+    "sha.js": "^2.4.11",
     "tiny-secp256k1": "^2.2.3",
     "vite-plugin-node-polyfills": "^0.22.0",
     "vite-plugin-top-level-await": "^1.4.4",
-    "vite-plugin-wasm": "^3.3.0"
+    "vite-plugin-wasm": "^3.3.0",
+    "yarn": "^1.22.22"
   },
   "devDependencies": {
     "@eslint/js": "^9.13.0",

@@ -9,6 +9,7 @@ export default defineConfig({
   resolve: {
     alias: {
       crypto: "crypto-browserify",
+      '@tabler/icons-react': '@tabler/icons-react/dist/esm/icons/index.mjs',
     },
   },
   plugins: [
@@ -42,4 +43,6 @@ export default defineConfig({
       jsx: "automatic",
     },
   },
+
+  base: '/wallet/',
 });

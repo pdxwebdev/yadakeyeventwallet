@@ -2,9 +2,12 @@ import { testDerivation, testEncryptDecrypt } from "../utils/hdWallet";
 import { Transaction } from "../utils/transaction";
 import KeyEventLog from "../components/keyeventlog";
 import { useState } from "react";
+import SandboxInstructionsModal from "../components/SandboxInstructionsModal";
+import { Switch } from "@mantine/core";
 
 // Sandbox component contains your current HD Wallet UI
 function Sandbox() {
+  const [onchainMode, setOnchainMode] = useState("");
   const [kels, setKels] = useState({
     "User 1": {
       hidden: false,
@@ -24,8 +27,20 @@ function Sandbox() {
 
   return (
     <div style={{ display: "flex", flexDirection: "column" }}>
-      <div style={{ display: "flex", flexDirection: "column", marginBottom: "20px" }}>
-        <h1>HD Wallet Example</h1>
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          marginBottom: "20px",
+        }}
+      >
+        <h1>Yada Event Log Sandbox</h1>
+        <Switch
+          label="onchain mode"
+          value={onchainMode}
+          onChange={setOnchainMode}
+        />
+        <SandboxInstructionsModal />
         <button onClick={handleGenerateTxn}>Generate txn</button>
         <button onClick={testDerivation}>Run test</button>
         <button onClick={testEncryptDecrypt}>Test Encrypt / Decrypt</button>
@@ -33,6 +48,7 @@ function Sandbox() {
       <div style={{ display: "flex", flexDirection: "row" }}>
         {Object.keys(kels).map((key) => (
           <KeyEventLog
+            onchainMode={onchainMode}
             key={key}
             id={key}
             setKels={setKels}

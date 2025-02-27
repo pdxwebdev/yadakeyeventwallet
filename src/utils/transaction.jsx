@@ -21,6 +21,9 @@ class MissingInputTransactionException extends Error {
 
 export class Transaction {
   constructor(options = {}) {
+    if (!options.key) {
+      return;
+    }
     if (!options.status) {
       this.status = "pending";
     }
@@ -33,6 +36,7 @@ export class Transaction {
     if (!options.inputs) {
       this.inputs = [];
     }
+    this.key = options.key;
     this.time =
       options.txn_time instanceof Number
         ? options.txn_time
@@ -91,6 +95,14 @@ export class Transaction {
     this.prev_public_key_hash = options.prev_public_key_hash || "";
   }
 
+  async hashAndSign() {
+    await this.generateHash();
+    this.id = await generateSignatureWithPrivateKey(
+      this.key.privateKey,
+      this.hash
+    );
+  }
+
   async generateHash() {
     const concatenatedString =
       this.public_key +
@@ -133,7 +145,7 @@ export class Transaction {
   }
 
   toJson() {
-    return JSON.stringify({
+    return {
       public_key: this.public_key,
       time: this.time,
       dh_public_key: this.dh_public_key,
@@ -153,7 +165,7 @@ export class Transaction {
       prev_public_key_hash: this.prev_public_key_hash,
       hash: this.hash,
       id: this.id,
-    });
+    };
   }
 }
 
@@ -166,6 +178,6 @@ class Output {
 
 class Input {
   constructor(options = {}) {
-    this.id = options.signature;
+    this.id = options.id;
   }
 }

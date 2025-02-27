@@ -4,7 +4,6 @@ import {
   testDerivation,
   generateMnemonic,
   createHDWallet,
-  importWif,
   getP2PKH,
   generateSignatureWithPrivateKey,
   testEncryptDecrypt,
@@ -16,9 +15,19 @@ import {
   generateSHA256,
 } from "../utils/hdWallet";
 import { Transaction } from "../utils/transaction";
+import { API_URL } from "../config";
 
 export default function KeyEventLog(props) {
-  const { hidden, kels, setKels, id, other_kel_id, kel, defaultWallet } = props;
+  const {
+    hidden,
+    kels,
+    setKels,
+    id,
+    other_kel_id,
+    kel,
+    defaultWallet,
+    onchainMode,
+  } = props;
   const [hdWallet, setHdWallet] = useState(null);
   const [mfa, setMfa] = useState("");
   const [newMfa, setNewMfa] = useState("");
@@ -32,6 +41,7 @@ export default function KeyEventLog(props) {
   }, [kel, setKels]);
 
   useEffect(() => {
+    if (onchainMode) return;
     if (!hdWallet && hidden && defaultWallet) {
       setHdWallet(defaultWallet);
     }
@@ -40,7 +50,7 @@ export default function KeyEventLog(props) {
         kel.kel.forEach(async (txn, index) => {
           if (txn.status !== "pending") return;
           const res = await axios.get(
-            `http://10.0.0.168:8005/get-transaction-by-id?id=${txn.id}`
+            `${API_URL}/get-transaction-by-id?id=${txn.id}`
           );
           if (res.data.id) {
             if (res.data.mempool === true) {
@@ -73,6 +83,7 @@ export default function KeyEventLog(props) {
   };
 
   const handleChangeAddress = useCallback(async () => {
+    console.log(mnemonic);
     const a = await deriveSecurePath(hdWallet, mfa); //0/0 --> //0/0/0
     const b = await deriveSecurePath(a, mfa); //0/0/0 --> //0/0/0/0
     const c = await deriveSecurePath(b, newMfa || mfa); //0/0/0 --> //0/0/0/0
@@ -83,6 +94,7 @@ export default function KeyEventLog(props) {
       await encryptMessage(c.publicKey, message)
     );
     const txn = new Transaction({
+      key: a,
       public_key: Buffer.from(a.publicKey).toString("hex"), //0/0
       twice_prerotated_key_hash: getP2PKH(
         c.publicKey //0/0/0
@@ -180,6 +192,7 @@ export default function KeyEventLog(props) {
     );
     console.log(`encrypted: ${encrypted}`);
     const txn = new Transaction({
+      key: a,
       public_key: Buffer.from(a.publicKey).toString("hex"), //0/0
       twice_prerotated_key_hash: getP2PKH(
         c.publicKey //0/0/0
@@ -203,6 +216,7 @@ export default function KeyEventLog(props) {
 
     const d = await deriveSecurePath(c, mfa); //0/0/0/0/0
     const ke = new Transaction({
+      key: b,
       public_key: Buffer.from(b.publicKey).toString("hex"), // NOT rotated
       twice_prerotated_key_hash: getP2PKH(
         d.publicKey //0/0/0
@@ -226,6 +240,7 @@ export default function KeyEventLog(props) {
     kel.last_decrypt_key = c;
 
     const privateKeyEvent = new Transaction({
+      key: za,
       public_key: Buffer.from(za.publicKey).toString("hex"), // NOT rotated
       twice_prerotated_key_hash: getP2PKH(
         zc.publicKey //0/0/0
@@ -314,6 +329,7 @@ export default function KeyEventLog(props) {
     );
     console.log(Buffer.from(a.publicKey).toString("hex"));
     const txn = new Transaction({
+      key: a,
       public_key: Buffer.from(a.publicKey).toString("hex"), //0/0
       twice_prerotated_key_hash: getP2PKH(
         c.publicKey //0/0/0
@@ -337,6 +353,7 @@ export default function KeyEventLog(props) {
 
     const d = await deriveSecurePath(c, mfa); //0/0/0/0/0
     const ke = new Transaction({
+      key: b,
       public_key: Buffer.from(b.publicKey).toString("hex"), // NOT rotated
       twice_prerotated_key_hash: getP2PKH(
         d.publicKey //0/0/0
@@ -360,6 +377,7 @@ export default function KeyEventLog(props) {
     kel.last_decrypt_key = c;
 
     const privateKeyEvent = new Transaction({
+      key: za,
       public_key: Buffer.from(za.publicKey).toString("hex"), // NOT rotated
       twice_prerotated_key_hash: getP2PKH(
         zc.publicKey //0/0/0
@@ -450,6 +468,7 @@ export default function KeyEventLog(props) {
     );
     console.log(decrypted.public_key);
     const txn = new Transaction({
+      key: a,
       public_key: Buffer.from(a.publicKey).toString("hex"), //0/0
       twice_prerotated_key_hash: getP2PKH(
         c.publicKey //0/0/0
@@ -472,6 +491,7 @@ export default function KeyEventLog(props) {
     kels[id].kel.push(txn);
 
     const txn2 = new Transaction({
+      key: b,
       public_key: Buffer.from(b.publicKey).toString("hex"), //0/0
       twice_prerotated_key_hash: getP2PKH(
         d.publicKey //0/0/0
@@ -526,6 +546,7 @@ export default function KeyEventLog(props) {
     const c = await deriveSecurePath(b, derivationMfa); //0/0/0 --> //0/0/0/0
     const d = await deriveSecurePath(c, derivationMfa); //0/0/0 --> //0/0/0/0
     const txn = new Transaction({
+      key: a,
       public_key: Buffer.from(a.publicKey).toString("hex"), //0/0
       twice_prerotated_key_hash: getP2PKH(
         c.publicKey //0/0/0
@@ -547,6 +568,7 @@ export default function KeyEventLog(props) {
     kel.kel.push(txn);
 
     const ke = new Transaction({
+      key: b,
       public_key: Buffer.from(b.publicKey).toString("hex"), // NOT rotated
       twice_prerotated_key_hash: getP2PKH(
         d.publicKey //0/0/0
@@ -584,9 +606,6 @@ export default function KeyEventLog(props) {
   }, [hdWallet, kel, mfa, walletAddress, kels]);
 
   const [wif, setWif] = useState("");
-  const handleWifImport = () => {
-    importWif(wif);
-  };
 
   const verify = (prev2, prev1, txn) => {
     if (
@@ -638,15 +657,41 @@ export default function KeyEventLog(props) {
   const sendTransaction = async (wallet, txn) => {
     await txn.generateHash();
     txn.id = await generateSignatureWithPrivateKey(wallet.privateKey, txn.hash);
-    axios.post(
-      "http://10.0.0.168:8005/transaction?username_signature=asdf",
-      txn.toJson(),
-      {
-        headers: {
-          "Content-Type": "application/json",
-        },
-      }
+    if (!onchainMode) {
+      txn.status = "onchain";
+      setHdWallet(wallet);
+      return;
+    }
+    axios.post(`${API_URL}/transaction?username_signature=asdf`, txn.toJson(), {
+      headers: {
+        "Content-Type": "application/json",
+      },
+    });
+  };
+
+  const handleSeedImport = async () => {
+    const wallet = createHDWallet(mnemonic);
+
+    let a = await deriveSecurePath(wallet, mfa); //0/0 --> //0/0/0
+
+    const pk = Buffer.from(a.publicKey).toString("hex");
+    const res = await axios.get(
+      `${API_URL}/key-event-log?username_signature=asdf&public_key=${pk}`
     );
+    console.log(res.data);
+    if (res.data.key_event_log) {
+      for (let i = 1; i < res.data.key_event_log.length; i++) {
+        a = await deriveSecurePath(a, mfa); //0/0 --> //0/0/0
+      }
+
+      setHdWallet(a);
+      kels[id].kel = res.data.key_event_log.map((txn) => {
+        txn.status = "onchain";
+        return txn;
+      });
+      kels[id].kel[kels[id].kel.length - 1].key = a;
+      setKels({ ...kels, [id]: kels[id] });
+    }
   };
   const other_kell = kels[other_kel_id];
   return (
@@ -674,7 +719,7 @@ export default function KeyEventLog(props) {
           <button onClick={handleSendMessage}>Send Private Message</button>
         )}
 
-        {/* <p>Import WIF</p>
+        <p>Import WIF</p>
         <input
           type="text"
           value={wif}
@@ -682,8 +727,17 @@ export default function KeyEventLog(props) {
             setWif(e.currentTarget.value);
           }}
         />
-        <button onClick={handleWifImport}>Import</button> */}
+        {/* <button onClick={handleWifImport}>Import</button> */}
 
+        <p>Import Seed</p>
+        <input
+          type="text"
+          value={mnemonic}
+          onChange={(e) => {
+            setMnemonic(e.currentTarget.value);
+          }}
+        />
+        <button onClick={handleSeedImport}>Import</button>
         {!kel.parent && (
           <>
             <p>Wallet Address: </p>

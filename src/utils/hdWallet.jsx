@@ -5,6 +5,11 @@ import * as tinySecp256k1 from "tiny-secp256k1";
 import * as bitcoin from "bitcoinjs-lib";
 import * as ECPairFactory from "ecpair";
 import * as eccryptoJS from "eccrypto-js";
+import * as shajs from "sha.js";
+import bs58 from "bs58";
+import { useAppContext } from "../context/AppContext";
+import axios from "axios";
+import { API_URL } from "../config";
 
 // Function to generate a mnemonic phrase
 export const generateMnemonic = () => {
@@ -33,14 +38,7 @@ function encodeASN1Integer(integer) {
 }
 
 export const generateSHA256 = async (input) => {
-  const encoder = new TextEncoder();
-  const data = encoder.encode(input);
-  const hashBuffer = await crypto.subtle.digest("SHA-256", data);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  const hashHex = hashArray
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
-  return hashHex;
+  return new shajs.sha256().update(input).digest("hex");
 };
 
 export const generateSignatureWithPrivateKey = async (
@@ -93,6 +91,33 @@ export const createHDWallet = (mnemonic) => {
   return root.deriveHardened(0);
 };
 
+export const initWalletFromMnemonic = async (mnemonic) => {
+  const root = createHDWallet(mnemonic);
+  const mfa = prompt("Enter your wallet password.");
+  const roota = await deriveSecurePath(root, mfa);
+  const rootb = await deriveSecurePath(roota, mfa);
+  const log = await getKeyEventLog(rootb);
+  const wallet = await syncWalletWithKel(roota, mfa, log);
+  return { wallet, mfa, log };
+};
+
+export const getKeyEventLog = async (wallet) => {
+  const pk = Buffer.from(wallet.publicKey).toString("hex");
+  const res = await axios.get(
+    `${API_URL}/key-event-log?username_signature=asdf&public_key=${pk}`
+  );
+  return res.data.key_event_log;
+};
+
+export const syncWalletWithKel = async (wallet, mfa, key_event_log) => {
+  let a = await deriveSecurePath(wallet, mfa);
+  for (let i = 1; i < key_event_log.length; i++) {
+    a = await deriveSecurePath(a, mfa); //0/0 --> //0/0/0
+    key_event_log[i].key = a;
+  }
+  return a;
+};
+
 const deriveIndex = async (factor, level) => {
   const hash = await generateSHA256(factor + level);
   return parseInt(hash.toString("hex"), 16) % 2147483647; // Modulo 2^31
@@ -109,20 +134,6 @@ export const deriveSecurePath = async (root, secondFactor) => {
   }
 
   return currentNode;
-};
-
-export const importWif = (wif) => {
-  const ECPair = ECPairFactory.ECPairFactory(tinySecp256k1);
-  const keyPair = ECPair.fromWIF(wif);
-
-  // Generate a native SegWit (bc1) address
-  const { address } = bitcoin.payments.p2wpkh({ pubkey: keyPair.publicKey });
-  const { address: address2 } = bitcoin.payments.p2pkh({
-    pubkey: keyPair.publicKey,
-  });
-
-  console.log("bc1 Address:", address);
-  console.log("p2pkh Address:", address2);
 };
 
 export function serializeToBinary(encryptionOutput) {
