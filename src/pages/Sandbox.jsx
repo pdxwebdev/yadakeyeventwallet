@@ -7,7 +7,7 @@ import { Switch } from "@mantine/core";
 
 // Sandbox component contains your current HD Wallet UI
 function Sandbox() {
-  const [onchainMode, setOnchainMode] = useState("");
+  const [onchainMode, setOnchainMode] = useState(false);
   const [kels, setKels] = useState({
     "User 1": {
       hidden: false,
@@ -38,7 +38,7 @@ function Sandbox() {
         <Switch
           label="onchain mode"
           value={onchainMode}
-          onChange={setOnchainMode}
+          onChange={() => setOnchainMode(() => !onchainMode)}
         />
         <SandboxInstructionsModal />
         <button onClick={handleGenerateTxn}>Generate txn</button>

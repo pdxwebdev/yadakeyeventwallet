@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import axios from "axios";
 import {
   testDerivation,
@@ -16,6 +16,7 @@ import {
 } from "../utils/hdWallet";
 import { Transaction } from "../utils/transaction";
 import { API_URL } from "../config";
+import { memoize } from "@mantine/core";
 
 export default function KeyEventLog(props) {
   const {
@@ -33,6 +34,12 @@ export default function KeyEventLog(props) {
   const [newMfa, setNewMfa] = useState("");
   const [mnemonic, setMnemonic] = useState("");
   const [walletAddress, setWalletAddress] = useState("");
+
+  const onchainModeRef = useRef(onchainMode);
+
+  useEffect(() => {
+    onchainModeRef.current = onchainMode; // Always update the ref when prop changes
+  }, [onchainMode]);
 
   useEffect(() => {
     setKels((prevKels) => {
@@ -654,20 +661,30 @@ export default function KeyEventLog(props) {
     return "False";
   };
 
-  const sendTransaction = async (wallet, txn) => {
-    await txn.generateHash();
-    txn.id = await generateSignatureWithPrivateKey(wallet.privateKey, txn.hash);
-    if (!onchainMode) {
-      txn.status = "onchain";
-      setHdWallet(wallet);
-      return;
-    }
-    axios.post(`${API_URL}/transaction?username_signature=asdf`, txn.toJson(), {
-      headers: {
-        "Content-Type": "application/json",
-      },
-    });
-  };
+  const sendTransaction = useCallback(
+    async (wallet, txn) => {
+      await txn.generateHash();
+      txn.id = await generateSignatureWithPrivateKey(
+        wallet.privateKey,
+        txn.hash
+      );
+      if (!onchainModeRef.current) {
+        txn.status = "onchain";
+        setHdWallet(wallet);
+        return;
+      }
+      axios.post(
+        `${API_URL}/transaction?username_signature=asdf`,
+        txn.toJson(),
+        {
+          headers: {
+            "Content-Type": "application/json",
+          },
+        }
+      );
+    },
+    [onchainMode]
+  );
 
   const handleSeedImport = async () => {
     const wallet = createHDWallet(mnemonic);
