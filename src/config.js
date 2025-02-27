@@ -1,1 +1,1 @@
-export const API_URL = 'http://10.0.0.168:8005'
+export const API_URL = 'https://yadacoin.io'
