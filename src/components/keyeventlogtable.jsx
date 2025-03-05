@@ -1,5 +1,5 @@
 import React from "react";
-import { Table, ScrollArea, Card, Title } from "@mantine/core";
+import { Table, ScrollArea, Card, Title, Text } from "@mantine/core";
 
 const KeyEventLogTable = (props) => {
   const { keyEventLogs } = props;
@@ -11,22 +11,39 @@ const KeyEventLogTable = (props) => {
       </Title>
       <ScrollArea>
         <Table striped highlightOnHover>
-          <thead>
-            <tr>
-              <th>Twice Pre-Rotated Key Hash</th>
-              <th>Pre-Rotated Key Hash</th>
-              <th>Public Key Hash</th>
-            </tr>
-          </thead>
-          <tbody>
+          <Table.Thead>
+            <Table.Tr>
+              <Table.Th>Twice Pre-Rotated Key Hash</Table.Th>
+              <Table.Th>Pre-Rotated Key Hash</Table.Th>
+              <Table.Th>Outputs</Table.Th>
+              <Table.Th>Public Key Hash</Table.Th>
+              <Table.Th>Status</Table.Th>
+            </Table.Tr>
+          </Table.Thead>
+          <Table.Tbody>
             {keyEventLogs.map((log, index) => (
-              <tr key={index}>
-                <td>{log.twice_prerotated_key_hash}</td>
-                <td>{log.prerotated_key_hash}</td>
-                <td>{log.public_key_hash}</td>
-              </tr>
+              <Table.Tr key={index}>
+                <Table.Td>{log.twice_prerotated_key_hash}</Table.Td>
+                <Table.Td>{log.prerotated_key_hash}</Table.Td>
+                <Table.Td>
+                  <Table striped highlightOnHover withRowBorders={true}>
+                    {log.outputs.map((item) => {
+                      return (
+                        <Table.Tr>
+                          <Table.Td>{item.to}</Table.Td>
+                          <Table.Td style={{ textAlign: "left" }}>
+                            {item.value}
+                          </Table.Td>
+                        </Table.Tr>
+                      );
+                    })}
+                  </Table>
+                </Table.Td>
+                <Table.Td>{log.public_key_hash}</Table.Td>
+                <Table.Td>{log.mempool ? "mempool" : "on-chain"}</Table.Td>
+              </Table.Tr>
             ))}
-          </tbody>
+          </Table.Tbody>
         </Table>
       </ScrollArea>
     </Card>

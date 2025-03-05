@@ -15,6 +15,7 @@ import {
   createHDWallet,
   deriveSecurePath,
   generateMnemonic,
+  initWalletFromMnemonic,
 } from "../utils/hdWallet";
 import { useAppContext } from "../context/AppContext";
 import axios from "axios";
@@ -37,6 +38,7 @@ const WalletInitializer = () => {
     getWifBalance,
     mfa,
     setMfa,
+    setLog,
   } = useAppContext();
   const navigate = useNavigate();
 
@@ -71,11 +73,12 @@ const WalletInitializer = () => {
         setWifWallet(fromWIF(wif));
         return navigate("/wif-to-hd");
       } catch (error) {
-        alert("Invalid mnemonic phrase provided.");
+        alert("Invalid WIF provided.");
       }
     } else if (method === "mnemonic") {
       if (!mnemonic) return alert("Please enter your mnemonic phrase.");
       try {
+        console.log(mnemonic);
         const { wallet, mfa, log } = await initWalletFromMnemonic(mnemonic);
         localStorage.setItem("mnemonic", mnemonic);
         setLog(log);

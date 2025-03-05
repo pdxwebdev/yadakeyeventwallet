@@ -162,7 +162,7 @@ const Wallet = () => {
     if (inputs.total - total > 0) {
       meoutput = {
         value: inputs.total - total,
-        to: getP2PKH(b.publicKey),
+        to: getP2PKH(c.publicKey),
       };
       filteredRecipients.push(meoutput);
     }
@@ -202,13 +202,13 @@ const Wallet = () => {
         prerotated_key_hash: getP2PKH(
           c.publicKey //0/0/0
         ),
-        inputs: [{ id: txn.id }],
+        inputs: [],
         outputs: [
           {
             to: getP2PKH(
               c.publicKey //0/0/0
             ),
-            value: meoutput ? meoutput.value : 0,
+            value: 0,
           },
         ],
         relationship: "",

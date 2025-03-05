@@ -3,10 +3,12 @@ import { Transaction } from "../utils/transaction";
 import KeyEventLog from "../components/keyeventlog";
 import { useState } from "react";
 import SandboxInstructionsModal from "../components/SandboxInstructionsModal";
-import { Switch } from "@mantine/core";
+import { Button, Switch, Tabs } from "@mantine/core";
+import { IconWriting } from "@tabler/icons-react";
 
 // Sandbox component contains your current HD Wallet UI
 function Sandbox() {
+  const [opened, setOpened] = useState(true);
   const [onchainMode, setOnchainMode] = useState(false);
   const [kels, setKels] = useState({
     "User 1": {
@@ -27,39 +29,57 @@ function Sandbox() {
 
   return (
     <div style={{ display: "flex", flexDirection: "column" }}>
+      <h1>Yada Event Log Sandbox</h1>
+      <Switch
+        mb="xl"
+        label="onchain mode"
+        value={onchainMode}
+        onChange={() => setOnchainMode(() => !onchainMode)}
+      />
       <div
         style={{
           display: "flex",
-          flexDirection: "column",
+          flexDirection: "row",
           marginBottom: "20px",
+          gap: 10,
         }}
       >
-        <h1>Yada Event Log Sandbox</h1>
-        <Switch
-          label="onchain mode"
-          value={onchainMode}
-          onChange={() => setOnchainMode(() => !onchainMode)}
+        <SandboxInstructionsModal
+          kels={kels}
+          onchainMode={onchainMode}
+          opened={opened}
+          setOpened={setOpened}
         />
-        <SandboxInstructionsModal />
-        <button onClick={handleGenerateTxn}>Generate txn</button>
-        <button onClick={testDerivation}>Run test</button>
-        <button onClick={testEncryptDecrypt}>Test Encrypt / Decrypt</button>
+        {/* <Button onClick={handleGenerateTxn}>Generate txn</Button>
+        <Button onClick={testDerivation}>Run test</Button>
+        <Button onClick={testEncryptDecrypt}>Test Encrypt / Decrypt</Button> */}
       </div>
-      <div style={{ display: "flex", flexDirection: "row" }}>
+      <Tabs defaultValue="User 1">
+        <Tabs.List>
+          {Object.keys(kels).map((key) => {
+            return (
+              <Tabs.Tab value={key} leftSection={<IconWriting size={12} />}>
+                {key}
+              </Tabs.Tab>
+            );
+          })}
+        </Tabs.List>
         {Object.keys(kels).map((key) => (
-          <KeyEventLog
-            onchainMode={onchainMode}
-            key={key}
-            id={key}
-            setKels={setKels}
-            kels={kels}
-            kel={kels[key]}
-            other_kel_id={kels[key].other_kel_id}
-            hidden={kels[key].hidden}
-            defaultWallet={kels[key].default_wallet}
-          />
+          <Tabs.Panel value={key} key={key}>
+            <KeyEventLog
+              setOpened={setOpened}
+              onchainMode={onchainMode}
+              id={key}
+              setKels={setKels}
+              kels={kels}
+              kel={kels[key]}
+              other_kel_id={kels[key].other_kel_id}
+              hidden={kels[key].hidden}
+              defaultWallet={kels[key].default_wallet}
+            />
+          </Tabs.Panel>
         ))}
-      </div>
+      </Tabs>
     </div>
   );
 }
