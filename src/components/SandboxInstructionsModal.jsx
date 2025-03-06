@@ -120,10 +120,6 @@ export default function SandboxInstructionsModal(props) {
             rotation between these two parties. This can be used for very secure
             communication.
           </List.Item>
-          <List.Item>
-            Next, under <strong>Session for User 1</strong>, click{" "}
-            <strong>'Send 1 Yada'</strong>.
-          </List.Item>
           <List.Item
             icon={
               kels["Session for User 1"] &&
@@ -134,6 +130,10 @@ export default function SandboxInstructionsModal(props) {
               )
             }
           >
+            Next, under <strong>Session for User 1</strong>, click{" "}
+            <strong>'Send 1 Yada'</strong>.
+          </List.Item>
+          <List.Item>
             This rotates the User 1 side of the relationship.
           </List.Item>
           <List.Item
@@ -153,11 +153,18 @@ export default function SandboxInstructionsModal(props) {
             This rotates the User 2 side of the relationship.
           </List.Item>
           <List.Item>
-            If you look in the far right column. There is a property named
-            'mfa'. This is an example of a property which is consistent
-            throughout the entire workflow (User 1, User 2, Session for User 1,
-            Session for User 2) and if it is changed, the key chain will break
-            and the blockchcain will reject the transaction.
+            If the contract address were to change between session user 1 and
+            session user 2, or the passwords were not correct, there would be an
+            error raised and the transaction would be denied. Notice the how the
+            values/colors correspond to one another in a diagonal pattern from
+            row to row.
+          </List.Item>
+          <List.Item>
+            Also, scroll to the right and notice we are exposing the private
+            key, the chain code, password, and the contract address of the
+            previous record. This allows the consensus layer to verify that the
+            action taken in the unconfirmed event is valid. We do all of this
+            without compromising the key log or the current key!
           </List.Item>
         </List>
       </Modal>
