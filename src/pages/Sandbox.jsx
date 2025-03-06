@@ -35,6 +35,7 @@ function Sandbox() {
       other_kel_id: "User 1",
     },
   });
+  const [contractAddress, setContractAddress] = useState("");
 
   const handleGenerateTxn = () => {
     console.log(new Transaction());
@@ -71,7 +72,11 @@ function Sandbox() {
         <Tabs.List>
           {Object.keys(kels).map((key) => {
             return (
-              <Tabs.Tab value={key} leftSection={<IconWriting size={12} />}>
+              <Tabs.Tab
+                key={key}
+                value={key}
+                leftSection={<IconWriting size={12} />}
+              >
                 {key}
               </Tabs.Tab>
             );
@@ -89,6 +94,8 @@ function Sandbox() {
               other_kel_id={kels[key].other_kel_id}
               hidden={kels[key].hidden}
               defaultWallet={kels[key].default_wallet}
+              setContractAddress={setContractAddress}
+              contractAddress={contractAddress}
             />
           </Tabs.Panel>
         ))}

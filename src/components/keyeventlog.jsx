@@ -28,10 +28,76 @@ import {
   generateSHA256,
 } from "../utils/hdWallet";
 import { Transaction } from "../utils/transaction";
-import { memoize, Table, Text, Button } from "@mantine/core";
+import { memoize, Table, Text, Button, TextInput } from "@mantine/core";
 import * as bip39 from "bip39";
 import * as bip32 from "bip32";
 import * as tinySecp256k1 from "tiny-secp256k1";
+
+const stringToColor = (str) => {
+  let hash = 0;
+  // Compute a hash from the input string
+  for (let i = 0; i < str.length; i++) {
+    hash = str.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  let color = "#";
+  // Extract and adjust each RGB component
+  for (let i = 0; i < 3; i++) {
+    // Extract one 8-bit component from the hash
+    let value = (hash >> (i * 8)) & 0xff;
+    // Mix with white (255) to lighten the color (pastel effect)
+    value = Math.floor((value + 255) / 2);
+    // Convert the value to a two-digit hexadecimal string
+    color += ("00" + value.toString(16)).substr(-2);
+  }
+  return color;
+};
+
+const verify = (prev2, prev1, txn) => {
+  if (
+    txn.outputs.length > 1 ||
+    txn.relationship !== "" ||
+    txn.outputs[0].to !== txn.prerotated_key_hash
+  )
+    return "Requires confirmation";
+
+  if (
+    !prev1 &&
+    txn.public_key_hash &&
+    txn.outputs.length === 1 &&
+    txn.outputs[0].to === txn.prerotated_key_hash &&
+    txn.relationship === ""
+  )
+    return "Inception";
+
+  if (
+    prev1 &&
+    prev2 &&
+    txn.outputs.length === 1 &&
+    txn.twice_prerotated_key_hash &&
+    txn.twice_prerotated_key_hash.length > 0 &&
+    txn.prerotated_key_hash &&
+    txn.prerotated_key_hash.length > 0 &&
+    prev2.twice_prerotated_key_hash === txn.public_key_hash &&
+    prev1.twice_prerotated_key_hash === txn.outputs[0].to &&
+    prev1.prerotated_key_hash === txn.public_key_hash
+  )
+    return "Confirmed";
+
+  if (
+    prev1 &&
+    !prev2 &&
+    txn.outputs.length === 1 &&
+    txn.twice_prerotated_key_hash &&
+    txn.twice_prerotated_key_hash.length > 0 &&
+    txn.prerotated_key_hash &&
+    txn.prerotated_key_hash.length > 0 &&
+    prev1.twice_prerotated_key_hash === txn.outputs[0].to &&
+    prev1.prerotated_key_hash === txn.public_key_hash
+  )
+    return "Confirmed";
+
+  return "False";
+};
 
 export default function KeyEventLog(props) {
   const {
@@ -44,6 +110,8 @@ export default function KeyEventLog(props) {
     defaultWallet,
     onchainMode,
     setOpened,
+    setContractAddress,
+    contractAddress,
   } = props;
   const [rootKey, setRootKey] = useState(null);
   const [hdWallet, setHdWallet] = useState(null);
@@ -108,9 +176,13 @@ export default function KeyEventLog(props) {
 
   const handleChangeAddress = useCallback(async () => {
     console.log(mnemonic);
+    if (!mfa || mfa === "") {
+      alert("Password cannot be blank.");
+      return;
+    }
     const a = await deriveSecurePath(hdWallet, mfa); //0/0 --> //0/0/0
     const b = await deriveSecurePath(a, mfa); //0/0/0 --> //0/0/0/0
-    const c = await deriveSecurePath(b, newMfa || mfa); //0/0/0 --> //0/0/0/0
+    const c = await deriveSecurePath(b, mfa); //0/0/0 --> //0/0/0/0
     const message = JSON.stringify({
       message: "pass it on",
     });
@@ -139,7 +211,7 @@ export default function KeyEventLog(props) {
       prev_public_key_hash:
         kel.kel.length > 0 ? kel.kel[kel.kel.length - 1].public_key_hash : "",
     });
-
+    txn.mfa = mfa;
     txn.key = a;
     kel.kel.push(txn);
     console.log(getP2PKH(a.publicKey));
@@ -168,6 +240,7 @@ export default function KeyEventLog(props) {
         public_key_hash: getP2PKH(newa.publicKey),
         prev_public_key_hash: kel.kel[kel.kel.length - 1].public_key_hash,
       });
+      txn2.mfa = mfa;
       txn2.key = newa;
       kel.kel.push(txn2);
       await sendTransaction(newa, txn2);
@@ -184,6 +257,14 @@ export default function KeyEventLog(props) {
   }, [hdWallet, kel, mfa, id, newMfa, kels]);
 
   const handleSendRelationshipRequest = useCallback(async () => {
+    if (!contractAddress) {
+      alert("Contract address required. (or just type some characters)");
+      return;
+    }
+    if (!mfa || mfa === "" || !newMfa || newMfa === "" || mfa === newMfa) {
+      alert("New Password required.");
+      return;
+    }
     if (kel.kel.length <= 0)
       return alert("No inception event on key event log");
     if (Object.keys(kels).length < 2)
@@ -195,15 +276,14 @@ export default function KeyEventLog(props) {
     const other_key_most_recent_event = other_kel[other_kel.length - 1];
     const a = await deriveSecurePath(hdWallet, mfa); //0/0 --> //0/0/0
     const b = await deriveSecurePath(a, mfa); //0/0/0 --> //0/0/0/0
-    const c = await deriveSecurePath(b, mfa); //0/0/0 --> //0/0/0/0
-    const mfaAddress = other_key_most_recent_event.prerotated_key_hash;
-    const za = await deriveSecurePath(hdWallet, mfa + mfaAddress); //0/0 --> //0/0/0
-    const zb = await deriveSecurePath(za, mfa + mfaAddress); //0/0 --> //0/0/0
-    const zc = await deriveSecurePath(zb, mfa + mfaAddress); //0/0 --> //0/0/0
+    const c = await deriveSecurePath(b, newMfa || mfa); //0/0/0 --> //0/0/0/0
+    const za = await deriveSecurePath(hdWallet, mfa + contractAddress); //0/0 --> //0/0/0
+    const zb = await deriveSecurePath(za, mfa + contractAddress); //0/0 --> //0/0/0
+    const zc = await deriveSecurePath(zb, (newMfa || mfa) + contractAddress); //0/0 --> //0/0/0
     const message = JSON.stringify(
       {
         public_key: Buffer.from(za.publicKey).toString("hex"),
-        mfa: mfaAddress,
+        mfa: contractAddress,
         encryption_key_hash: getP2PKH(
           Buffer.from(other_key_most_recent_event.public_key, "hex")
         ),
@@ -242,6 +322,7 @@ export default function KeyEventLog(props) {
       prev_public_key_hash: kel.kel[kel.kel.length - 1].public_key_hash,
     });
     txn.message = message;
+    txn.mfa = mfa;
     txn.key = a;
     await sendTransaction(a, txn);
 
@@ -265,6 +346,7 @@ export default function KeyEventLog(props) {
       public_key_hash: getP2PKH(b.publicKey),
       prev_public_key_hash: txn.public_key_hash,
     });
+    ke.mfa = newMfa || mfa;
     ke.key = b;
     kels[id].kel.push(txn, ke);
     await sendTransaction(b, ke);
@@ -289,6 +371,8 @@ export default function KeyEventLog(props) {
       public_key_hash: getP2PKH(za.publicKey),
     });
 
+    privateKeyEvent.contractAddress = contractAddress;
+    privateKeyEvent.mfa = mfa;
     privateKeyEvent.key = za;
 
     await sendTransaction(za, privateKeyEvent, false);
@@ -306,10 +390,20 @@ export default function KeyEventLog(props) {
       };
     }
     setKels({ ...kels, [new_id]: kels[new_id], [id]: kels[id] });
+    setMfa(newMfa || mfa);
+    setNewMfa("");
     //console.log(JSON.stringify(kel));
-  }, [hdWallet, kel, mfa, kels]);
+  }, [hdWallet, kel, mfa, kels, newMfa]);
 
   const handleAcceptRelationshipRequest = useCallback(async () => {
+    if (!contractAddress) {
+      alert("Contract address required. (or just type some characters)");
+      return;
+    }
+    if (!mfa || mfa === "" || !newMfa || newMfa === "" || mfa === newMfa) {
+      alert("New Password required.");
+      return;
+    }
     if (kel.kel.length <= 0)
       return alert("No inception event on key event log");
     if (Object.keys(kels).length < 2)
@@ -344,11 +438,11 @@ export default function KeyEventLog(props) {
 
     const a = await deriveSecurePath(hdWallet, mfa); //0/0 --> //0/0/0
     const b = await deriveSecurePath(a, mfa); //0/0/0 --> //0/0/0/0
-    const c = await deriveSecurePath(b, mfa); //0/0/0 --> //0/0/0/0
+    const c = await deriveSecurePath(b, newMfa || mfa); //0/0/0 --> //0/0/0/0
 
     const za = await deriveSecurePath(hdWallet, mfa + decrypted.mfa); //0/0 --> //0/0/0
     const zb = await deriveSecurePath(za, mfa + decrypted.mfa); //0/0 --> //0/0/0
-    const zc = await deriveSecurePath(zb, mfa + decrypted.mfa); //0/0 --> //0/0/0
+    const zc = await deriveSecurePath(zb, (newMfa || mfa) + decrypted.mfa); //0/0 --> //0/0/0
     const message = JSON.stringify(
       {
         public_key: Buffer.from(zb.publicKey).toString("hex"),
@@ -387,6 +481,7 @@ export default function KeyEventLog(props) {
       public_key_hash: getP2PKH(a.publicKey),
       prev_public_key_hash: kel.kel[kel.kel.length - 1].public_key_hash,
     });
+    txn.mfa = mfa;
     txn.message = message;
     txn.key = a;
     await sendTransaction(a, txn);
@@ -411,6 +506,7 @@ export default function KeyEventLog(props) {
       public_key_hash: getP2PKH(b.publicKey),
       prev_public_key_hash: txn.public_key_hash,
     });
+    ke.mfa = mfa;
     ke.key = b;
     kels[id].kel.push(txn, ke);
     await sendTransaction(b, ke);
@@ -432,6 +528,8 @@ export default function KeyEventLog(props) {
       ],
       public_key_hash: getP2PKH(za.publicKey),
     });
+    privateKeyEvent.contractAddress = contractAddress;
+    privateKeyEvent.mfa = mfa;
     privateKeyEvent.key = za;
     await sendTransaction(za, privateKeyEvent, false);
 
@@ -449,108 +547,9 @@ export default function KeyEventLog(props) {
     }
     setKels({ ...kels, [new_id]: kels[new_id], [id]: kels[id] });
     //console.log(JSON.stringify(kel));
-  }, [hdWallet, kel, mfa, kels]);
-
-  const handleSendMessage = useCallback(async () => {
-    if (kel.length <= 0) return alert("No inception event on key event log");
-
-    const other_kel = kels[other_kel_id].kel;
-    const other_key_most_recent_event = other_kel[other_kel.length - 1];
-    let other_key_most_recent_unconfirmed_event;
-    let derivationMfa;
-    let decrypted;
-    if (kel.parent) {
-      other_key_most_recent_unconfirmed_event =
-        kels[other_kel_id].parent &&
-        !kels[other_kel_id].kel[kels[other_kel_id].kel.length - 2]
-          ? kels[other_kel_id].parent.kel[
-              kels[other_kel_id].parent.kel.length - 2
-            ]
-          : kels[other_kel_id].kel[kels[other_kel_id].kel.length - 2];
-
-      const decryptKey = kels[other_kel_id].kel[
-        kels[other_kel_id].kel.length - 2
-      ]
-        ? kels[id].last_decrypt_key.privateKey
-        : kels[id].parent.last_decrypt_key.privateKey;
-
-      decrypted = JSON.parse(
-        await decryptMessage(
-          Buffer.from(decryptKey),
-          deserializeFromHex(
-            other_key_most_recent_unconfirmed_event.relationship
-          )
-        )
-      );
-      derivationMfa = mfa + decrypted.mfa;
-      console.log(decrypted);
-    } else {
-      derivationMfa = mfa;
-    }
-
-    const a = await deriveSecurePath(hdWallet, derivationMfa); //0/0 --> //0/0/0
-    const b = await deriveSecurePath(a, derivationMfa); //0/0/0 --> //0/0/0/0
-    const c = await deriveSecurePath(b, derivationMfa); //0/0/0 --> //0/0/0/0
-    const d = await deriveSecurePath(c, derivationMfa); //0/0/0 --> //0/0/0/0
-
-    kel.last_decrypt_key = c;
-    const message = JSON.stringify({
-      public_key: Buffer.from(c.publicKey).toString("hex"),
-      mfa: decrypted.mfa,
-      encryption_key_hash: getP2PKH(Buffer.from(decrypted.public_key, "hex")),
-    });
-
-    const encrypted = serializeToBinary(
-      await encryptMessage(Buffer.from(decrypted.public_key, "hex"), message)
-    );
-    console.log(decrypted.public_key);
-    const txn = new Transaction({
-      key: a,
-      public_key: Buffer.from(a.publicKey).toString("hex"), //0/0
-      twice_prerotated_key_hash: getP2PKH(
-        c.publicKey //0/0/0
-      ),
-      prerotated_key_hash: getP2PKH(
-        b.publicKey //0/0/0
-      ),
-      outputs: [
-        {
-          to: other_kel[other_kel.length - 1].prerotated_key_hash,
-        },
-      ],
-      relationship: encrypted,
-      relationship_hash: await generateSHA256(encrypted),
-      public_key_hash: getP2PKH(a.publicKey),
-      prev_public_key_hash: kel.kel[kel.kel.length - 1].public_key_hash,
-    });
-    txn.key = a;
-    await sendTransaction(a, txn);
-    kels[id].kel.push(txn);
-
-    const txn2 = new Transaction({
-      key: b,
-      public_key: Buffer.from(b.publicKey).toString("hex"), //0/0
-      twice_prerotated_key_hash: getP2PKH(
-        d.publicKey //0/0/0
-      ),
-      prerotated_key_hash: getP2PKH(
-        c.publicKey //0/0/0
-      ),
-      outputs: [
-        {
-          to: getP2PKH(
-            c.publicKey //0/0/0
-          ),
-        },
-      ],
-      public_key_hash: getP2PKH(b.publicKey),
-      prev_public_key_hash: kel.kel[kel.kel.length - 1].public_key_hash,
-    });
-    txn2.key = b;
-    await sendTransaction(b, txn2);
-    kels[id].kel.push(txn2);
-    setKels({ ...kels, [id]: kels[id] });
-  }, [hdWallet, kel, mfa, kels]);
+    setMfa(newMfa || mfa);
+    setNewMfa("");
+  }, [hdWallet, kel, mfa, kels, newMfa]);
 
   const handleSendYada = useCallback(async () => {
     if (kel.length <= 0) return alert("No inception event on key event log");
@@ -582,10 +581,10 @@ export default function KeyEventLog(props) {
           )
         )
       );
-      derivationMfa = mfa + decrypted.mfa;
+      derivationMfa = (newMfa || mfa) + decrypted.mfa;
       console.log(decrypted);
     } else {
-      derivationMfa = mfa;
+      derivationMfa = newMfa || mfa;
     }
     const a = await deriveSecurePath(hdWallet, derivationMfa); //0/0 --> //0/0/0
     const b = await deriveSecurePath(a, derivationMfa); //0/0/0 --> //0/0/0/0
@@ -626,6 +625,8 @@ export default function KeyEventLog(props) {
       public_key_hash: getP2PKH(a.publicKey),
       prev_public_key_hash: kel.kel[kel.kel.length - 1].public_key_hash,
     });
+    txn.contractAddress = contractAddress;
+    txn.mfa = mfa;
     txn.message = message;
     txn.key = a;
     await sendTransaction(a, txn);
@@ -650,6 +651,8 @@ export default function KeyEventLog(props) {
       public_key_hash: getP2PKH(b.publicKey),
       prev_public_key_hash: kel.kel[kel.kel.length - 1].public_key_hash,
     });
+    ke.contractAddress = contractAddress;
+    ke.mfa = mfa;
     ke.key = b;
     kel.kel.push(ke);
     if (
@@ -667,56 +670,11 @@ export default function KeyEventLog(props) {
     setKels({ ...kels, [id]: kel });
     console.log(JSON.stringify(kel));
     await sendTransaction(b, ke);
+    setMfa(newMfa || mfa);
+    setNewMfa("");
   }, [hdWallet, kel, mfa, walletAddress, kels]);
 
   const [wif, setWif] = useState("");
-
-  const verify = (prev2, prev1, txn) => {
-    if (
-      txn.outputs.length > 1 ||
-      txn.relationship !== "" ||
-      txn.outputs[0].to !== txn.prerotated_key_hash
-    )
-      return "Requires confirmation";
-
-    if (
-      !prev1 &&
-      txn.public_key_hash &&
-      txn.outputs.length === 1 &&
-      txn.outputs[0].to === txn.prerotated_key_hash &&
-      txn.relationship === ""
-    )
-      return "Inception";
-
-    if (
-      prev1 &&
-      prev2 &&
-      txn.outputs.length === 1 &&
-      txn.twice_prerotated_key_hash &&
-      txn.twice_prerotated_key_hash.length > 0 &&
-      txn.prerotated_key_hash &&
-      txn.prerotated_key_hash.length > 0 &&
-      prev2.twice_prerotated_key_hash === txn.public_key_hash &&
-      prev1.twice_prerotated_key_hash === txn.outputs[0].to &&
-      prev1.prerotated_key_hash === txn.public_key_hash
-    )
-      return "Confirmed";
-
-    if (
-      prev1 &&
-      !prev2 &&
-      txn.outputs.length === 1 &&
-      txn.twice_prerotated_key_hash &&
-      txn.twice_prerotated_key_hash.length > 0 &&
-      txn.prerotated_key_hash &&
-      txn.prerotated_key_hash.length > 0 &&
-      prev1.twice_prerotated_key_hash === txn.outputs[0].to &&
-      prev1.prerotated_key_hash === txn.public_key_hash
-    )
-      return "Confirmed";
-
-    return "False";
-  };
 
   const sendTransaction = useCallback(
     async (wallet, txn, saveWallet = true) => {
@@ -767,6 +725,8 @@ export default function KeyEventLog(props) {
         txn.status = "onchain";
         return txn;
       });
+
+      kels[id].kel[kels[id].kel.length - 1].mfa = mfa;
       kels[id].kel[kels[id].kel.length - 1].key = a;
       setKels({ ...kels, [id]: kels[id] });
     }
@@ -794,27 +754,10 @@ export default function KeyEventLog(props) {
         txn.status = "onchain";
         return txn;
       });
+      kels[id].kel[kels[id].kel.length - 1].mfa = mfa;
       kels[id].kel[kels[id].kel.length - 1].key = a;
       setKels({ ...kels, [id]: kels[id] });
     }
-  };
-  const stringToColor = (str) => {
-    let hash = 0;
-    // Compute a hash from the input string
-    for (let i = 0; i < str.length; i++) {
-      hash = str.charCodeAt(i) + ((hash << 5) - hash);
-    }
-    let color = "#";
-    // Extract and adjust each RGB component
-    for (let i = 0; i < 3; i++) {
-      // Extract one 8-bit component from the hash
-      let value = (hash >> (i * 8)) & 0xff;
-      // Mix with white (255) to lighten the color (pastel effect)
-      value = Math.floor((value + 255) / 2);
-      // Convert the value to a two-digit hexadecimal string
-      color += ("00" + value.toString(16)).substr(-2);
-    }
-    return color;
   };
   const pending_request =
     kels[id].kel.at(-1) &&
@@ -907,8 +850,8 @@ export default function KeyEventLog(props) {
           kels[other_kel_id].kel.length === 1 && (
             <Button onClick={handleSendYada}>Send 1 Yada</Button>
           )}
-        {/* <p>Change password</p>
-        <input
+        <TextInput
+          label="Password"
           placeholder="Current"
           type="text"
           value={mfa}
@@ -916,14 +859,24 @@ export default function KeyEventLog(props) {
             setMfa(e.currentTarget.value);
           }}
         />
-        <input
+        <TextInput
           placeholder="New"
           type="text"
           value={newMfa}
+          disabled={!mfa || mfa === "" || kel.kel.length === 0}
           onChange={(e) => {
             setNewMfa(e.currentTarget.value);
           }}
-        /> */}
+        />
+        <TextInput
+          label="Contract address"
+          placeholder="Contract address"
+          type="text"
+          value={contractAddress}
+          onChange={(e) => {
+            setContractAddress(e.currentTarget.value);
+          }}
+        />
       </div>
       <Table striped highlightOnHover>
         <Table.Thead>
@@ -938,140 +891,231 @@ export default function KeyEventLog(props) {
             <Table.Th>Message</Table.Th>
             <Table.Th>Private key</Table.Th>
             <Table.Th>Chaincode</Table.Th>
+            <Table.Th>PrivKey + Chaincode = address</Table.Th>
+            <Table.Th>prevTxn x2 PrivKey</Table.Th>
+            <Table.Th>prevTxn x2 Chaincode</Table.Th>
+            <Table.Th>prevTxn x2 mfa</Table.Th>
+            <Table.Th>prevTxn x2 contract address</Table.Th>
+            <Table.Th>
+              derive(prevTxn privkey + prevTxn Chaincode + prevTxn mfa) =
+              address
+            </Table.Th>
           </Table.Tr>
         </Table.Thead>
         <Table.Tbody>
           {kel.kel.length > 0 &&
             kel.kel.map((txn, index, array) => {
-              const prevTxn1 = index >= 1 ? array[index - 1] : null;
-              const prevTxn2 = index >= 2 ? array[index - 2] : null;
-
-              let verifyDerivation = null;
-              const fn = async (tx) => {
-                return getP2PKH(
-                  (
-                    await deriveSecurePath(
-                      bip32
-                        .BIP32Factory(tinySecp256k1)
-                        .fromPrivateKey(tx.key.privateKey, tx.key.chainCode),
-                      mfa
-                    )
-                  ).publicKey
-                );
-              };
-              if (prevTxn1) {
-                verifyDerivation = fn(prevTxn1);
-              }
               return (
-                <Table.Tr
+                <TableRow
+                  txn={txn}
+                  index={index}
+                  array={array}
+                  mfa={mfa}
                   key={txn.id}
-                  title={txn.id}
-                  style={{ height: "200px" }}
-                >
-                  <Table.Td
-                    style={{
-                      fontSize: 8,
-                      backgroundColor: stringToColor(
-                        txn.twice_prerotated_key_hash
-                      ),
-                    }}
-                  >
-                    <Text>{txn.twice_prerotated_key_hash}</Text>
-                  </Table.Td>
-                  <Table.Td
-                    style={{
-                      fontSize: 8,
-                      backgroundColor: stringToColor(txn.prerotated_key_hash),
-                    }}
-                  >
-                    <Text>{txn.prerotated_key_hash}</Text>
-                  </Table.Td>
-                  <Table.Td
-                    style={{
-                      fontSize: 8,
-                      backgroundColor: stringToColor(txn.public_key_hash),
-                    }}
-                  >
-                    <Text>{txn.public_key_hash}</Text>
-                  </Table.Td>
-                  <Table.Td
-                    style={{
-                      fontSize: 8,
-                      backgroundColor: stringToColor(txn.prev_public_key_hash),
-                    }}
-                  >
-                    <Text>{txn.prev_public_key_hash}</Text>
-                  </Table.Td>
-                  <Table.Td style={{ fontSize: 8 }}>
-                    <Text>{verify(prevTxn2, prevTxn1, txn)}</Text>
-                  </Table.Td>
-                  <Table.Td style={{ fontSize: 8 }}>
-                    <Text>{txn.status}</Text>
-                  </Table.Td>
-                  <Table.Td
-                    style={{
-                      fontSize: 8,
-                      padding: 0, // Remove padding so the inner container fills the cell
-                      overflow: "hidden",
-                      maxWidth: 400,
-                      height: "100%",
-                    }}
-                  >
-                    {/* Using a flex container instead of a nested table */}
-                    <div
-                      style={{
-                        display: "flex",
-                        flexDirection: "column",
-                        height: "100%",
-                      }}
-                    >
-                      {txn.outputs.map((item, idx) => (
-                        <div
-                          key={idx}
-                          style={{
-                            flex: 1,
-                            backgroundColor: stringToColor(item.to),
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            borderBottom:
-                              idx < txn.outputs.length - 1
-                                ? "1px solid #ccc"
-                                : "none",
-                          }}
-                        >
-                          {item.to}: {item.value}
-                        </div>
-                      ))}
-                    </div>
-                  </Table.Td>
-                  <Table.Td style={{ fontSize: 8 }}>
-                    <pre>{txn.message}</pre>
-                  </Table.Td>
-                  <Table.Td style={{ fontSize: 8 }}>
-                    <Text>{txn.key.privateKey}</Text>
-                  </Table.Td>
-                  <Table.Td style={{ fontSize: 8 }}>
-                    <Text>{txn.key.chainCode}</Text>
-                  </Table.Td>
-                  <Table.Td style={{ fontSize: 8 }}>
-                    <Text>
-                      {getP2PKH(
-                        bip32
-                          .BIP32Factory(tinySecp256k1)
-                          .fromPrivateKey(txn.key.privateKey, txn.key.chainCode)
-                          .publicKey
-                      )}
-                    </Text>
-                  </Table.Td>
-                  <Table.Td style={{ fontSize: 8 }}>
-                    {prevTxn1 && <Text>{verifyDerivation}</Text>}
-                  </Table.Td>
-                </Table.Tr>
+                />
               );
             })}
         </Table.Tbody>
       </Table>
     </div>
+  );
+}
+
+function TableRow(props) {
+  const { txn, index, array, mfa } = props;
+  const prevTxn1 = index >= 1 ? array[index - 1] : null;
+  const prevTxn2 = index >= 2 ? array[index - 2] : null;
+
+  const [verifyDerivation, setVerifyDerivation] = useState(null);
+  const [verifyPrivateDerivation, setVerifyPrivateDerivation] = useState(null);
+  const fn = async (tx) => {
+    return getP2PKH(
+      (
+        await deriveSecurePath(
+          bip32
+            .BIP32Factory(tinySecp256k1)
+            .fromPrivateKey(tx.key.privateKey, tx.key.chainCode),
+          tx.mfa
+        )
+      ).publicKey
+    );
+  };
+  useEffect(() => {
+    const fetchDerivation = async () => {
+      if (prevTxn2) {
+        const derived = await fn(prevTxn2);
+        setVerifyDerivation(derived);
+      }
+    };
+    fetchDerivation();
+  }, [prevTxn2]);
+  useEffect(() => {
+    const fetchDerivation = async () => {
+      if (txn) {
+        const derived = await fn(txn);
+        setVerifyPrivateDerivation(derived);
+      }
+    };
+    fetchDerivation();
+  }, [txn]);
+  return (
+    <Table.Tr key={txn.id} title={txn.id} style={{ height: "200px" }}>
+      <Table.Td
+        style={{
+          fontSize: 8,
+          backgroundColor: stringToColor(txn.twice_prerotated_key_hash),
+        }}
+      >
+        <Text>{txn.twice_prerotated_key_hash}</Text>
+      </Table.Td>
+      <Table.Td
+        style={{
+          fontSize: 8,
+          backgroundColor: stringToColor(txn.prerotated_key_hash),
+        }}
+      >
+        <Text>{txn.prerotated_key_hash}</Text>
+      </Table.Td>
+      <Table.Td
+        style={{
+          fontSize: 8,
+          backgroundColor: stringToColor(txn.public_key_hash),
+        }}
+      >
+        <Text>{txn.public_key_hash}</Text>
+      </Table.Td>
+      <Table.Td
+        style={{
+          fontSize: 8,
+          backgroundColor: stringToColor(txn.prev_public_key_hash),
+        }}
+      >
+        <Text>{txn.prev_public_key_hash}</Text>
+      </Table.Td>
+      <Table.Td
+        style={{
+          fontSize: 8,
+          backgroundColor:
+            verify(prevTxn2, prevTxn1, txn) === "False" ? "red" : "lightgreen",
+        }}
+      >
+        <Text>{verify(prevTxn2, prevTxn1, txn)}</Text>
+      </Table.Td>
+      <Table.Td style={{ fontSize: 8 }}>
+        <Text>{txn.status}</Text>
+      </Table.Td>
+      <Table.Td
+        style={{
+          fontSize: 8,
+          padding: 0, // Remove padding so the inner container fills the cell
+          overflow: "hidden",
+          maxWidth: 400,
+          height: "100%",
+        }}
+      >
+        {/* Using a flex container instead of a nested table */}
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            height: "100%",
+          }}
+        >
+          {txn.outputs.map((item, idx) => (
+            <div
+              key={item.to}
+              style={{
+                flex: 1,
+                backgroundColor: stringToColor(item.to),
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                borderBottom:
+                  idx < txn.outputs.length - 1 ? "1px solid #ccc" : "none",
+              }}
+            >
+              {item.to}: {item.value}
+            </div>
+          ))}
+        </div>
+      </Table.Td>
+      <Table.Td style={{ fontSize: 8 }}>
+        <pre>{txn.message}</pre>
+      </Table.Td>
+      <Table.Td
+        style={{
+          fontSize: 8,
+          backgroundColor: stringToColor(
+            Buffer.from(txn.key.privateKey).toString("hex")
+          ),
+        }}
+      >
+        <Text>{txn.key.privateKey}</Text>
+      </Table.Td>
+      <Table.Td
+        style={{
+          fontSize: 8,
+          backgroundColor: stringToColor(
+            Buffer.from(txn.key.chainCode).toString("hex")
+          ),
+        }}
+      >
+        <Text>{txn.key.chainCode}</Text>
+      </Table.Td>
+      <Table.Td
+        style={{
+          fontSize: 8,
+          backgroundColor: stringToColor(
+            getP2PKH(
+              bip32
+                .BIP32Factory(tinySecp256k1)
+                .fromPrivateKey(txn.key.privateKey, txn.key.chainCode).publicKey
+            )
+          ),
+        }}
+      >
+        <Text>
+          {getP2PKH(
+            bip32
+              .BIP32Factory(tinySecp256k1)
+              .fromPrivateKey(txn.key.privateKey, txn.key.chainCode).publicKey
+          )}
+        </Text>
+      </Table.Td>
+      <Table.Td
+        style={{
+          fontSize: 8,
+          backgroundColor:
+            verifyDerivation &&
+            stringToColor(Buffer.from(prevTxn2.key.privateKey).toString("hex")),
+        }}
+      >
+        {prevTxn2 && <Text>{prevTxn2.key.privateKey}</Text>}
+      </Table.Td>
+      <Table.Td
+        style={{
+          fontSize: 8,
+          backgroundColor:
+            verifyDerivation &&
+            stringToColor(Buffer.from(prevTxn2.key.chainCode).toString("hex")),
+        }}
+      >
+        {prevTxn2 && <Text>{prevTxn2.key.chainCode}</Text>}
+      </Table.Td>
+      <Table.Td style={{ fontSize: 8 }}>
+        {prevTxn2 && <Text>{prevTxn2.mfa}</Text>}
+      </Table.Td>
+      <Table.Td style={{ fontSize: 8 }}>
+        {prevTxn2 && <Text>{prevTxn2.contractAddress}</Text>}
+      </Table.Td>
+      <Table.Td
+        style={{
+          fontSize: 8,
+          backgroundColor: verifyDerivation && stringToColor(verifyDerivation),
+        }}
+      >
+        {prevTxn2 && <Text>{verifyDerivation}</Text>}
+      </Table.Td>
+    </Table.Tr>
   );
 }
