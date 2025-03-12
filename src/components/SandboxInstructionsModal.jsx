@@ -40,7 +40,7 @@ export default function SandboxInstructionsModal(props) {
         <List spacing="sm" size="md" p="xl">
           <List.Item
             icon={
-              kels["User 1"].kel.length > 0 && (
+              kels["Wallet"].kel.length > 0 && (
                 <ThemeIcon color="green" size={24} radius="xl">
                   <IconCheck size="1rem" />
                 </ThemeIcon>
@@ -48,11 +48,11 @@ export default function SandboxInstructionsModal(props) {
             }
           >
             First, click the <strong>Intialize wallet</strong> button under the{" "}
-            <strong>User 1</strong> section.
+            <strong>Wallet</strong> section.
           </List.Item>
           <List.Item
             icon={
-              kels["User 2"].kel.length > 0 && (
+              kels["Password Manager"].kel.length > 0 && (
                 <ThemeIcon color="green" size={24} radius="xl">
                   <IconCheck size="1rem" />
                 </ThemeIcon>
@@ -60,7 +60,7 @@ export default function SandboxInstructionsModal(props) {
             }
           >
             Then, click the <strong>Intialize wallet</strong> button under the{" "}
-            <strong>User 2</strong> section.
+            <strong>Password Manager</strong> section.
           </List.Item>
           <List.Item>This will initialize both key logs.</List.Item>
           <List.Item>
@@ -76,15 +76,15 @@ export default function SandboxInstructionsModal(props) {
           )}
           <List.Item
             icon={
-              kels["User 1"].kel.length > 1 && (
+              kels["Wallet"].kel.length > 1 && (
                 <ThemeIcon color="green" size={24} radius="xl">
                   <IconCheck size="1rem" />
                 </ThemeIcon>
               )
             }
           >
-            Click <strong>'Request to branch log with User 2'</strong> under the{" "}
-            <strong>User 1</strong> section.
+            Click <strong>'Request to branch log with Password Manager'</strong>{" "}
+            under the <strong>Wallet</strong> section.
           </List.Item>
           {onchainMode && (
             <List.Item>
@@ -93,7 +93,7 @@ export default function SandboxInstructionsModal(props) {
           )}
           <List.Item
             icon={
-              kels["User 2"].kel.length > 1 && (
+              kels["Password Manager"].kel.length > 1 && (
                 <ThemeIcon color="green" size={24} radius="xl">
                   <IconCheck size="1rem" />
                 </ThemeIcon>
@@ -101,8 +101,8 @@ export default function SandboxInstructionsModal(props) {
             }
           >
             Then, click{" "}
-            <strong>'Accept request to branch log with User 1'</strong> under
-            the <strong>User 2</strong> section.
+            <strong>'Accept request to branch log with Wallet'</strong> under
+            the <strong>Password Manager</strong> section.
           </List.Item>
           {onchainMode && (
             <List.Item>
@@ -112,8 +112,8 @@ export default function SandboxInstructionsModal(props) {
           )}
           <List.Item>
             You'll notice two new sections:{" "}
-            <strong>'Session for User 1'</strong> and{" "}
-            <strong>'Session for User 2'</strong>.
+            <strong>'Session for Wallet'</strong> and{" "}
+            <strong>'Session for Password Manager'</strong>.
           </List.Item>
           <List.Item>
             This is a fork from both key logs and represents a private key
@@ -122,35 +122,35 @@ export default function SandboxInstructionsModal(props) {
           </List.Item>
           <List.Item
             icon={
-              kels["Session for User 1"] &&
-              kels["Session for User 1"].kel.length > 1 && (
+              kels["Session for Wallet"] &&
+              kels["Session for Wallet"].kel.length > 1 && (
                 <ThemeIcon color="green" size={24} radius="xl">
                   <IconCheck size="1rem" />
                 </ThemeIcon>
               )
             }
           >
-            Next, under <strong>Session for User 1</strong>, click{" "}
+            Next, under <strong>Session for Wallet</strong>, click{" "}
             <strong>'Send 1 Yada'</strong>.
           </List.Item>
           <List.Item>
-            This rotates the User 1 side of the relationship.
+            This rotates the Wallet side of the relationship.
           </List.Item>
           <List.Item
             icon={
-              kels["Session for User 2"] &&
-              kels["Session for User 2"].kel.length > 1 && (
+              kels["Session for Password Manager"] &&
+              kels["Session for Password Manager"].kel.length > 1 && (
                 <ThemeIcon color="green" size={24} radius="xl">
                   <IconCheck size="1rem" />
                 </ThemeIcon>
               )
             }
           >
-            Next, under <strong>Session for User 2</strong>, click{" "}
+            Next, under <strong>Session for Password Manager</strong>, click{" "}
             <strong>'Send 1 Yada'</strong>.
           </List.Item>
           <List.Item>
-            This rotates the User 2 side of the relationship.
+            This rotates the Password Manager side of the relationship.
           </List.Item>
           <List.Item>
             If the contract address were to change between session user 1 and

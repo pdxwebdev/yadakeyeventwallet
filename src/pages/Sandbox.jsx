@@ -24,15 +24,15 @@ function Sandbox() {
   const [opened, setOpened] = useState(true);
   const [onchainMode, setOnchainMode] = useState(false);
   const [kels, setKels] = useState({
-    "User 1": {
+    Wallet: {
       hidden: false,
       kel: [],
-      other_kel_id: "User 2",
+      other_kel_id: "Password Manager",
     },
-    "User 2": {
+    "Password Manager": {
       hidden: false,
       kel: [],
-      other_kel_id: "User 1",
+      other_kel_id: "Wallet",
     },
   });
   const [contractAddress, setContractAddress] = useState("");
@@ -68,7 +68,7 @@ function Sandbox() {
         <Button onClick={testDerivation}>Run test</Button>
         <Button onClick={testEncryptDecrypt}>Test Encrypt / Decrypt</Button> */}
       </div>
-      <Tabs defaultValue="User 1">
+      <Tabs defaultValue="Wallet">
         <Tabs.List>
           {Object.keys(kels).map((key) => {
             return (
