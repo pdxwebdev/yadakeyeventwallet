@@ -18,7 +18,13 @@ export default defineConfig({
     react(),
     nodePolyfills({
       // To add only specific polyfills, add them here. If no option is passed, adds all polyfills
-      include: ["path"],
+      include: [
+        "crypto", // For ethers.js crypto operations
+        "stream", // Dependency of crypto-browserify
+        "util",   // For inherits and other utils
+        "buffer", // For Buffer polyfill
+        "path",   // Already included
+      ],
       // To exclude specific polyfills, add them to this list. Note: if include is provided, this has no effect
       exclude: [
         "http", // Excludes the polyfill for `http` and `node:http`.
@@ -44,5 +50,17 @@ export default defineConfig({
     },
   },
 
+  build: {
+    outDir: "dist",
+    rollupOptions: {
+      input: {
+        main: 'index.html',
+        background: 'src/background.js',
+      },
+      output: {
+        entryFileNames: 'assets/[name].js',
+      },
+    },
+  },
   base: '/wallet/',
 });

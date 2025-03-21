@@ -23,6 +23,8 @@ import bs58 from "bs58";
 import { useAppContext } from "../context/AppContext";
 import axios from "axios";
 
+const STORAGE_KEYS = { MNEMONIC: "mnemonic", PUBLIC_KEY: "publicKey" };
+
 // Function to generate a mnemonic phrase
 export const generateMnemonic = () => {
   return bip39.generateMnemonic(); // Returns a 12-word mnemonic
@@ -217,6 +219,10 @@ export const testEncryptDecrypt = async () => {
   console.log("Original message:", message);
   console.log("Encrypted message:", encrypted);
   console.log("Decrypted message:", decrypted);
+  await chrome.storage.local.set({
+    [STORAGE_KEYS.MNEMONIC]: mnemonic,
+    [STORAGE_KEYS.PUBLIC_KEY]: publicKey,
+  });
 };
 
 export const testDerivation = () => {

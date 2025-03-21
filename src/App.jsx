@@ -17,6 +17,7 @@ import Sandbox from "./pages/Sandbox";
 import Home from "./pages/Home";
 import Wallet from "./pages/Wallet";
 import WifToHdConversion from "./pages/WifToHDConversion";
+import Bridge from "./components/Bridge";
 
 // Main App component with the router
 function App() {
@@ -38,6 +39,9 @@ function App() {
         <Link to="/whitepaper" style={{ marginRight: "10px" }}>
           Whitepaper
         </Link>
+        <Link to="/bridge" style={{ marginRight: "10px" }}>
+          Bridge
+        </Link>
       </nav>
       <Routes>
         <Route path="/" element={<Home />} />
@@ -56,6 +60,7 @@ function App() {
             />
           }
         />
+        <Route path="/bridge" element={<Bridge />} />
       </Routes>
     </Router>
   );

@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "copy-abis": "cp artifacts/contracts/Bridge.sol/Bridge.json src/utils/abis/ && cp artifacts/contracts/KeyLogRegistry.sol/KeyLogRegistry.json src/utils/abis/ && cp artifacts/contracts/WrappedToken.sol/WrappedToken.json src/utils/abis/ && cp artifacts/contracts/MockERC20.sol/MockERC20.json src/utils/abis/",
+    "refresh": "rm -rf artifacts/ && npx hardhat compile && npm run copy-abis && npx hardhat run scripts/deploy.js --network localhost",
     "lint": "eslint .",
     "preview": "vite preview"
   },
@@ -23,6 +25,8 @@
     "@mantine/nprogress": "^7.16.2",
     "@mantine/spotlight": "^7.16.2",
     "@mantine/tiptap": "^7.16.2",
+    "@openzeppelin/contracts": "^5.2.0",
+    "@openzeppelin/contracts-upgradeable": "^5.2.0",
     "@tabler/icons-react": "^3.30.0",
     "@tiptap/extension-link": "^2.11.5",
     "@tiptap/pm": "^2.11.5",
@@ -38,7 +42,7 @@
     "eccrypto-js": "^5.4.0",
     "ecpair": "^3.0.0-rc.0",
     "embla-carousel-react": "^7.1.0",
-    "ethers": "^6.13.4",
+    "ethers": "^6.13.5",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^7.1.5",
@@ -52,6 +56,8 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.13.0",
+    "@nomicfoundation/hardhat-ethers": "^3.0.8",
+    "@openzeppelin/hardhat-upgrades": "^3.4.0",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "eslint": "^9.13.0",
@@ -59,6 +65,7 @@
     "eslint-plugin-react-hooks": "^5.0.0",
     "eslint-plugin-react-refresh": "^0.4.14",
     "globals": "^15.11.0",
+    "hardhat": "^2.22.19",
     "vite": "^5.4.10"
   }
 }
