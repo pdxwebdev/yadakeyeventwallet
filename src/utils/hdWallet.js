@@ -148,9 +148,23 @@ export const deriveSecurePath = async (root, secondFactor) => {
     const index = await deriveIndex(secondFactor, level);
     currentNode = currentNode.deriveHardened(index);
   }
-
+  currentNode.uncompressedPublicKey = decompressPublicKey(Buffer.from(currentNode.publicKey))
   return currentNode;
 };
+
+function decompressPublicKey(compressedKey) {
+  if (!(compressedKey instanceof Buffer) || compressedKey.length !== 33) {
+    throw new Error("Invalid compressed public key");
+  }
+
+  // Use bitcoinjs-lib's ECPair to handle key decompression
+  const ECPair = ECPairFactory.default(tinySecp256k1);
+  const keyPair = ECPair.fromPublicKey(compressedKey, { compressed: false });
+  
+  // Get the uncompressed public key (65 bytes)
+  const uncompressedPublicKey = keyPair.publicKey; // This will be uncompressed by default when compressed: false is implied
+  return uncompressedPublicKey;
+}
 
 export function serializeToBinary(encryptionOutput) {
   return Buffer.concat([

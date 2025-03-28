@@ -14,8 +14,10 @@ const ERC20_ABI = MockERC20Artifact.abi;
 
 const BRIDGE_ADDRESS = "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0";
 const KEYLOG_REGISTRY_ADDRESS = "0x5FbDB2315678afecb367f032d93F642f64180aa3";
-const WRAPPED_TOKEN_ADDRESS = "0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9";
-const MOCK_ERC20_ADDRESS = "0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9";
+const WRAPPED_TOKEN_ADDRESS = "0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9"; // $WMOCK
+const Y_WRAPPED_TOKEN_ADDRESS = "0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9"; // $YMOCK
+const MOCK_ERC20_ADDRESS = "0x5FC8d32690cc91D4c39d9d3abcBD16989F875707"; // $MOCK
+const MOCK2_ERC20_ADDRESS = "0x0165878A594ca255338adfa4d48449f69242Eb8F"; // $MOCK2
 
 const HARDHAT_MNEMONIC =
   "test test test test test test test test test test test junk";
@@ -30,6 +32,7 @@ function Bridge() {
   const [rootWallet, setRootWallet] = useState(null);
   const [currentKey, setCurrentKey] = useState(null);
   const [nextKey, setNextKey] = useState(null);
+  const [previousKey, setPreviousKey] = useState(null); // Added previousKey state
   const [lastPublicKeyHash, setLastPublicKeyHash] = useState(
     "0x0000000000000000000000000000000000000000"
   );
@@ -52,714 +55,713 @@ function Bridge() {
       try {
         const localProvider = new ethers.JsonRpcProvider(
           "http://127.0.0.1:8545/",
-          { chainId: 31337, name: "hardhat" }
+          {
+            chainId: 31337,
+            name: "hardhat",
+          }
         );
         const wallet =
           ethers.Wallet.fromPhrase(HARDHAT_MNEMONIC).connect(localProvider);
-
         const hdWallet = createHDWallet(HARDHAT_MNEMONIC);
-        const initialKey = await deriveSecurePath(hdWallet, "defaultPassword");
-        const initialSigner = new ethers.Wallet(
-          ethers.hexlify(initialKey.privateKey),
-          localProvider
-        );
 
-        const walletNonce = await localProvider.getTransactionCount(
-          wallet.address,
-          "latest"
-        );
-        const ethAmount = ethers.parseEther("10");
-        const ethTx = await wallet.sendTransaction({
-          to: initialSigner.address,
-          value: ethAmount,
-          nonce: walletNonce,
-        });
-        await ethTx.wait();
-        console.log(
-          `Transferred ${ethers.formatEther(ethAmount)} ETH to ${
-            initialSigner.address
-          }`
-        );
-
-        const mockERC20 = new ethers.Contract(
-          MOCK_ERC20_ADDRESS,
-          ERC20_ABI,
+        const bridge = new ethers.Contract(BRIDGE_ADDRESS, BRIDGE_ABI, wallet);
+        const keyLogRegistry = new ethers.Contract(
+          KEYLOG_REGISTRY_ADDRESS,
+          KEYLOG_REGISTRY_ABI,
           wallet
         );
-        const mockAmount = ethers.parseEther("100");
-        const mockTx = await mockERC20.transfer(
-          initialSigner.address,
-          mockAmount
-        );
-        await mockTx.wait();
-        console.log(
-          `Transferred ${ethers.formatEther(mockAmount)} $MOCK to ${
-            initialSigner.address
-          }`
-        );
 
-        const bridge = new ethers.Contract(
-          BRIDGE_ADDRESS,
-          BRIDGE_ABI,
-          initialSigner
-        );
+        const isInitialized = localStorage.getItem("bridgeInitialized");
+        let currentSigner, currentDerivedKey, currentAccount;
+
+        if (!isInitialized) {
+          const initialKey = await deriveSecurePath(hdWallet, kdp);
+          currentDerivedKey = initialKey;
+          currentSigner = new ethers.Wallet(
+            ethers.hexlify(initialKey.privateKey),
+            localProvider
+          );
+          currentAccount = currentSigner.address;
+
+          let walletNonce = await localProvider.getTransactionCount(
+            wallet.address,
+            "latest"
+          );
+
+          const ethAmount = ethers.parseEther("10");
+          const ethTx = await wallet.sendTransaction({
+            to: currentSigner.address,
+            value: ethAmount,
+            nonce: walletNonce,
+          });
+          await ethTx.wait();
+          console.log(
+            `Funded ${currentSigner.address} with ${ethers.formatEther(
+              ethAmount
+            )} ETH`
+          );
+          walletNonce++;
+
+          const mockERC20 = new ethers.Contract(
+            MOCK_ERC20_ADDRESS,
+            ERC20_ABI,
+            wallet
+          );
+          const mockAmount = ethers.parseEther("100");
+          const mockTx = await mockERC20.transfer(
+            currentSigner.address,
+            mockAmount,
+            { nonce: walletNonce }
+          );
+          await mockTx.wait();
+          console.log(
+            `Transferred ${ethers.formatEther(mockAmount)} $MOCK to ${
+              currentSigner.address
+            }`
+          );
+          walletNonce++;
+
+          const mock2ERC20 = new ethers.Contract(
+            MOCK2_ERC20_ADDRESS,
+            ERC20_ABI,
+            wallet
+          );
+          const mock2Amount = ethers.parseEther("100");
+          const mock2Tx = await mock2ERC20.transfer(
+            currentSigner.address,
+            mock2Amount,
+            { nonce: walletNonce }
+          );
+          await mock2Tx.wait();
+          console.log(
+            `Transferred ${ethers.formatEther(mock2Amount)} $MOCK2 to ${
+              currentSigner.address
+            }`
+          );
+          walletNonce++;
+
+          const largeApprovalAmount = ethers.parseEther("1000000");
+          const mockApprovalTx = await mockERC20.approve(
+            BRIDGE_ADDRESS,
+            largeApprovalAmount,
+            { nonce: walletNonce }
+          );
+          await mockApprovalTx.wait();
+          console.log(
+            `Approved Bridge to spend ${ethers.formatEther(
+              largeApprovalAmount
+            )} $MOCK`
+          );
+          walletNonce++;
+
+          const mock2ApprovalTx = await mock2ERC20.approve(
+            BRIDGE_ADDRESS,
+            largeApprovalAmount,
+            { nonce: walletNonce }
+          );
+          await mock2ApprovalTx.wait();
+          console.log(
+            `Approved Bridge to spend ${ethers.formatEther(
+              largeApprovalAmount
+            )} $MOCK2`
+          );
+          walletNonce++;
+
+          const relayerTx = await bridge.setRelayer(wallet.address, {
+            nonce: walletNonce,
+          });
+          await relayerTx.wait();
+          console.log(`Set relayer to ${wallet.address}`);
+          walletNonce++;
+
+          const authTx = await keyLogRegistry.setAuthorizedCaller(
+            BRIDGE_ADDRESS,
+            { nonce: walletNonce }
+          );
+          await authTx.wait();
+          console.log(`Set authorized caller to ${BRIDGE_ADDRESS}`);
+          walletNonce++;
+
+          const { key: nextKey, signer: nextSigner } = await deriveNextKey(
+            currentDerivedKey,
+            localProvider,
+            hdWallet
+          );
+          const { key: nextNextKey, signer: nextNextSigner } =
+            await deriveNextKey(nextKey, localProvider, hdWallet);
+          const { key: nextNextNextKey, signer: nextNextNextSigner } =
+            await deriveNextKey(nextNextKey, localProvider, hdWallet);
+
+          const ethForGasNext = ethers.parseEther("1");
+          const ethTxForNext = await wallet.sendTransaction({
+            to: nextSigner.address,
+            value: ethForGasNext,
+            nonce: walletNonce,
+          });
+          await ethTxForNext.wait();
+          console.log(
+            `Funded ${nextSigner.address} with ${ethers.formatEther(
+              ethForGasNext
+            )} ETH for gas`
+          );
+          walletNonce++;
+
+          const mockForNext = ethers.parseEther("10");
+          const mockTxForNext = await mockERC20.transfer(
+            nextSigner.address,
+            mockForNext,
+            { nonce: walletNonce }
+          );
+          await mockTxForNext.wait();
+          console.log(
+            `Transferred ${ethers.formatEther(mockForNext)} $MOCK to ${
+              nextSigner.address
+            }`
+          );
+          walletNonce++;
+
+          const ethForGasFinal = ethers.parseEther("1");
+          const ethTxForFinal = await wallet.sendTransaction({
+            to: nextNextNextSigner.address,
+            value: ethForGasFinal,
+            nonce: walletNonce,
+          });
+          await ethTxForFinal.wait();
+          console.log(
+            `Funded ${nextNextNextSigner.address} with ${ethers.formatEther(
+              ethForGasFinal
+            )} ETH for gas`
+          );
+          walletNonce++;
+
+          const mockForFinal = ethers.parseEther("10");
+          const mockTxForFinal = await mockERC20.transfer(
+            nextNextNextSigner.address,
+            mockForFinal,
+            { nonce: walletNonce }
+          );
+          await mockTxForFinal.wait();
+          console.log(
+            `Transferred ${ethers.formatEther(mockForFinal)} $MOCK to ${
+              nextNextNextSigner.address
+            }`
+          );
+          walletNonce++;
+
+          console.log(
+            currentSigner.address // Level 0
+          );
+          console.log(nextSigner.address); // Level 1
+          console.log(nextNextSigner.address); // Level 2)
+
+          const inceptionTx = await keyLogRegistry.registerKeyLog(
+            currentDerivedKey.uncompressedPublicKey.slice(1),
+            currentSigner.address, // Level 0
+            nextSigner.address, // Level 1
+            nextNextSigner.address, // Level 2
+            "0x0000000000000000000000000000000000000000",
+            nextSigner.address,
+            false,
+            { nonce: walletNonce }
+          );
+          await inceptionTx.wait();
+          console.log("Registered inception key log entry");
+
+          localStorage.setItem("bridgeInitialized", "true");
+          localStorage.setItem("bridgeAccount", nextNextNextSigner.address);
+          localStorage.setItem(
+            "bridgePrivateKey",
+            ethers.hexlify(nextNextNextKey.privateKey)
+          );
+          localStorage.setItem(
+            "previousPrivateKey",
+            ethers.hexlify(nextNextKey.privateKey)
+          );
+
+          setPreviousKey(currentKey); // Level 2
+          setCurrentKey(nextKey); // Level 3
+          setNextKey(nextNextKey); // Level 4
+          setLastPublicKeyHash(currentSigner.address); // Level 2
+          setSigner(nextSigner); // Level 3
+          setAccount(nextSigner.address);
+          setStatus("Initialization complete with 3 key rotations");
+        } else {
+          const storedPrivateKey = localStorage.getItem("bridgePrivateKey");
+          const storedPreviousPrivateKey =
+            localStorage.getItem("previousPrivateKey");
+          const storedAccount = localStorage.getItem("bridgeAccount");
+          if (storedPrivateKey && storedAccount && storedPreviousPrivateKey) {
+            currentSigner = new ethers.Wallet(storedPrivateKey, localProvider);
+            const previousSigner = new ethers.Wallet(
+              storedPreviousPrivateKey,
+              localProvider
+            );
+            currentAccount = storedAccount;
+            currentDerivedKey = await deriveSecurePath(hdWallet, kdp); // Level 0
+            let derivedKey = currentDerivedKey;
+            const currentIndex = await keyLogRegistry.getCurrentIndex(
+              currentDerivedKey.uncompressedPublicKey.slice(1)
+            );
+            const indexNumber = Number(currentIndex);
+            console.log("Current Index:", indexNumber);
+            for (let i = 0; i < indexNumber; i++) {
+              derivedKey = (
+                await deriveNextKey(derivedKey, localProvider, hdWallet)
+              ).key;
+            }
+            const nextDerivedKey = (
+              await deriveNextKey(derivedKey, localProvider, hdWallet)
+            ).key;
+
+            setPreviousKey(currentKey); // Level 2
+            setCurrentKey(nextKey); // Level 3
+            setNextKey(nextNextKey); // Level 4
+            setLastPublicKeyHash(currentSigner.address); // Level 2
+            setSigner(nextSigner); // Level 3
+            setAccount(nextSigner.address);
+            setStatus("Loaded existing key state");
+          } else {
+            setStatus("Error: Missing stored keys despite initialization");
+          }
+        }
+
         const collector = await bridge.feeCollector();
-
         setProvider(localProvider);
-        setSigner(initialSigner);
-        setAccount(initialSigner.address);
-        setFeeCollector(collector);
         setRootWallet(hdWallet);
-        setStatus("Connected to Hardhat: " + initialSigner.address);
-
-        await registerInitialKeyLogPair(
-          initialKey,
-          initialSigner,
-          localProvider,
-          hdWallet
-        );
+        setFeeCollector(collector);
       } catch (error) {
-        setStatus("Error connecting to Hardhat: " + error.message);
+        setStatus("Error during initialization: " + error.message);
         console.error("Init error:", error);
+        console.log(
+          "Initialization failed. Please restart the Hardhat node and try again to reset blockchain state."
+        );
       }
     };
     init();
   }, []);
 
-  const registerInitialKeyLogPair = async (
-    initialKey,
-    initialSigner,
-    localProvider,
-    localRootWallet
-  ) => {
-    const bridge = new ethers.Contract(
-      BRIDGE_ADDRESS,
-      BRIDGE_ABI,
-      initialSigner
-    );
-    const keyLogRegistry = new ethers.Contract(
-      KEYLOG_REGISTRY_ADDRESS,
-      KEYLOG_REGISTRY_ABI,
-      initialSigner
-    );
-    const mockERC20 = new ethers.Contract(
-      MOCK_ERC20_ADDRESS,
-      ERC20_ABI,
-      initialSigner
-    );
-    try {
-      const signerNonce = await localProvider.getTransactionCount(
-        initialSigner.address,
-        "latest"
+  const wrap = async (isCrossChain = false) => {
+    if (!provider || !signer || !rootWallet || !currentKey) {
+      setStatus(
+        "Provider, signer, root wallet, or current key not initialized"
       );
-      const bridgeNonce = await bridge.nonces(initialSigner.address);
-
-      let unconfirmedPrevPublicKeyHash =
-        "0x0000000000000000000000000000000000000000";
-      const currentIndex = await keyLogRegistry.getCurrentIndex(
-        initialSigner.address
-      );
-      if (currentIndex > 0) {
-        const lastEntry = await keyLogRegistry.keyLogs(
-          initialSigner.address,
-          currentIndex - 1n
-        );
-        if (lastEntry.isOnChain) {
-          unconfirmedPrevPublicKeyHash = lastEntry.publicKeyHash;
-        }
-      }
-
-      const publicKey = ethers.hexlify(initialKey.publicKey);
-      const { key: nextKey, signer: nextSigner } = await deriveNextKey(
-        initialKey,
-        localProvider,
-        localRootWallet
-      );
-      const { key: nextNextKey, signer: nextNextSigner } = await deriveNextKey(
-        nextKey,
-        localProvider,
-        localRootWallet
-      );
-      const { key: nextNextNextKey, signer: nextNextNextSigner } =
-        await deriveNextKey(nextNextKey, localProvider, localRootWallet);
-
-      const unconfirmedMessage = ethers.solidityPacked(
-        ["address", "uint256", "address", "uint256"],
-        [MOCK_ERC20_ADDRESS, 0, initialSigner.address, bridgeNonce.toString()]
-      );
-      const unconfirmedMessageHash = ethers.keccak256(unconfirmedMessage);
-      const unconfirmedSignature = await initialSigner.signMessage(
-        ethers.getBytes(unconfirmedMessageHash)
-      );
-
-      const confirmingMessage = ethers.solidityPacked(
-        ["address", "uint256", "address", "uint256"],
-        [
-          MOCK_ERC20_ADDRESS,
-          ethers.parseEther("0"),
-          "0x" +
-            ethers.keccak256(ethers.hexlify(nextNextKey.publicKey)).slice(-40),
-          (bridgeNonce + 1n).toString(),
-        ]
-      );
-      const confirmingMessageHash = ethers.keccak256(confirmingMessage);
-      const confirmingSignature = await initialSigner.signMessage(
-        ethers.getBytes(confirmingMessageHash)
-      );
-
-      const confirmingPublicKey = ethers.hexlify(nextKey.publicKey);
-      const unconfirmedPublicKeyHash =
-        "0x" + ethers.keccak256(publicKey).slice(-40);
-      const confirmingPrevPublicKeyHash = unconfirmedPublicKeyHash;
-
-      const tx = await bridge.wrapPair(
-        MOCK_ERC20_ADDRESS,
-        ethers.parseEther("0"),
-        unconfirmedSignature,
-        publicKey,
-        "0x" + ethers.keccak256(ethers.hexlify(nextKey.publicKey)).slice(-40),
-        "0x" +
-          ethers.keccak256(ethers.hexlify(nextNextKey.publicKey)).slice(-40),
-        unconfirmedPrevPublicKeyHash,
-        initialSigner.address,
-        true,
-        ethers.parseEther("0"),
-        confirmingSignature,
-        confirmingPublicKey,
-        "0x" +
-          ethers.keccak256(ethers.hexlify(nextNextKey.publicKey)).slice(-40),
-        "0x" +
-          ethers
-            .keccak256(ethers.hexlify(nextNextNextKey.publicKey))
-            .slice(-40),
-        confirmingPrevPublicKeyHash,
-        "0x" +
-          ethers.keccak256(ethers.hexlify(nextNextKey.publicKey)).slice(-40),
-        false,
-        { nonce: signerNonce }
-      );
-      await localProvider.send("evm_mine", []);
-      await tx.wait();
-
-      const nextAddress = nextSigner.address;
-      const mockBalance = await mockERC20.balanceOf(initialSigner.address);
-      if (mockBalance > 0) {
-        const mockTransferTx = await mockERC20.transfer(
-          nextAddress,
-          mockBalance
-        );
-        await mockTransferTx.wait();
-        console.log(
-          `Transferred ${ethers.formatEther(
-            mockBalance
-          )} $MOCK to ${nextAddress}`
-        );
-      }
-
-      const ethBalance = await localProvider.getBalance(initialSigner.address);
-      if (ethBalance > ethers.parseEther("0.1")) {
-        const ethToTransfer = ethBalance - ethers.parseEther("0.1");
-        const ethTransferTx = await initialSigner.sendTransaction({
-          to: nextAddress,
-          value: ethToTransfer,
-        });
-        await ethTransferTx.wait();
-        console.log(
-          `Transferred ${ethers.formatEther(
-            ethToTransfer
-          )} ETH to ${nextAddress}`
-        );
-      }
-
-      setCurrentKey(nextKey);
-      setNextKey(nextNextKey);
-      setLastPublicKeyHash(
-        "0x" + ethers.keccak256(confirmingPublicKey).slice(-40)
-      );
-      setSigner(nextSigner);
-      setAccount(nextAddress);
-      setStatus("Initial key log pair registered");
-    } catch (error) {
-      console.error("Wrap pair failed:", error);
-      setStatus("Wrap pair failed: " + error.message);
-    }
-  };
-
-  const wrapLocal = async () => {
-    if (!provider || !signer || !rootWallet) {
-      setStatus("Provider, signer, or root wallet not initialized");
       return;
     }
 
     try {
       const bridge = new ethers.Contract(BRIDGE_ADDRESS, BRIDGE_ABI, signer);
-      const keyLogRegistry = new ethers.Contract(
-        KEYLOG_REGISTRY_ADDRESS,
-        KEYLOG_REGISTRY_ABI,
-        signer
-      );
+      const originalTokenAddress = isCrossChain
+        ? MOCK_ERC20_ADDRESS
+        : MOCK2_ERC20_ADDRESS;
       const mockERC20 = new ethers.Contract(
-        MOCK_ERC20_ADDRESS,
+        originalTokenAddress,
         ERC20_ABI,
         signer
       );
 
       const amountToWrap = ethers.parseEther("10");
+      let nonce = await provider.getTransactionCount(signer.address, "latest");
 
-      const mockBalance = await mockERC20.balanceOf(account);
-      console.log("Account $MOCK Balance:", ethers.formatEther(mockBalance));
-      if (mockBalance < amountToWrap) {
-        setStatus("Insufficient $MOCK balance");
-        return;
+      const balance = await mockERC20.balanceOf(signer.address);
+      console.log(
+        `Balance of ${
+          signer.address
+        } for ${originalTokenAddress}: ${ethers.formatEther(balance)}`
+      );
+
+      if (balance < amountToWrap) {
+        const hardhatWallet =
+          ethers.Wallet.fromPhrase(HARDHAT_MNEMONIC).connect(provider);
+        const mockERC20WithHardhat = new ethers.Contract(
+          originalTokenAddress,
+          ERC20_ABI,
+          hardhatWallet
+        );
+        const transferAmount = ethers.parseEther("10");
+        const hardhatNonce = await provider.getTransactionCount(
+          hardhatWallet.address,
+          "latest"
+        );
+        const transferTx = await mockERC20WithHardhat.transfer(
+          signer.address,
+          transferAmount,
+          { nonce: hardhatNonce }
+        );
+        await transferTx.wait();
+        console.log(
+          `Transferred ${ethers.formatEther(transferAmount)} $MOCK2 to ${
+            signer.address
+          } from Hardhat wallet`
+        );
       }
 
-      const ethBalance = await provider.getBalance(account);
-      console.log("Account ETH Balance:", ethers.formatEther(ethBalance));
-      if (ethBalance < ethers.parseEther("0.1")) {
-        setStatus("Insufficient ETH balance for gas");
-        return;
+      const currentAllowance = await mockERC20.allowance(
+        signer.address,
+        BRIDGE_ADDRESS
+      );
+      console.log(`Current allowance: ${ethers.formatEther(currentAllowance)}`);
+
+      if (currentAllowance < amountToWrap) {
+        const approvalAmount = ethers.parseEther("1000");
+        const approveTx = await mockERC20.approve(
+          BRIDGE_ADDRESS,
+          approvalAmount,
+          { nonce }
+        );
+        await approveTx.wait();
+        console.log(
+          `Approved Bridge to spend ${ethers.formatEther(
+            approvalAmount
+          )} $MOCK2`
+        );
+        nonce++;
       }
 
-      const approveTx = await mockERC20.approve(BRIDGE_ADDRESS, amountToWrap);
-      console.log("Approval Tx Hash:", approveTx.hash);
-      await approveTx.wait();
-      const allowance = await mockERC20.allowance(account, BRIDGE_ADDRESS);
-      console.log("Allowance after approval:", ethers.formatEther(allowance));
+      const ethBalance = await provider.getBalance(signer.address);
+      console.log(
+        `ETH Balance of ${signer.address}: ${ethers.formatEther(ethBalance)}`
+      );
+      const wrappedToken = await bridge.originalToWrapped(originalTokenAddress);
+      console.log(`Wrapped token for $MOCK2: ${wrappedToken}`);
+      console.log(`Nonce before wrap: ${nonce}`);
 
-      const currentIndex = await keyLogRegistry.getCurrentIndex(account);
-      console.log("Current Index:", currentIndex.toString());
+      const { key: nextDerivedKey, signer: nextSigner } = await deriveNextKey(
+        currentKey,
+        provider,
+        rootWallet
+      );
+      const { key: nextNextDerivedKey, signer: nextNextSigner } =
+        await deriveNextKey(nextDerivedKey, provider, rootWallet);
+      const { key: nextNextNextDerivedKey, signer: nextNextNextSigner } =
+        await deriveNextKey(nextNextDerivedKey, provider, rootWallet);
 
-      let prevEntry;
-      let prevPublicKeyHash = "0x0000000000000000000000000000000000000000";
-      if (currentIndex > 0) {
-        prevEntry = await keyLogRegistry.keyLogs(account, currentIndex - 1n);
-        if (!prevEntry.isOnChain) {
-          setStatus("Previous key log entry is not on-chain");
-          return;
-        }
-        prevPublicKeyHash = prevEntry.publicKeyHash;
-        console.log("Previous Entry:", {
-          publicKeyHash: prevEntry.publicKeyHash,
-          prerotatedKeyHash: prevEntry.prerotatedKeyHash,
-          twicePrerotatedKeyHash: prevEntry.twicePrerotatedKeyHash,
-        });
-      }
-
-      let derivedKey = await deriveSecurePath(rootWallet, kdp);
-      let currentDerivedKey,
-        nextDerivedKey,
-        nextNextDerivedKey,
-        nextNextNextDerivedKey;
-
-      for (let i = 0; i < currentIndex; i++) {
-        derivedKey = (await deriveNextKey(derivedKey, provider, rootWallet))
-          .key;
-      }
-      currentDerivedKey = derivedKey;
-      nextDerivedKey = (
-        await deriveNextKey(currentDerivedKey, provider, rootWallet)
-      ).key;
-      nextNextDerivedKey = (
-        await deriveNextKey(nextDerivedKey, provider, rootWallet)
-      ).key;
-      nextNextNextDerivedKey = (
-        await deriveNextKey(nextNextDerivedKey, provider, rootWallet)
-      ).key;
-
-      const currentPublicKeyHash =
-        "0x" +
-        ethers
-          .keccak256(ethers.hexlify(currentDerivedKey.publicKey))
-          .slice(-40);
-      const nextPublicKeyHash =
-        "0x" +
-        ethers.keccak256(ethers.hexlify(nextDerivedKey.publicKey)).slice(-40);
-      const nextNextPublicKeyHash =
-        "0x" +
-        ethers
-          .keccak256(ethers.hexlify(nextNextDerivedKey.publicKey))
-          .slice(-40);
-      const nextNextNextPublicKeyHash =
-        "0x" +
-        ethers
-          .keccak256(ethers.hexlify(nextNextNextDerivedKey.publicKey))
-          .slice(-40);
-
-      console.log("Derived Keys:", {
-        currentPublicKeyHash,
-        nextPublicKeyHash,
-        nextNextPublicKeyHash,
-        nextNextNextPublicKeyHash,
-      });
-
-      if (currentIndex > 0) {
-        const currentPublicKeyHashLower = currentPublicKeyHash.toLowerCase();
-        const prevPrerotatedKeyHashLower =
-          prevEntry.prerotatedKeyHash.toLowerCase();
-        if (currentPublicKeyHashLower !== prevPrerotatedKeyHashLower) {
-          console.error(
-            "Mismatch: currentPublicKeyHash",
-            currentPublicKeyHash,
-            "does not match prevEntry.prerotatedKeyHash",
-            prevEntry.prerotatedKeyHash
-          );
-          setStatus("Key derivation mismatch with on-chain state");
-          return;
-        }
-      }
-
-      const nonce = await bridge.nonces(signer.address);
-      console.log("Bridge Nonce:", nonce.toString());
+      const bridgeNonce = await bridge.nonces(signer.address);
+      console.log(
+        `Bridge nonce for ${signer.address}: ${bridgeNonce.toString()}`
+      );
 
       const unconfirmedMessage = ethers.solidityPacked(
         ["address", "uint256", "address", "uint256"],
-        [MOCK_ERC20_ADDRESS, amountToWrap, account, nonce.toString()]
+        [
+          originalTokenAddress,
+          amountToWrap,
+          signer.address,
+          bridgeNonce.toString(),
+        ]
       );
       const unconfirmedMessageHash = ethers.keccak256(unconfirmedMessage);
       const unconfirmedSignature = await signer.signMessage(
         ethers.getBytes(unconfirmedMessageHash)
       );
-
-      const confirmingMessage = ethers.solidityPacked(
-        ["address", "uint256", "address", "uint256"],
-        [MOCK_ERC20_ADDRESS, 0, nextNextPublicKeyHash, (nonce + 1n).toString()]
-      );
-      const confirmingMessageHash = ethers.keccak256(confirmingMessage);
-      const confirmingSignature = await signer.signMessage(
-        ethers.getBytes(confirmingMessageHash)
-      );
-
-      const tx = await bridge.wrapPair(
-        MOCK_ERC20_ADDRESS,
-        amountToWrap,
-        unconfirmedSignature,
-        ethers.hexlify(currentDerivedKey.publicKey),
-        nextPublicKeyHash,
-        nextNextPublicKeyHash,
-        prevPublicKeyHash,
-        account,
-        true,
-        0,
-        confirmingSignature,
-        ethers.hexlify(nextDerivedKey.publicKey),
-        nextNextPublicKeyHash,
-        nextNextNextPublicKeyHash,
-        currentPublicKeyHash,
-        nextNextPublicKeyHash,
-        false
-      );
-      console.log("Wrap Tx Hash:", tx.hash);
-      await provider.send("evm_mine", []);
-      await tx.wait();
-
-      const nextSigner = new ethers.Wallet(
-        ethers.hexlify(nextDerivedKey.privateKey),
-        provider
-      );
-      const nextAddress = nextSigner.address;
-      const remainingMockBalance = await mockERC20.balanceOf(account);
-      if (remainingMockBalance > 0) {
-        const mockTransferTx = await mockERC20.transfer(
-          nextAddress,
-          remainingMockBalance
-        );
-        await mockTransferTx.wait();
-        console.log(
-          `Transferred ${ethers.formatEther(
-            remainingMockBalance
-          )} $MOCK to ${nextAddress}`
-        );
-      }
-
-      const remainingEthBalance = await provider.getBalance(account);
-      if (remainingEthBalance > ethers.parseEther("0.1")) {
-        const ethToTransfer = remainingEthBalance - ethers.parseEther("0.1");
-        const ethTransferTx = await signer.sendTransaction({
-          to: nextAddress,
-          value: ethToTransfer,
-        });
-        await ethTransferTx.wait();
-        console.log(
-          `Transferred ${ethers.formatEther(
-            ethToTransfer
-          )} ETH to ${nextAddress}`
-        );
-      }
-
-      setCurrentKey(nextDerivedKey);
-      setNextKey(nextNextDerivedKey);
-      setLastPublicKeyHash(nextPublicKeyHash);
-      setSigner(nextSigner);
-      setAccount(nextAddress);
-      setStatus(`Wrapped 10 $MOCK to $WMOCK for ${nextAddress}`);
-    } catch (error) {
-      console.error("Wrap local failed:", error);
-      setStatus("Wrap local failed: " + error.message);
-    }
-  };
-
-  const unwrapLocal = async () => {
-    if (!provider || !signer || !rootWallet) {
-      setStatus("Provider, signer, or root wallet not initialized");
-      return;
-    }
-
-    try {
-      const bridge = new ethers.Contract(BRIDGE_ADDRESS, BRIDGE_ABI, signer);
-      const keyLogRegistry = new ethers.Contract(
-        KEYLOG_REGISTRY_ADDRESS,
-        KEYLOG_REGISTRY_ABI,
-        signer
-      );
-      const wrappedToken = new ethers.Contract(
-        WRAPPED_TOKEN_ADDRESS,
-        WRAPPED_TOKEN_ABI,
-        signer
-      );
-      const mockERC20 = new ethers.Contract(
-        MOCK_ERC20_ADDRESS,
-        ERC20_ABI,
-        signer
-      );
-
-      const amountToUnwrap = ethers.parseEther("5");
-
-      // Check balances
-      const wmockBalance = await wrappedToken.balanceOf(account);
-      console.log("Account $WMOCK Balance:", ethers.formatEther(wmockBalance));
-      if (wmockBalance < amountToUnwrap) {
-        setStatus("Insufficient $WMOCK balance");
-        return;
-      }
-
-      const ethBalance = await provider.getBalance(account);
-      console.log("Account ETH Balance:", ethers.formatEther(ethBalance));
-      if (ethBalance < ethers.parseEther("0.1")) {
-        setStatus("Insufficient ETH balance for gas");
-        return;
-      }
-
-      // Approve bridge to burn $WMOCK
-      const approveTx = await wrappedToken.approve(
-        BRIDGE_ADDRESS,
-        amountToUnwrap
-      );
-      console.log("Approval Tx Hash:", approveTx.hash);
-      await approveTx.wait();
-      const allowance = await wrappedToken.allowance(account, BRIDGE_ADDRESS);
-      console.log("Allowance after approval:", ethers.formatEther(allowance));
-
-      const currentIndex = await keyLogRegistry.getCurrentIndex(account);
-      console.log("Current Index:", currentIndex.toString());
-
-      let prevEntry;
-      let prevPublicKeyHash = "0x0000000000000000000000000000000000000000";
-      if (currentIndex > 0) {
-        prevEntry = await keyLogRegistry.keyLogs(account, currentIndex - 1n);
-        if (!prevEntry.isOnChain) {
-          setStatus("Previous key log entry is not on-chain");
-          return;
-        }
-        prevPublicKeyHash = prevEntry.publicKeyHash;
-        console.log("Previous Entry:", {
-          publicKeyHash: prevEntry.publicKeyHash,
-          prerotatedKeyHash: prevEntry.prerotatedKeyHash,
-          twicePrerotatedKeyHash: prevEntry.twicePrerotatedKeyHash,
-        });
-      }
-
-      let derivedKey = await deriveSecurePath(rootWallet, kdp);
-      let currentDerivedKey,
-        nextDerivedKey,
-        nextNextDerivedKey,
-        nextNextNextDerivedKey;
-
-      for (let i = 0; i < currentIndex; i++) {
-        derivedKey = (await deriveNextKey(derivedKey, provider, rootWallet))
-          .key;
-      }
-      currentDerivedKey = derivedKey;
-      nextDerivedKey = (
-        await deriveNextKey(currentDerivedKey, provider, rootWallet)
-      ).key;
-      nextNextDerivedKey = (
-        await deriveNextKey(nextDerivedKey, provider, rootWallet)
-      ).key;
-      nextNextNextDerivedKey = (
-        await deriveNextKey(nextNextDerivedKey, provider, rootWallet)
-      ).key;
-
-      const currentPublicKeyHash =
-        "0x" +
-        ethers
-          .keccak256(ethers.hexlify(currentDerivedKey.publicKey))
-          .slice(-40);
-      const nextPublicKeyHash =
-        "0x" +
-        ethers.keccak256(ethers.hexlify(nextDerivedKey.publicKey)).slice(-40);
-      const nextNextPublicKeyHash =
-        "0x" +
-        ethers
-          .keccak256(ethers.hexlify(nextNextDerivedKey.publicKey))
-          .slice(-40);
-      const nextNextNextPublicKeyHash =
-        "0x" +
-        ethers
-          .keccak256(ethers.hexlify(nextNextNextDerivedKey.publicKey))
-          .slice(-40);
-
-      console.log("Derived Keys:", {
-        currentPublicKeyHash,
-        nextPublicKeyHash,
-        nextNextPublicKeyHash,
-        nextNextNextPublicKeyHash,
-      });
-
-      if (currentIndex > 0) {
-        const currentPublicKeyHashLower = currentPublicKeyHash.toLowerCase();
-        const prevPrerotatedKeyHashLower =
-          prevEntry.prerotatedKeyHash.toLowerCase();
-        if (currentPublicKeyHashLower !== prevPrerotatedKeyHashLower) {
-          console.error(
-            "Mismatch: currentPublicKeyHash",
-            currentPublicKeyHash,
-            "does not match prevEntry.prerotatedKeyHash",
-            prevEntry.prerotatedKeyHash
-          );
-          setStatus("Key derivation mismatch with on-chain state");
-          return;
-        }
-      }
-
-      const nonce = await bridge.nonces(signer.address);
-      console.log("Bridge Nonce:", nonce.toString());
-
-      const unconfirmedMessage = ethers.solidityPacked(
-        ["address", "uint256", "address", "uint256"],
-        [WRAPPED_TOKEN_ADDRESS, amountToUnwrap, account, nonce.toString()]
-      );
-      const unconfirmedMessageHash = ethers.keccak256(unconfirmedMessage);
-      const unconfirmedSignature = await signer.signMessage(
-        ethers.getBytes(unconfirmedMessageHash)
-      );
+      console.log("Unconfirmed Message Hash:", unconfirmedMessageHash);
 
       const confirmingMessage = ethers.solidityPacked(
         ["address", "uint256", "address", "uint256"],
         [
-          WRAPPED_TOKEN_ADDRESS,
+          originalTokenAddress,
           0,
-          nextNextPublicKeyHash,
-          (nonce + 1n).toString(),
+          nextNextSigner.address,
+          (bridgeNonce + 1n).toString(),
         ]
       );
       const confirmingMessageHash = ethers.keccak256(confirmingMessage);
       const confirmingSignature = await signer.signMessage(
         ethers.getBytes(confirmingMessageHash)
       );
+      console.log("Confirming Message Hash:", confirmingMessageHash);
 
-      const unconfirmedParams = {
-        amount: amountToUnwrap,
-        signature: unconfirmedSignature,
-        publicKey: ethers.hexlify(currentDerivedKey.publicKey),
-        prerotatedKeyHash: nextPublicKeyHash,
-        twicePrerotatedKeyHash: nextNextPublicKeyHash,
-        prevPublicKeyHash: prevPublicKeyHash,
-        targetAddress: account,
-        hasRelationship: true,
-      };
+      console.log("Next Signer Address:", nextSigner.address);
+      console.log("Fee Collector:", await bridge.feeCollector());
 
-      const confirmingParams = {
-        amount: ethers.parseEther("0"),
-        signature: confirmingSignature,
-        publicKey: ethers.hexlify(nextDerivedKey.publicKey),
-        prerotatedKeyHash: nextNextPublicKeyHash,
-        twicePrerotatedKeyHash: nextNextNextPublicKeyHash,
-        prevPublicKeyHash: currentPublicKeyHash,
-        targetAddress: nextNextPublicKeyHash,
-        hasRelationship: false,
-      };
-
-      const tx = await bridge.unwrapPair(
-        WRAPPED_TOKEN_ADDRESS,
-        unconfirmedParams,
-        confirmingParams
+      // Compute key hashes for validation
+      const currentPublicKeyHash = ethers.keccak256(
+        currentKey.uncompressedPublicKey.slice(1)
       );
-      console.log("Unwrap Tx Hash:", tx.hash);
+
+      // Check KeyLogRegistry state
+      const keyLogRegistry = new ethers.Contract(
+        KEYLOG_REGISTRY_ADDRESS,
+        KEYLOG_REGISTRY_ABI,
+        signer
+      );
+      const latestEntry = await keyLogRegistry.getLatestChainEntry(
+        currentKey.uncompressedPublicKey.slice(1)
+      );
+      console.log("Latest Entry Exists:", latestEntry[1]);
+      if (latestEntry[1]) {
+        console.log(
+          "Latest Entry Public Key Hash:",
+          latestEntry[0].publicKeyHash
+        );
+        console.log(
+          "Latest Entry Prerotated Key Hash:",
+          latestEntry[0].prerotatedKeyHash
+        );
+      }
+
+      const tx = await bridge.wrapPairWithTransfer(
+        originalTokenAddress,
+        {
+          amount: amountToWrap,
+          signature: unconfirmedSignature,
+          publicKey: currentKey.uncompressedPublicKey.slice(1),
+          prerotatedKeyHash: nextSigner.address,
+          twicePrerotatedKeyHash: nextNextSigner.address,
+          prevPublicKeyHash: lastPublicKeyHash,
+          outputAddress: signer.address,
+          hasRelationship: true,
+        },
+        {
+          amount: ethers.parseEther("0"),
+          signature: confirmingSignature,
+          publicKey: nextDerivedKey.uncompressedPublicKey.slice(1),
+          prerotatedKeyHash: nextNextSigner.address,
+          twicePrerotatedKeyHash: nextNextNextSigner.address,
+          prevPublicKeyHash: nextSigner.address,
+          outputAddress: nextNextSigner.address,
+          hasRelationship: false,
+        },
+        { nonce }
+      );
       await provider.send("evm_mine", []);
       await tx.wait();
 
-      // Transfer balances to next key
-      const nextSigner = new ethers.Wallet(
-        ethers.hexlify(nextDerivedKey.privateKey),
-        provider
+      localStorage.setItem(
+        "previousPrivateKey",
+        ethers.hexlify(currentKey.privateKey)
       );
-      const nextAddress = nextSigner.address;
+      localStorage.setItem(
+        "bridgePrivateKey",
+        ethers.hexlify(nextDerivedKey.privateKey)
+      );
+      localStorage.setItem("bridgeAccount", nextSigner.address);
 
-      const remainingWmockBalance = await wrappedToken.balanceOf(account);
-      if (remainingWmockBalance > 0) {
-        const wmockTransferTx = await wrappedToken.transfer(
-          nextAddress,
-          remainingWmockBalance
-        );
-        await wmockTransferTx.wait();
-        console.log(
-          `Transferred ${ethers.formatEther(
-            remainingWmockBalance
-          )} $WMOCK to ${nextAddress}`
-        );
-      }
-
-      const remainingMockBalance = await mockERC20.balanceOf(account);
-      if (remainingMockBalance > 0) {
-        const mockTransferTx = await mockERC20.transfer(
-          nextAddress,
-          remainingMockBalance
-        );
-        await mockTransferTx.wait();
-        console.log(
-          `Transferred ${ethers.formatEther(
-            remainingMockBalance
-          )} $MOCK to ${nextAddress}`
-        );
-      }
-
-      const remainingEthBalance = await provider.getBalance(account);
-      if (remainingEthBalance > ethers.parseEther("0.1")) {
-        const ethToTransfer = remainingEthBalance - ethers.parseEther("0.1");
-        const ethTransferTx = await signer.sendTransaction({
-          to: nextAddress,
-          value: ethToTransfer,
-        });
-        await ethTransferTx.wait();
-        console.log(
-          `Transferred ${ethers.formatEther(
-            ethToTransfer
-          )} ETH to ${nextAddress}`
-        );
-      }
-
-      setCurrentKey(nextDerivedKey);
-      setNextKey(nextNextDerivedKey);
-      setLastPublicKeyHash(nextPublicKeyHash);
-      setSigner(nextSigner);
-      setAccount(nextAddress);
-      setStatus(`Unwrapped 5 $WMOCK to $MOCK for ${nextAddress}`);
+      setPreviousKey(nextDerivedKey);
+      setCurrentKey(nextNextDerivedKey);
+      setNextKey(nextNextNextDerivedKey);
+      setLastPublicKeyHash(nextSigner.address);
+      setSigner(nextNextSigner);
+      setAccount(nextNextSigner.address);
+      setStatus(
+        `Wrapped 10 $${isCrossChain ? "MOCK" : "MOCK2"} to ${
+          nextNextSigner.address
+        }`
+      );
     } catch (error) {
-      console.error("Unwrap local failed:", error);
-      setStatus("Unwrap local failed: " + error.message);
+      setStatus("Wrap failed: " + error.message);
+      console.error("Wrap failed:", error);
     }
   };
 
-  const setupContracts = async () => {
-    setStatus("Setup Contracts not implemented yet");
-  };
+  const unwrap = async (isCrossChain = false) => {
+    if (!provider || !signer || !rootWallet || !currentKey) {
+      setStatus(
+        "Provider, signer, root wallet, or current key not initialized"
+      );
+      return;
+    }
 
-  const wrapCrossChain = async () => {
-    setStatus("Wrap Cross-Chain not implemented yet");
-  };
+    try {
+      const bridge = new ethers.Contract(BRIDGE_ADDRESS, BRIDGE_ABI, signer);
+      const wrappedTokenAddress = isCrossChain
+        ? WRAPPED_TOKEN_ADDRESS
+        : Y_WRAPPED_TOKEN_ADDRESS;
+      const wrappedToken = new ethers.Contract(
+        wrappedTokenAddress,
+        WRAPPED_TOKEN_ABI,
+        signer
+      );
+      const originalTokenAddress = isCrossChain
+        ? MOCK_ERC20_ADDRESS
+        : MOCK2_ERC20_ADDRESS;
+      const mockERC20 = new ethers.Contract(
+        originalTokenAddress,
+        ERC20_ABI,
+        provider
+      );
 
-  const unwrapCrossChain = async () => {
-    setStatus("Unwrap Cross-Chain not implemented yet");
+      const amountToUnwrap = ethers.parseEther("5");
+      let nonce = await provider.getTransactionCount(signer.address, "latest");
+
+      // Log signer details
+      console.log("Signer Address:", signer.address);
+      const ethBalance = await provider.getBalance(signer.address);
+      console.log(`ETH Balance: ${ethers.formatEther(ethBalance)}`);
+
+      // Check wrapped token balance and allowance
+      const wrappedBalance = await wrappedToken.balanceOf(signer.address);
+      console.log(
+        `Wrapped Balance (${wrappedTokenAddress}): ${ethers.formatEther(
+          wrappedBalance
+        )}`
+      );
+      if (wrappedBalance < amountToUnwrap) {
+        setStatus(`Insufficient $${isCrossChain ? "WMOCK" : "YMOCK"} balance`);
+        return;
+      }
+
+      const allowance = await wrappedToken.allowance(
+        signer.address,
+        BRIDGE_ADDRESS
+      );
+      console.log(`Allowance for Bridge: ${ethers.formatEther(allowance)}`);
+      if (allowance < amountToUnwrap) {
+        const approveTx = await wrappedToken.approve(
+          BRIDGE_ADDRESS,
+          amountToUnwrap,
+          { nonce }
+        );
+        await approveTx.wait();
+        console.log(
+          `Approved ${ethers.formatEther(amountToUnwrap)} for Bridge`
+        );
+        nonce++;
+      }
+
+      // Check bridge's original token balance (for non-cross-chain)
+      if (!isCrossChain) {
+        const bridgeBalance = await mockERC20.balanceOf(BRIDGE_ADDRESS);
+        console.log(
+          `Bridge ${originalTokenAddress} Balance: ${ethers.formatEther(
+            bridgeBalance
+          )}`
+        );
+        if (bridgeBalance < amountToUnwrap) {
+          setStatus("Bridge has insufficient original token balance");
+          return;
+        }
+      }
+
+      // Derive next keys
+      const { key: nextDerivedKey, signer: nextSigner } = await deriveNextKey(
+        currentKey,
+        provider,
+        rootWallet
+      );
+      const { key: nextNextDerivedKey, signer: nextNextSigner } =
+        await deriveNextKey(nextDerivedKey, provider, rootWallet);
+      const { key: nextNextNextDerivedKey, signer: nextNextNextSigner } =
+        await deriveNextKey(nextNextDerivedKey, provider, rootWallet);
+
+      // Prepare signatures
+      const bridgeNonce = await bridge.nonces(signer.address);
+      console.log(`Bridge Nonce: ${bridgeNonce.toString()}`);
+
+      const unconfirmedMessage = ethers.solidityPacked(
+        ["address", "uint256", "address", "uint256"],
+        [wrappedTokenAddress, amountToUnwrap, account, bridgeNonce.toString()]
+      );
+      const unconfirmedMessageHash = ethers.keccak256(unconfirmedMessage);
+      const unconfirmedEthSignedHash = ethers.toBeHex(
+        ethers.hashMessage(ethers.getBytes(unconfirmedMessageHash))
+      );
+      const unconfirmedSignature = await signer.signMessage(
+        ethers.getBytes(unconfirmedMessageHash)
+      );
+      const unconfirmedSigner = ethers.recoverAddress(
+        unconfirmedEthSignedHash,
+        unconfirmedSignature
+      );
+      console.log("Unconfirmed Message Hash:", unconfirmedMessageHash);
+      console.log("Unconfirmed Eth Signed Hash:", unconfirmedEthSignedHash);
+      console.log("Unconfirmed Signature:", unconfirmedSignature);
+      console.log("Recovered Unconfirmed Signer:", unconfirmedSigner);
+      console.log("Expected Signer:", signer.address);
+
+      const confirmingMessage = ethers.solidityPacked(
+        ["address", "uint256", "address", "uint256"],
+        [
+          wrappedTokenAddress,
+          0,
+          nextNextSigner.address,
+          (bridgeNonce + 1n).toString(),
+        ]
+      );
+      const confirmingMessageHash = ethers.keccak256(confirmingMessage);
+      const confirmingEthSignedHash = ethers.toBeHex(
+        ethers.hashMessage(ethers.getBytes(confirmingMessageHash))
+      );
+      const confirmingSignature = await signer.signMessage(
+        ethers.getBytes(confirmingMessageHash)
+      );
+      const confirmingSigner = ethers.recoverAddress(
+        confirmingEthSignedHash,
+        confirmingSignature
+      );
+      console.log("Confirming Message Hash:", confirmingMessageHash);
+      console.log("Confirming Eth Signed Hash:", confirmingEthSignedHash);
+      console.log("Confirming Signature:", confirmingSignature);
+      console.log("Recovered Confirming Signer:", confirmingSigner);
+
+      // Log key parameters
+      console.log(
+        "Current Public Key:",
+        ethers.hexlify(currentKey.uncompressedPublicKey.slice(1))
+      );
+      console.log("Next Signer Address (prerotated):", nextSigner.address);
+      console.log(
+        "Next Next Signer Address (twicePrerotated):",
+        nextNextSigner.address
+      );
+      console.log("Last Public Key Hash:", lastPublicKeyHash);
+
+      // Execute unwrapPairWithTransfer
+      const tx = await bridge.unwrapPairWithTransfer(
+        wrappedTokenAddress,
+        {
+          amount: amountToUnwrap,
+          signature: unconfirmedSignature,
+          publicKey: ethers.hexlify(currentKey.uncompressedPublicKey.slice(1)),
+          prerotatedKeyHash: nextSigner.address,
+          twicePrerotatedKeyHash: nextNextSigner.address,
+          prevPublicKeyHash: lastPublicKeyHash,
+          targetAddress: account,
+          hasRelationship: true,
+        },
+        {
+          amount: ethers.parseEther("0"),
+          signature: confirmingSignature,
+          publicKey: ethers.hexlify(
+            nextDerivedKey.uncompressedPublicKey.slice(1)
+          ),
+          prerotatedKeyHash: nextNextSigner.address,
+          twicePrerotatedKeyHash: nextNextNextSigner.address,
+          prevPublicKeyHash: nextSigner.address,
+          targetAddress: nextNextSigner.address,
+          hasRelationship: false,
+        },
+        { nonce, gasLimit: 1000000 } // Increased gas limit for debugging
+      );
+      console.log("Transaction Hash:", tx.hash);
+      await provider.send("evm_mine", []);
+      await tx.wait();
+
+      // Update state
+      localStorage.setItem(
+        "previousPrivateKey",
+        ethers.hexlify(currentKey.privateKey)
+      );
+      localStorage.setItem(
+        "bridgePrivateKey",
+        ethers.hexlify(nextDerivedKey.privateKey)
+      );
+      localStorage.setItem("bridgeAccount", nextSigner.address);
+
+      setPreviousKey(currentKey);
+      setCurrentKey(nextDerivedKey);
+      setNextKey(nextNextDerivedKey);
+      setLastPublicKeyHash(signer.address);
+      setSigner(nextSigner);
+      setAccount(nextSigner.address);
+      setStatus(
+        `Unwrapped 5 $${isCrossChain ? "WMOCK" : "YMOCK"} to ${
+          nextNextSigner.address
+        }`
+      );
+    } catch (error) {
+      setStatus("Unwrap failed: " + error.message);
+      console.error("Unwrap failed:", error);
+    }
   };
 
   return (
@@ -769,11 +771,14 @@ function Bridge() {
       <p>Fee Collector: {feeCollector}</p>
       {account && (
         <>
-          <button onClick={setupContracts}>Setup Contracts</button>
-          <button onClick={wrapLocal}>Wrap 10 $MOCK</button>
-          <button onClick={unwrapLocal}>Unwrap 5 $WMOCK</button>
-          <button onClick={wrapCrossChain}>Wrap 10 $MOCK (Cross-Chain)</button>
-          <button onClick={unwrapCrossChain}>
+          <button onClick={() => wrap(false)}>Wrap 10 $MOCK (On-Chain)</button>
+          <button onClick={() => unwrap(false)}>
+            Unwrap 5 $YMOCK (On-Chain)
+          </button>
+          <button onClick={() => wrap(true)}>
+            Wrap 10 $MOCK (Cross-Chain)
+          </button>
+          <button onClick={() => unwrap(true)}>
             Unwrap 5 $WMOCK (Cross-Chain)
           </button>
         </>

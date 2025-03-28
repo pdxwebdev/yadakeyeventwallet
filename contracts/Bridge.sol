@@ -31,8 +31,21 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable {
     event UnwrapCrossChain(address indexed originalToken, address targetAddress, uint256 amount, address indexed user);
     event TokensLocked(address indexed user, address indexed originalToken, uint256 amount);
     event FeesCollected(address indexed token, uint256 amount);
+    event TokensMinted(address indexed wrappedToken, address indexed user, uint256 amount);
 
-    // Structs to group unwrapPair parameters
+    // Struct for wrap parameters (reused for both unconfirmed and confirming)
+    struct WrapParams {
+        uint256 amount;
+        bytes signature;
+        bytes publicKey;
+        address prerotatedKeyHash;
+        address twicePrerotatedKeyHash;
+        address prevPublicKeyHash;
+        address outputAddress;
+        bool hasRelationship;
+    }
+
+    // Existing struct for unwrap (unchanged)
     struct UnwrapParams {
         uint256 amount;
         bytes signature;
@@ -69,7 +82,7 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable {
     function addTokenPair(address originalToken, address wrappedToken, bool _isCrossChain) external onlyOwner {
         originalToWrapped[originalToken] = wrappedToken;
         wrappedToOriginal[wrappedToken] = originalToken;
-        isCrossChain[originalToken] = _isCrossChain;
+        isCrossChain[wrappedToken] = _isCrossChain;
     }
 
     function lockCrossChain(
@@ -81,18 +94,17 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable {
     ) external {
         require(IERC20(originalToken).transferFrom(msg.sender, address(this), amount), "Transfer failed");
         keyLogRegistry.registerKeyLog(
-            msg.sender,
-            address(uint160(uint256(keccak256(publicKey)))),
+            publicKey,
+            getAddressFromPublicKey(publicKey),
             prerotatedKeyHash,
             twicePrerotatedKeyHash,
             address(0),
-            msg.sender,
+            prerotatedKeyHash,
             false
         );
         emit TokensLocked(msg.sender, originalToken, amount);
     }
 
-    // Assuming wrapPair could also be refactored similarly if needed
     function wrapPair(
         address originalToken,
         uint256 unconfirmedAmount,
@@ -129,14 +141,14 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable {
         require(confirmingSigner == msg.sender, "Invalid confirming signature");
 
         keyLogRegistry.registerKeyLogPair(
-            msg.sender,
-            address(uint160(uint256(keccak256(unconfirmedPublicKey)))),
+            unconfirmedPublicKey,
+            getAddressFromPublicKey(unconfirmedPublicKey),
             unconfirmedPrerotatedKeyHash,
             unconfirmedTwicePrerotatedKeyHash,
             unconfirmedPrevPublicKeyHash,
             unconfirmedOutputAddress,
             unconfirmedHasRelationship,
-            address(uint160(uint256(keccak256(confirmingPublicKey)))),
+            getAddressFromPublicKey(confirmingPublicKey),
             confirmingPrerotatedKeyHash,
             confirmingTwicePrerotatedKeyHash,
             confirmingPrevPublicKeyHash,
@@ -153,14 +165,148 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable {
             require(IERC20(originalToken).transfer(feeCollector, fee), "Fee transfer failed");
             emit FeesCollected(originalToken, fee);
         }
-        WrappedToken(wrappedToken).mint(unconfirmedOutputAddress, netAmount);
-        emit TokensWrapped(unconfirmedOutputAddress, wrappedToken, netAmount);
+        WrappedToken(wrappedToken).mint(confirmingPrerotatedKeyHash, netAmount);
+        emit TokensWrapped(confirmingPrerotatedKeyHash, wrappedToken, netAmount);
+    }
+
+    function wrapPairWithTransfer(
+        address originalToken,
+        WrapParams calldata unconfirmed,
+        WrapParams calldata confirming
+    ) external {
+        address wrappedToken = originalToWrapped[originalToken];
+        require(wrappedToken != address(0), "Token pair not supported");
+
+        uint256 nonce = nonces[msg.sender];
+        nonces[msg.sender] += 2;
+
+        // Validate signatures
+        bytes32 unconfirmedMessageHash = keccak256(abi.encodePacked(originalToken, unconfirmed.amount, unconfirmed.outputAddress, nonce));
+        bytes32 unconfirmedEthSignedMessageHash = unconfirmedMessageHash.toEthSignedMessageHash();
+        address unconfirmedSigner = unconfirmedEthSignedMessageHash.recover(unconfirmed.signature);
+        require(unconfirmedSigner == msg.sender, "Invalid unconfirmed signature");
+
+        bytes32 confirmingMessageHash = keccak256(abi.encodePacked(originalToken, confirming.amount, confirming.outputAddress, nonce + 1));
+        bytes32 confirmingEthSignedMessageHash = confirmingMessageHash.toEthSignedMessageHash();
+        address confirmingSigner = confirmingEthSignedMessageHash.recover(confirming.signature);
+        require(confirmingSigner == msg.sender, "Invalid confirming signature");
+
+        // Calculate total amount and fees
+        uint256 totalAmount = unconfirmed.amount + confirming.amount;
+        uint256 fee = (totalAmount * feePercentage) / FEE_DENOMINATOR;
+        uint256 netAmount = totalAmount - fee;
+
+        // Transfer tokens from sender to this contract
+        require(
+            IERC20(originalToken).transferFrom(msg.sender, address(this), totalAmount),
+            "Transfer failed"
+        );
+
+        // Collect fees if applicable
+        if (fee > 0) {
+            require(
+                IERC20(originalToken).transfer(feeCollector, fee),
+                "Fee transfer failed"
+            );
+            emit FeesCollected(originalToken, fee);
+        }
+
+        // Register key log pair
+        keyLogRegistry.registerKeyLogPair(
+            unconfirmed.publicKey,
+            getAddressFromPublicKey(unconfirmed.publicKey),
+            unconfirmed.prerotatedKeyHash,
+            unconfirmed.twicePrerotatedKeyHash,
+            unconfirmed.prevPublicKeyHash,
+            unconfirmed.outputAddress,
+            unconfirmed.hasRelationship,
+            getAddressFromPublicKey(confirming.publicKey),
+            confirming.prerotatedKeyHash,
+            confirming.twicePrerotatedKeyHash,
+            confirming.prevPublicKeyHash,
+            confirming.outputAddress,
+            confirming.hasRelationship
+        );
+
+        // Mint wrapped tokens
+        WrappedToken(wrappedToken).mint(confirming.prerotatedKeyHash, netAmount);
+        emit TokensWrapped(confirming.prerotatedKeyHash, wrappedToken, netAmount);
+    }
+    function unwrapPairWithTransfer(
+        address wrappedToken,
+        UnwrapParams calldata unconfirmed,
+        UnwrapParams calldata confirming
+    ) external {
+        address originalToken = wrappedToOriginal[wrappedToken];
+        require(originalToken != address(0), "Token pair not supported");
+
+        uint256 nonce = nonces[msg.sender];
+        nonces[msg.sender] += 2;
+
+        // Validate signatures
+        bytes32 unconfirmedMessageHash = keccak256(abi.encodePacked(wrappedToken, unconfirmed.amount, unconfirmed.targetAddress, nonce));
+        bytes32 unconfirmedEthSignedMessageHash = unconfirmedMessageHash.toEthSignedMessageHash();
+        address unconfirmedSigner = unconfirmedEthSignedMessageHash.recover(unconfirmed.signature);
+        require(unconfirmedSigner == msg.sender, "Invalid unconfirmed signature");
+
+        bytes32 confirmingMessageHash = keccak256(abi.encodePacked(wrappedToken, confirming.amount, confirming.targetAddress, nonce + 1));
+        bytes32 confirmingEthSignedMessageHash = confirmingMessageHash.toEthSignedMessageHash();
+        address confirmingSigner = confirmingEthSignedMessageHash.recover(confirming.signature);
+        require(confirmingSigner == msg.sender, "Invalid confirming signature");
+
+        // Calculate total amount
+        uint256 totalAmount = unconfirmed.amount + confirming.amount;
+
+        // Burn wrapped tokens from sender
+        WrappedToken(wrappedToken).burn(msg.sender, totalAmount);
+
+        // Register key log pair
+        keyLogRegistry.registerKeyLogPair(
+            unconfirmed.publicKey,
+            getAddressFromPublicKey(unconfirmed.publicKey),
+            unconfirmed.prerotatedKeyHash,
+            unconfirmed.twicePrerotatedKeyHash,
+            unconfirmed.prevPublicKeyHash,
+            unconfirmed.targetAddress,
+            unconfirmed.hasRelationship,
+            getAddressFromPublicKey(confirming.publicKey),
+            confirming.prerotatedKeyHash,
+            confirming.twicePrerotatedKeyHash,
+            confirming.prevPublicKeyHash,
+            confirming.targetAddress,
+            confirming.hasRelationship
+        );
+
+        if (isCrossChain[wrappedToken]) {
+            // Emit event for cross-chain unwrapping
+            emit UnwrapCrossChain(originalToken, unconfirmed.targetAddress, totalAmount, msg.sender);
+        } else {
+            // Calculate fees and net amount for same-chain unwrapping
+            uint256 fee = (totalAmount * feePercentage) / FEE_DENOMINATOR;
+            uint256 netAmount = totalAmount - fee;
+
+            // Collect fees if applicable
+            if (fee > 0) {
+                require(
+                    IERC20(originalToken).transfer(feeCollector, fee),
+                    "Fee transfer failed"
+                );
+                emit FeesCollected(originalToken, fee);
+            }
+
+            // Transfer original tokens to target address
+            require(
+                IERC20(originalToken).transfer(unconfirmed.targetAddress, netAmount),
+                "Transfer failed"
+            );
+        }
     }
 
     function mintWrappedToken(address wrappedToken, address user, uint256 amount) external {
         require(msg.sender == relayer, "Only relayer can mint");
-        require(isCrossChain[wrappedToOriginal[wrappedToken]], "Not a cross-chain token");
+        require(isCrossChain[wrappedToken], "Not a cross-chain token");
         WrappedToken(wrappedToken).mint(user, amount);
+        emit TokensMinted(wrappedToken, user, amount);
     }
 
     function mintWrappedTokenWithLock(
@@ -181,6 +327,7 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable {
             emit FeesCollected(originalToken, fee);
         }
         WrappedToken(wrappedToken).mint(user, netAmount);
+        emit TokensMinted(wrappedToken, user, netAmount);
     }
 
     function unwrapPair(
@@ -194,28 +341,25 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable {
         uint256 nonce = nonces[msg.sender];
         nonces[msg.sender] += 2;
 
-        // Verify unconfirmed signature
         bytes32 unconfirmedMessageHash = keccak256(abi.encodePacked(wrappedToken, unconfirmed.amount, unconfirmed.targetAddress, nonce));
         bytes32 unconfirmedEthSignedMessageHash = unconfirmedMessageHash.toEthSignedMessageHash();
         address unconfirmedSigner = unconfirmedEthSignedMessageHash.recover(unconfirmed.signature);
         require(unconfirmedSigner == msg.sender, "Invalid unconfirmed signature");
 
-        // Verify confirming signature
         bytes32 confirmingMessageHash = keccak256(abi.encodePacked(wrappedToken, confirming.amount, confirming.targetAddress, nonce + 1));
         bytes32 confirmingEthSignedMessageHash = confirmingMessageHash.toEthSignedMessageHash();
         address confirmingSigner = confirmingEthSignedMessageHash.recover(confirming.signature);
         require(confirmingSigner == msg.sender, "Invalid confirming signature");
 
-        // Register key log pair
         keyLogRegistry.registerKeyLogPair(
-            msg.sender,
-            address(uint160(uint256(keccak256(unconfirmed.publicKey)))),
+            unconfirmed.publicKey,
+            getAddressFromPublicKey(unconfirmed.publicKey),
             unconfirmed.prerotatedKeyHash,
             unconfirmed.twicePrerotatedKeyHash,
             unconfirmed.prevPublicKeyHash,
             unconfirmed.targetAddress,
             unconfirmed.hasRelationship,
-            address(uint160(uint256(keccak256(confirming.publicKey)))),
+            getAddressFromPublicKey(confirming.publicKey),
             confirming.prerotatedKeyHash,
             confirming.twicePrerotatedKeyHash,
             confirming.prevPublicKeyHash,
@@ -225,11 +369,9 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable {
 
         uint256 totalAmount = unconfirmed.amount + confirming.amount;
         
-        // Burn wrapped tokens
         WrappedToken(wrappedToken).burn(msg.sender, totalAmount);
 
-        // Handle transfer based on cross-chain status
-        if (isCrossChain[originalToken]) {
+        if (isCrossChain[wrappedToken]) {
             emit UnwrapCrossChain(originalToken, unconfirmed.targetAddress, totalAmount, msg.sender);
         } else {
             uint256 fee = (totalAmount * feePercentage) / FEE_DENOMINATOR;
@@ -241,6 +383,12 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable {
             }
             require(IERC20(originalToken).transfer(unconfirmed.targetAddress, netAmount), "Transfer failed");
         }
+    }
+
+    function getAddressFromPublicKey(bytes memory publicKey) public pure returns (address) {
+        require(publicKey.length == 64, "Public key must be 64 bytes");
+        bytes32 hash = keccak256(publicKey);
+        return address(uint160(uint256(hash)));
     }
 
     function _authorizeUpgrade(address newImplementation) internal override onlyOwner {}
