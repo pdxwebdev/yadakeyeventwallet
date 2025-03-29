@@ -189,7 +189,7 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable {
         bytes32 confirmingMessageHash = keccak256(abi.encodePacked(originalToken, confirming.amount, confirming.outputAddress, nonce + 1));
         bytes32 confirmingEthSignedMessageHash = confirmingMessageHash.toEthSignedMessageHash();
         address confirmingSigner = confirmingEthSignedMessageHash.recover(confirming.signature);
-        require(confirmingSigner == msg.sender, "Invalid confirming signature");
+        require(confirmingSigner == getAddressFromPublicKey(confirming.publicKey), "Invalid confirming signature");
 
         // Calculate total amount and fees
         uint256 totalAmount = unconfirmed.amount + confirming.amount;
