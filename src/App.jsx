@@ -18,6 +18,8 @@ import Home from "./pages/Home";
 import Wallet from "./pages/Wallet";
 import WifToHdConversion from "./pages/WifToHDConversion";
 import Bridge from "./components/Bridge";
+import AdminPanel from "./pages/AdminPanel";
+import Markets from "./pages/Markets";
 
 // Main App component with the router
 function App() {
@@ -42,6 +44,12 @@ function App() {
         <Link to="/bridge" style={{ marginRight: "10px" }}>
           Bridge
         </Link>
+        <Link to="/markets" style={{ marginRight: "10px" }}>
+          Markets
+        </Link>
+        <Link to="/admin" style={{ marginRight: "10px" }}>
+          Admin
+        </Link>
       </nav>
       <Routes>
         <Route path="/" element={<Home />} />
@@ -61,6 +69,8 @@ function App() {
           }
         />
         <Route path="/bridge" element={<Bridge />} />
+        <Route path="/markets" element={<Markets />} />
+        <Route path="/admin" element={<AdminPanel />} />
       </Routes>
     </Router>
   );

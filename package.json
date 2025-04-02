@@ -14,6 +14,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@chainlink/contracts": "^1.3.0",
     "@mantine/carousel": "^7.16.2",
     "@mantine/charts": "^7.16.2",
     "@mantine/code-highlight": "^7.16.2",

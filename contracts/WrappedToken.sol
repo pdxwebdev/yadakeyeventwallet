@@ -3,15 +3,16 @@ pragma solidity ^0.8.0;
 
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/token/ERC20/extensions/ERC20Permit.sol";
 
-contract WrappedToken is ERC20, Ownable {
+contract WrappedToken is ERC20, Ownable, ERC20Permit {
     address public bridge;
 
     constructor(
         string memory name,
         string memory symbol,
         address _bridge
-    ) ERC20(name, symbol) Ownable(msg.sender) {
+    ) ERC20(name, symbol) Ownable(msg.sender) ERC20Permit(name) {
         bridge = _bridge;
     }
 
