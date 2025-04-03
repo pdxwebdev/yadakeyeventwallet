@@ -1,90 +1,144 @@
 import pkg from "hardhat";
+import fs from 'fs';
 const { ethers, upgrades } = pkg;
 
 async function main() {
   const [deployer] = await ethers.getSigners();
   console.log("Deploying with:", deployer.address);
 
-  // Deploy KeyLogRegistry
+  const deploymentsFile = "./deployments.json";
+  let deployments = fs.existsSync(deploymentsFile)
+    ? JSON.parse(fs.readFileSync(deploymentsFile))
+    : {};
+
+  // Deploy KeyLogRegistry (non-upgradeable for now)
   const KeyLogRegistry = await ethers.getContractFactory("KeyLogRegistry");
-  const keyLogRegistry = await KeyLogRegistry.deploy();
-  await keyLogRegistry.waitForDeployment();
-  const keyLogRegistryAddress = await keyLogRegistry.getAddress();
-  console.log("KeyLogRegistry:", keyLogRegistryAddress);
+  let keyLogRegistry;
+  if (deployments.keyLogRegistry) {
+    keyLogRegistry = await KeyLogRegistry.attach(deployments.keyLogRegistry);
+    console.log("Using existing KeyLogRegistry:", deployments.keyLogRegistry);
+  } else {
+    keyLogRegistry = await KeyLogRegistry.deploy();
+    await keyLogRegistry.waitForDeployment();
+    deployments.keyLogRegistry = await keyLogRegistry.getAddress();
+    console.log("KeyLogRegistry:", deployments.keyLogRegistry);
+  }
+  const keyLogRegistryAddress = deployments.keyLogRegistry;
 
   // Deploy Bridge as a proxy
   const Bridge = await ethers.getContractFactory("Bridge");
-  const bridge = await upgrades.deployProxy(
-    Bridge,
-    [keyLogRegistryAddress],
-    { initializer: "initialize", kind: "uups" }
-  );
-  await bridge.waitForDeployment();
-  const bridgeAddress = await bridge.getAddress();
-  console.log("Bridge:", bridgeAddress);
+  let bridge;
+  if (deployments.bridge) {
+    bridge = await ethers.getContractAt("Bridge", deployments.bridge, deployer);
+    console.log("Using existing Bridge proxy:", deployments.bridge);
+    // Optionally upgrade to a new version (e.g., BridgeV2)
+    // const BridgeV2 = await ethers.getContractFactory("BridgeV2");
+    // bridge = await upgrades.upgradeProxy(deployments.bridge, BridgeV2);
+    // console.log("Upgraded Bridge to V2 at same address:", deployments.bridge);
+  } else {
+    bridge = await upgrades.deployProxy(Bridge, [keyLogRegistryAddress], {
+      initializer: "initialize",
+      kind: "uups",
+    });
+    await bridge.waitForDeployment();
+    deployments.bridge = await bridge.getAddress();
+    console.log("Bridge:", deployments.bridge);
+  }
+  const bridgeAddress = deployments.bridge;
 
-  // Deploy WrappedToken ($WMOCK)
-  const WrappedTokenWMOCK = await ethers.getContractFactory("WrappedToken");
-  const wrappedTokenWMOCK = await WrappedTokenWMOCK.deploy("Wrapped Mock", "WYDA", bridgeAddress);
-  await wrappedTokenWMOCK.waitForDeployment();
-  const wrappedTokenWMOCKAddress = await wrappedTokenWMOCK.getAddress();
-  console.log("WrappedToken ($WYDA):", wrappedTokenWMOCKAddress);
+  // Deploy WrappedToken ($WYDA) - non-upgradeable for now
+  const WrappedToken = await ethers.getContractFactory("WrappedToken");
+  let wrappedTokenWMOCK;
+  if (deployments.wrappedTokenWMOCK) {
+    wrappedTokenWMOCK = await WrappedToken.attach(deployments.wrappedTokenWMOCK);
+    console.log("Using existing WrappedToken ($WYDA):", deployments.wrappedTokenWMOCK);
+  } else {
+    wrappedTokenWMOCK = await WrappedToken.deploy("Wrapped Mock", "WYDA", bridgeAddress);
+    await wrappedTokenWMOCK.waitForDeployment();
+    deployments.wrappedTokenWMOCK = await wrappedTokenWMOCK.getAddress();
+    console.log("WrappedToken ($WYDA):", deployments.wrappedTokenWMOCK);
+  }
+  const wrappedTokenWMOCKAddress = deployments.wrappedTokenWMOCK;
 
-  // Deploy WrappedToken ($YMOCK)
-  const WrappedTokenYMOCK = await ethers.getContractFactory("WrappedToken");
-  const wrappedTokenYMOCK = await WrappedTokenYMOCK.deploy("Yada PEPE", "YPEPE", bridgeAddress);
-  await wrappedTokenYMOCK.waitForDeployment();
-  const wrappedTokenYMOCKAddress = await wrappedTokenYMOCK.getAddress();
-  console.log("WrappedToken ($YPEPE):", wrappedTokenYMOCKAddress);
+  // Deploy WrappedToken ($YPEPE) - non-upgradeable for now
+  let wrappedTokenYMOCK;
+  if (deployments.wrappedTokenYMOCK) {
+    wrappedTokenYMOCK = await WrappedToken.attach(deployments.wrappedTokenYMOCK);
+    console.log("Using existing WrappedToken ($YPEPE):", deployments.wrappedTokenYMOCK);
+  } else {
+    wrappedTokenYMOCK = await WrappedToken.deploy("Yada PEPE", "YPEPE", bridgeAddress);
+    await wrappedTokenYMOCK.waitForDeployment();
+    deployments.wrappedTokenYMOCK = await wrappedTokenYMOCK.getAddress();
+    console.log("WrappedToken ($YPEPE):", deployments.wrappedTokenYMOCK);
+  }
+  const wrappedTokenYMOCKAddress = deployments.wrappedTokenYMOCK;
 
   // Deploy YadaERC20 ($YDA)
   const MockERC20 = await ethers.getContractFactory("MockERC20");
-  const yadaERC20 = await MockERC20.deploy("Yada cross-chain", "YDA", ethers.parseEther("1000"));
-  await yadaERC20.waitForDeployment();
-  const yadaERC20Address = await yadaERC20.getAddress();
-  console.log("Yada Cross-chain ($YDA):", yadaERC20Address);
+  let yadaERC20;
+  if (deployments.yadaERC20) {
+    yadaERC20 = await MockERC20.attach(deployments.yadaERC20);
+    console.log("Using existing Yada Cross-chain ($YDA):", deployments.yadaERC20);
+  } else {
+    yadaERC20 = await MockERC20.deploy("Yada cross-chain", "YDA", ethers.parseEther("1000"));
+    await yadaERC20.waitForDeployment();
+    deployments.yadaERC20 = await yadaERC20.getAddress();
+    console.log("Yada Cross-chain ($YDA):", deployments.yadaERC20);
+  }
+  const yadaERC20Address = deployments.yadaERC20;
 
-  const mockPepe = await MockERC20.deploy("Pepe", "PEPE", ethers.parseEther("1000"));
-  await mockPepe.waitForDeployment();
-  const mockPepeAddress = await mockPepe.getAddress();
-  console.log("Mock PEPE:", mockPepeAddress);
+  // Deploy Mock PEPE
+  let mockPepe;
+  if (deployments.pepeERC20_2) {
+    mockPepe = await MockERC20.attach(deployments.pepeERC20_2);
+    console.log("Using existing Mock PEPE:", deployments.pepeERC20_2);
+  } else {
+    mockPepe = await MockERC20.deploy("Pepe", "PEPE", ethers.parseEther("1000"));
+    await mockPepe.waitForDeployment();
+    deployments.pepeERC20_2 = await mockPepe.getAddress();
+    console.log("Mock PEPE:", deployments.pepeERC20_2);
+  }
+  const mockPepeAddress = deployments.pepeERC20_2;
 
-  // Deploy MockAggregatorV3 for PEPE
+  // Deploy Mock Price Feed
   const PriceFeedAggregatorV3 = await ethers.getContractFactory("PriceFeedAggregatorV3");
-  const priceFeed = await PriceFeedAggregatorV3.deploy(ethers.parseUnits("100000.0", 8)); // e.g., $0.0001 per PEPE, 8 decimals
-  await priceFeed.waitForDeployment();
-  const priceFeedAddress = await priceFeed.getAddress();
-  console.log("Price Feed (PEPE/USD):", priceFeedAddress);
-  await bridge.setTokenPriceFeed(mockPepeAddress, priceFeedAddress);
+  let priceFeed;
+  if (deployments.mockPriceFeed) {
+    priceFeed = await PriceFeedAggregatorV3.attach(deployments.mockPriceFeed);
+    console.log("Using existing Price Feed (PEPE/USD):", deployments.mockPriceFeed);
+  } else {
+    priceFeed = await PriceFeedAggregatorV3.deploy(ethers.parseUnits("100000.0", 8));
+    await priceFeed.waitForDeployment();
+    deployments.mockPriceFeed = await priceFeed.getAddress();
+    console.log("Price Feed (PEPE/USD):", deployments.mockPriceFeed);
+  }
+  const priceFeedAddress = deployments.mockPriceFeed;
 
-  // Configure contracts
-  await keyLogRegistry.setAuthorizedCaller(bridgeAddress);
-  console.log("Set KeyLogRegistry authorized caller to Bridge");
+  // Configure contracts (only if not already configured)
+  if (!deployments.configured) {
+    await keyLogRegistry.setAuthorizedCaller(bridgeAddress);
+    console.log("Set KeyLogRegistry authorized caller to Bridge");
 
-  await bridge.addTokenPair(yadaERC20Address, wrappedTokenWMOCKAddress, true);
-  console.log("Added token pair: $YDA -> $WYDA (cross-chain)");
-  await bridge.addTokenPair(mockPepeAddress, wrappedTokenYMOCKAddress, false);
-  console.log("Added token pair: $PEPE -> $YPEPE (on-chain)");
+    await bridge.addTokenPair(yadaERC20Address, wrappedTokenWMOCKAddress, true);
+    console.log("Added token pair: $YDA -> $WYDA (cross-chain)");
 
-  // Set price feed for PEPE
-  await bridge.setTokenPriceFeed(mockPepeAddress, priceFeedAddress);
-  console.log("Set price feed for $PEPE");
+    await bridge.addTokenPair(mockPepeAddress, wrappedTokenYMOCKAddress, false);
+    console.log("Added token pair: $PEPE -> $YPEPE (on-chain)");
+
+    await bridge.setTokenPriceFeed(mockPepeAddress, priceFeedAddress);
+    console.log("Set price feed for $PEPE");
+
+    deployments.configured = true;
+  }
 
   // Verify deployment
   const feeCollector = await bridge.feeCollector();
   console.log("FeeCollector:", feeCollector);
 
-  // Return addresses
-  const addresses = {
-    keyLogRegistry: keyLogRegistryAddress,
-    bridge: bridgeAddress,
-    wrappedTokenWMOCK: wrappedTokenWMOCKAddress,
-    wrappedTokenYMOCK: wrappedTokenYMOCKAddress,
-    yadaERC20: yadaERC20Address,
-    pepeERC20_2: mockPepeAddress,
-    mockPriceFeed: priceFeedAddress,
-  };
+  // Save deployments
+  fs.writeFileSync(deploymentsFile, JSON.stringify(deployments, null, 2));
 
+  // Output for React
   console.log("\nCopy these into your React component:");
   console.log(`const BRIDGE_ADDRESS = "${bridgeAddress}";`);
   console.log(`const KEYLOG_REGISTRY_ADDRESS = "${keyLogRegistryAddress}";`);
@@ -93,7 +147,7 @@ async function main() {
   console.log(`const MOCK_ERC20_ADDRESS = "${yadaERC20Address}"; // $YDA`);
   console.log(`const MOCK2_ERC20_ADDRESS = "${mockPepeAddress}"; // $PEPE`);
 
-  return addresses;
+  return deployments;
 }
 
 main()
