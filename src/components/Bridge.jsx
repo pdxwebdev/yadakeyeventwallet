@@ -19,26 +19,22 @@ import KeyLogRegistryArtifact from "../utils/abis/KeyLogRegistry.json";
 import WrappedTokenArtifact from "../utils/abis/WrappedToken.json";
 import MockERC20Artifact from "../utils/abis/MockERC20.json";
 import { createHDWallet, deriveSecurePath } from "../utils/hdWallet";
+import { getKeyState } from "../shared/keystate";
+import {
+  BRIDGE_ADDRESS,
+  HARDHAT_MNEMONIC,
+  KEYLOG_REGISTRY_ADDRESS,
+  localProvider,
+  MOCK2_ERC20_ADDRESS,
+  MOCK_ERC20_ADDRESS,
+  WRAPPED_TOKEN_ADDRESS,
+  Y_WRAPPED_TOKEN_ADDRESS,
+} from "../shared/constants";
 
 const BRIDGE_ABI = BridgeArtifact.abi;
 const KEYLOG_REGISTRY_ABI = KeyLogRegistryArtifact.abi;
 const WRAPPED_TOKEN_ABI = WrappedTokenArtifact.abi;
 const ERC20_ABI = MockERC20Artifact.abi;
-
-const BRIDGE_ADDRESS = "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0";
-const KEYLOG_REGISTRY_ADDRESS = "0x5FbDB2315678afecb367f032d93F642f64180aa3";
-const WRAPPED_TOKEN_ADDRESS = "0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9"; // $WYDA
-const Y_WRAPPED_TOKEN_ADDRESS = "0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9"; // $YPEPE
-const MOCK_ERC20_ADDRESS = "0x5FC8d32690cc91D4c39d9d3abcBD16989F875707"; // $YDA
-const MOCK2_ERC20_ADDRESS = "0x0165878A594ca255338adfa4d48449f69242Eb8F"; // $PEPE
-
-const HARDHAT_MNEMONIC =
-  "test test test test test test test test test test test junk";
-
-const localProvider = new ethers.JsonRpcProvider("http://127.0.0.1:8545/", {
-  chainId: 31337,
-  name: "hardhat",
-});
 
 function Bridge() {
   const [status, setStatus] = useState("");
@@ -46,75 +42,99 @@ function Bridge() {
   const [kdp, setKdp] = useState("defaultPassword");
   const [log, setLog] = useState([]);
 
-  const deriveNextKey = async (baseKey) => {
-    const derivedKey = await deriveSecurePath(baseKey, kdp);
-    const signer = new ethers.Wallet(
-      ethers.hexlify(derivedKey.privateKey),
-      localProvider
-    );
-    return { key: derivedKey, signer };
+  // Helper to print balances
+  const printBalances = async (signer, tokenAddresses) => {
+    for (const tokenAddress of tokenAddresses) {
+      const token = new ethers.Contract(tokenAddress, ERC20_ABI, signer);
+      const balance = await token.balanceOf(signer.address);
+      const name = await token.name();
+      console.log(
+        `${name} Balance of ${signer.address}:`,
+        ethers.formatEther(balance)
+      );
+    }
   };
 
-  const getKeyState = async (baseKey, log) => {
-    console.log("Current Index:", log.length);
-    let currentKey = {
-      key: baseKey,
-      signer: new ethers.Wallet(
-        ethers.hexlify(baseKey.privateKey),
-        localProvider
-      ),
+  // Helper to generate permit for a token
+  const generatePermit = async (tokenAddress, signer, amount) => {
+    const token = new ethers.Contract(tokenAddress, WRAPPED_TOKEN_ABI, signer);
+    const domain = {
+      name: await token.name(),
+      version: "1",
+      chainId: 31337, // Hardhat chain ID
+      verifyingContract: tokenAddress,
     };
-    let prevDerivedKey = null;
+    const types = {
+      Permit: [
+        { name: "owner", type: "address" },
+        { name: "spender", type: "address" },
+        { name: "value", type: "uint256" },
+        { name: "nonce", type: "uint256" },
+        { name: "deadline", type: "uint256" },
+      ],
+    };
+    const permitNonce = await token.nonces(signer.address);
+    const permitDeadline = Math.floor(Date.now() / 1000) + 60 * 60; // 1 hour from now
+    const message = {
+      owner: signer.address,
+      spender: BRIDGE_ADDRESS,
+      value: amount.toString(),
+      nonce: permitNonce.toString(),
+      deadline: permitDeadline,
+    };
+    const signature = await signer.signTypedData(domain, types, message);
+    const { v, r, s } = ethers.Signature.from(signature);
+    return {
+      token: tokenAddress,
+      amount,
+      deadline: permitDeadline,
+      v,
+      r,
+      s,
+    };
+  };
 
-    if (log.length > 0) {
-      const lastLog = log[log.length - 1];
-      while (currentKey.signer.address !== lastLog.prerotatedKeyHash) {
-        prevDerivedKey = currentKey;
-        currentKey = await deriveNextKey(currentKey.key);
+  // Helper to fetch supported tokens and their balances
+  const getUserTokensAndPermits = async (signer, bridge) => {
+    const supportedOriginalTokens = await bridge.getSupportedTokens();
+    const permits = [];
+
+    for (const origToken of supportedOriginalTokens) {
+      // Check original token balance
+      const origTokenContract = new ethers.Contract(
+        origToken,
+        ERC20_ABI,
+        signer
+      );
+      const origBalance = await origTokenContract.balanceOf(signer.address);
+      if (origBalance > 0) {
+        const permit = await generatePermit(origToken, signer, origBalance);
+        permits.push(permit);
       }
-    } else {
-      prevDerivedKey = currentKey;
-      currentKey = await deriveNextKey(currentKey.key);
+
+      // Check wrapped token balance
+      const wrappedToken = await bridge.originalToWrapped(origToken);
+      if (wrappedToken !== ethers.ZeroAddress) {
+        const wrappedTokenContract = new ethers.Contract(
+          wrappedToken,
+          WRAPPED_TOKEN_ABI,
+          signer
+        );
+        const wrappedBalance = await wrappedTokenContract.balanceOf(
+          signer.address
+        );
+        if (wrappedBalance > 0) {
+          const permit = await generatePermit(
+            wrappedToken,
+            signer,
+            wrappedBalance
+          );
+          permits.push(permit);
+        }
+      }
     }
 
-    const currentDerivedKey = currentKey;
-    const nextDerivedKey = await deriveNextKey(currentDerivedKey.key);
-    const nextNextDerivedKey = await deriveNextKey(nextDerivedKey.key);
-    console.log({
-      prevDerivedKey: prevDerivedKey.signer.address,
-      currentDerivedKey: currentDerivedKey.signer.address,
-      nextDerivedKey: nextDerivedKey.signer.address,
-      nextNextDerivedKey: nextNextDerivedKey.signer.address,
-    });
-    return {
-      prevDerivedKey,
-      currentDerivedKey,
-      nextDerivedKey,
-      nextNextDerivedKey,
-    };
-  };
-
-  const printBalances = async (isCrossChain, signer) => {
-    const originalToken = new ethers.Contract(
-      isCrossChain ? MOCK_ERC20_ADDRESS : MOCK2_ERC20_ADDRESS,
-      ERC20_ABI,
-      signer
-    );
-    const wrappedToken = new ethers.Contract(
-      isCrossChain ? WRAPPED_TOKEN_ADDRESS : Y_WRAPPED_TOKEN_ADDRESS,
-      WRAPPED_TOKEN_ABI,
-      signer
-    );
-    const wrappedBalance = await wrappedToken.balanceOf(signer.address);
-    console.log(
-      (isCrossChain ? "WYDA" : "YPEPE") + ` Balance of ${signer.address}:`,
-      ethers.formatEther(wrappedBalance)
-    );
-    const originalBalance = await originalToken.balanceOf(signer.address);
-    console.log(
-      (isCrossChain ? "YDA" : "PEPE") + ` Balance of ${signer.address}:`,
-      ethers.formatEther(originalBalance)
-    );
+    return permits;
   };
 
   useEffect(() => {
@@ -135,7 +155,7 @@ function Bridge() {
           initialKey.uncompressedPublicKey.slice(1)
         );
         setLog(() => log);
-        const keyState = await getKeyState(hdWallet, log);
+        const keyState = await getKeyState(hdWallet, log, kdp);
 
         if (log.length === 0) {
           let walletNonce = await localProvider.getTransactionCount(
@@ -158,7 +178,9 @@ function Bridge() {
           const mockApprovalTx = await mockERC20.approve(
             BRIDGE_ADDRESS,
             largeApprovalAmount,
-            { nonce: walletNonce }
+            {
+              nonce: walletNonce,
+            }
           );
           await mockApprovalTx.wait();
           walletNonce++;
@@ -166,7 +188,9 @@ function Bridge() {
           const mock2ApprovalTx = await mock2ERC20.approve(
             BRIDGE_ADDRESS,
             largeApprovalAmount,
-            { nonce: walletNonce }
+            {
+              nonce: walletNonce,
+            }
           );
           await mock2ApprovalTx.wait();
           walletNonce++;
@@ -188,7 +212,9 @@ function Bridge() {
 
           const authTx = await keyLogRegistry.setAuthorizedCaller(
             BRIDGE_ADDRESS,
-            { nonce: walletNonce }
+            {
+              nonce: walletNonce,
+            }
           );
           await authTx.wait();
           walletNonce++;
@@ -198,7 +224,7 @@ function Bridge() {
             keyState.currentDerivedKey.signer.address,
             keyState.nextDerivedKey.signer.address,
             keyState.nextNextDerivedKey.signer.address,
-            "0x0000000000000000000000000000000000000000",
+            ethers.ZeroAddress,
             keyState.nextDerivedKey.signer.address,
             false,
             { nonce: walletNonce }
@@ -226,7 +252,7 @@ function Bridge() {
   const wrap = async (isCrossChain = false) => {
     const hdWallet = createHDWallet(HARDHAT_MNEMONIC);
     const initialKey = await deriveSecurePath(hdWallet, kdp);
-    const keyState = await getKeyState(hdWallet, log);
+    const keyState = await getKeyState(hdWallet, log, kdp);
 
     try {
       const bridge = new ethers.Contract(
@@ -237,36 +263,21 @@ function Bridge() {
       const originalTokenAddress = isCrossChain
         ? MOCK_ERC20_ADDRESS
         : MOCK2_ERC20_ADDRESS;
-
       const originalToken = new ethers.Contract(
         originalTokenAddress,
         ERC20_ABI,
         keyState.currentDerivedKey.signer
       );
-      const wrapbalance = await originalToken.balanceOf(
-        keyState.currentDerivedKey.signer.address
-      );
-      console.log(
-        (isCrossChain ? "YDA" : "PEPE") +
-          ` Balance of ${keyState.currentDerivedKey.signer.address}:`,
-        ethers.formatEther(wrapbalance)
-      );
-      const hardhatWallet =
-        ethers.Wallet.fromPhrase(HARDHAT_MNEMONIC).connect(localProvider);
-
       const amountToWrap = ethers.parseEther("1");
       const nonce = await localProvider.getTransactionCount(
         keyState.currentDerivedKey.signer.address,
         "latest"
       );
-
-      keyState.nextNextNextDerivedKey = await deriveNextKey(
-        keyState.nextNextDerivedKey.key
-      );
       const bridgeNonce = await bridge.nonces(
         keyState.currentDerivedKey.signer.address
       );
 
+      // Generate signatures for unconfirmed and confirming
       const unconfirmedMessage = ethers.solidityPacked(
         ["address", "uint256", "address", "uint256"],
         [
@@ -296,103 +307,12 @@ function Bridge() {
         await keyState.nextDerivedKey.signer.signMessage(
           ethers.getBytes(confirmingMessageHash)
         );
-      const wrappedTokenAddress = isCrossChain
-        ? WRAPPED_TOKEN_ADDRESS
-        : Y_WRAPPED_TOKEN_ADDRESS;
 
-      const wrappedToken = new ethers.Contract(
-        isCrossChain ? WRAPPED_TOKEN_ADDRESS : Y_WRAPPED_TOKEN_ADDRESS,
-        WRAPPED_TOKEN_ABI,
-        localProvider
+      // Generate permits for all owned tokens
+      const permits = await getUserTokensAndPermits(
+        keyState.currentDerivedKey.signer,
+        bridge
       );
-
-      // Generate permit signature
-      const callerWrappedBalance = await wrappedToken.balanceOf(
-        keyState.currentDerivedKey.signer.address
-      );
-      let permitV, permitR, permitS, permitDeadline;
-      if (callerWrappedBalance > 0) {
-        const domain = {
-          name: await wrappedToken.name(),
-          version: "1",
-          chainId: 31337, // Hardhat chain ID
-          verifyingContract: wrappedTokenAddress,
-        };
-        const types = {
-          Permit: [
-            { name: "owner", type: "address" },
-            { name: "spender", type: "address" },
-            { name: "value", type: "uint256" },
-            { name: "nonce", type: "uint256" },
-            { name: "deadline", type: "uint256" },
-          ],
-        };
-        const permitNonce = await wrappedToken.nonces(
-          keyState.currentDerivedKey.signer.address
-        );
-        permitDeadline = Math.floor(Date.now() / 1000) + 60 * 60; // 1 hour from now
-        const message = {
-          owner: keyState.currentDerivedKey.signer.address,
-          spender: BRIDGE_ADDRESS,
-          value: callerWrappedBalance.toString(),
-          nonce: permitNonce.toString(),
-          deadline: permitDeadline,
-        };
-        const signature = await keyState.currentDerivedKey.signer.signTypedData(
-          domain,
-          types,
-          message
-        );
-        const { v, r, s } = ethers.Signature.from(signature);
-        permitV = v;
-        permitR = r;
-        permitS = s;
-      }
-      // Permit for $PEPE
-      const callerOriginalBalance = await originalToken.balanceOf(
-        keyState.currentDerivedKey.signer.address
-      );
-      let permitVOriginal,
-        permitROriginal,
-        permitSOriginal,
-        permitDeadlineOriginal;
-      if (callerOriginalBalance > 0) {
-        const domain = {
-          name: await originalToken.name(),
-          version: "1",
-          chainId: 31337,
-          verifyingContract: originalTokenAddress,
-        };
-        const types = {
-          Permit: [
-            { name: "owner", type: "address" },
-            { name: "spender", type: "address" },
-            { name: "value", type: "uint256" },
-            { name: "nonce", type: "uint256" },
-            { name: "deadline", type: "uint256" },
-          ],
-        };
-        const permitNonce = await originalToken.nonces(
-          keyState.currentDerivedKey.signer.address
-        );
-        permitDeadlineOriginal = Math.floor(Date.now() / 1000) + 60 * 60;
-        const message = {
-          owner: keyState.currentDerivedKey.signer.address,
-          spender: BRIDGE_ADDRESS,
-          value: callerOriginalBalance.toString(),
-          nonce: permitNonce.toString(),
-          deadline: permitDeadlineOriginal,
-        };
-        const signature = await keyState.currentDerivedKey.signer.signTypedData(
-          domain,
-          types,
-          message
-        );
-        const { v, r, s } = ethers.Signature.from(signature);
-        permitVOriginal = v;
-        permitROriginal = r;
-        permitSOriginal = s;
-      }
 
       // Transaction parameters
       const txParams = [
@@ -409,15 +329,17 @@ function Bridge() {
             : ethers.ZeroAddress,
           outputAddress: keyState.nextDerivedKey.signer.address,
           hasRelationship: true,
-          tokenSource: hardhatWallet.address,
-          permitDeadline: permitDeadline || 0,
-          permitV: permitV || 0,
-          permitR: permitR || ethers.ZeroHash,
-          permitS: permitS || ethers.ZeroHash,
-          permitDeadlineOriginal: permitDeadlineOriginal || 0,
-          permitVOriginal: permitVOriginal || 0,
-          permitROriginal: permitROriginal || ethers.ZeroHash,
-          permitSOriginal: permitSOriginal || ethers.ZeroHash,
+          tokenSource:
+            ethers.Wallet.fromPhrase(HARDHAT_MNEMONIC).connect(localProvider)
+              .address,
+          permits: permits.map((p) => ({
+            token: p.token,
+            amount: p.amount,
+            deadline: p.deadline,
+            v: p.v,
+            r: p.r,
+            s: p.s,
+          })),
         },
         {
           amount: ethers.parseEther("0"),
@@ -429,57 +351,36 @@ function Bridge() {
           prevPublicKeyHash: keyState.currentDerivedKey.signer.address,
           outputAddress: keyState.nextNextDerivedKey.signer.address,
           hasRelationship: false,
-          tokenSource: hardhatWallet.address,
-          permitDeadline: 0, // Not used in confirming
-          permitV: 0,
-          permitR: ethers.ZeroHash,
-          permitS: ethers.ZeroHash,
-          permitDeadlineOriginal: 0,
-          permitVOriginal: 0,
-          permitROriginal: ethers.ZeroHash,
-          permitSOriginal: ethers.ZeroHash,
+          tokenSource:
+            ethers.Wallet.fromPhrase(HARDHAT_MNEMONIC).connect(localProvider)
+              .address,
+          permits: [], // Confirming doesn't need permits
         },
       ];
 
-      // Get balance and fee data
+      // Estimate gas and calculate ETH to send
       const balance = await localProvider.getBalance(
         keyState.currentDerivedKey.signer.address
       );
       const feeData = await localProvider.getFeeData();
       const gasPrice = feeData.gasPrice;
-
-      // Estimate gas conservatively
       const gasEstimate = await bridge.wrapPairWithTransfer.estimateGas(
         ...txParams,
-        { value: 0n } // Baseline without ETH
+        { value: 0n }
       );
       let gasCost = gasEstimate * gasPrice;
-      console.log("Initial Gas Estimate:", gasEstimate.toString());
-      console.log("Gas Price:", ethers.formatEther(gasPrice));
-      console.log("Initial Gas Cost:", ethers.formatEther(gasCost));
-      console.log("Balance:", ethers.formatEther(balance));
-
-      // Re-estimate with ETH transfer, using a safe initial value
-      const safeInitialValue = balance / 2n; // Start with half the balance
+      const safeInitialValue = balance / 2n;
       const gasEstimateWithEth = await bridge.wrapPairWithTransfer.estimateGas(
         ...txParams,
-        { value: safeInitialValue }
+        {
+          value: safeInitialValue,
+        }
       );
       gasCost = gasEstimateWithEth * gasPrice;
-      console.log("Gas Estimate with ETH:", gasEstimateWithEth.toString());
-      console.log("Base Gas Cost:", ethers.formatEther(gasCost));
-
-      // Apply a larger buffer based on observed max upfront cost
-      const observedGasCost = ethers.parseEther("0.0012"); // ~0.001159 ETH from error + margin
+      const observedGasCost = ethers.parseEther("0.0012");
       const totalGasCost =
-        gasCost > observedGasCost ? gasCost * 2n : observedGasCost * 2n; // Double for safety
+        gasCost > observedGasCost ? gasCost * 2n : observedGasCost * 2n;
       const amountToSend = balance - totalGasCost;
-
-      console.log(
-        "Total Gas Cost (with buffer):",
-        ethers.formatEther(totalGasCost)
-      );
-      console.log("Amount to Send:", ethers.formatEther(amountToSend));
 
       if (amountToSend <= 0n) {
         throw new Error(
@@ -489,20 +390,32 @@ function Bridge() {
         );
       }
 
-      printBalances(isCrossChain, keyState.currentDerivedKey.signer);
-      printBalances(isCrossChain, keyState.nextNextDerivedKey.signer);
-      // Execute the transaction
+      // Print balances before
+      const allTokens = (await bridge.getSupportedTokens()).concat([
+        WRAPPED_TOKEN_ADDRESS,
+        Y_WRAPPED_TOKEN_ADDRESS,
+      ]);
+      await printBalances(keyState.currentDerivedKey.signer, allTokens);
+      await printBalances(keyState.nextNextDerivedKey.signer, allTokens);
+
+      // Execute transaction
       const tx = await bridge.wrapPairWithTransfer(...txParams, {
         nonce,
         value: amountToSend,
-        gasLimit: (gasEstimateWithEth * 150n) / 100n, // 50% buffer
+        gasLimit: (gasEstimateWithEth * 150n) / 100n,
         gasPrice,
       });
 
       await localProvider.send("evm_mine", []);
       await tx.wait();
 
-      const filter = wrappedToken.filters.Transfer(null, null); // Mint events are Transfer from 0x0
+      // Log events
+      const wrappedToken = new ethers.Contract(
+        isCrossChain ? WRAPPED_TOKEN_ADDRESS : Y_WRAPPED_TOKEN_ADDRESS,
+        WRAPPED_TOKEN_ABI,
+        localProvider
+      );
+      const filter = wrappedToken.filters.Transfer(null, null);
       const events = await wrappedToken.queryFilter(
         filter,
         tx.blockNumber - 1,
@@ -511,10 +424,13 @@ function Bridge() {
       events.forEach((event) =>
         console.log((isCrossChain ? "YDA" : "PEPE") + " Transfer:", event.args)
       );
-      printBalances(isCrossChain, keyState.currentDerivedKey.signer);
-      printBalances(isCrossChain, keyState.nextNextDerivedKey.signer);
+
+      // Print balances after
+      await printBalances(keyState.currentDerivedKey.signer, allTokens);
+      await printBalances(keyState.nextNextDerivedKey.signer, allTokens);
+
       setStatus(
-        `Wrapped 10 $${
+        `Wrapped ${ethers.formatEther(amountToWrap)} $${
           isCrossChain ? "YDA" : "PEPE"
         } and transferred ${ethers.formatEther(amountToSend)} ETH to ${
           keyState.nextNextDerivedKey.signer.address
@@ -540,7 +456,7 @@ function Bridge() {
 
   const unwrap = async (isCrossChain = false) => {
     const hdWallet = createHDWallet(HARDHAT_MNEMONIC);
-    const keyState = await getKeyState(hdWallet, log);
+    const keyState = await getKeyState(hdWallet, log, kdp);
 
     try {
       const bridge = new ethers.Contract(
@@ -551,126 +467,23 @@ function Bridge() {
       const wrappedTokenAddress = isCrossChain
         ? WRAPPED_TOKEN_ADDRESS
         : Y_WRAPPED_TOKEN_ADDRESS;
-
-      keyState.nextNextNextDerivedKey = await deriveNextKey(
-        keyState.nextNextDerivedKey.key
-      );
-
       const wrappedToken = new ethers.Contract(
         wrappedTokenAddress,
         WRAPPED_TOKEN_ABI,
         localProvider
       );
-
       const nonce = await localProvider.getTransactionCount(
         keyState.currentDerivedKey.signer.address,
         "latest"
       );
-
       const bridgeNonce = await bridge.nonces(
         keyState.currentDerivedKey.signer.address
       );
-
       const wrappedBalance = await wrappedToken.balanceOf(
         keyState.currentDerivedKey.signer.address
-      ); // Use current key’s balance
-      const totalAmount = wrappedBalance; // Example: burn all, adjust as needed
-
-      // Generate permit signature for remaining balance
-      let permitV, permitR, permitS, permitDeadline;
-      if (wrappedBalance > totalAmount) {
-        const remainingBalance = wrappedBalance - totalAmount;
-        const domain = {
-          name: await wrappedToken.name(),
-          version: "1",
-          chainId: 31337, // Hardhat chain ID
-          verifyingContract: wrappedTokenAddress,
-        };
-        const types = {
-          Permit: [
-            { name: "owner", type: "address" },
-            { name: "spender", type: "address" },
-            { name: "value", type: "uint256" },
-            { name: "nonce", type: "uint256" },
-            { name: "deadline", type: "uint256" },
-          ],
-        };
-        const permitNonce = await wrappedToken.nonces(
-          keyState.currentDerivedKey.signer.address
-        );
-        permitDeadline = Math.floor(Date.now() / 1000) + 60 * 60; // 1 hour from now
-        const message = {
-          owner: keyState.currentDerivedKey.signer.address,
-          spender: BRIDGE_ADDRESS,
-          value: remainingBalance.toString(),
-          nonce: permitNonce.toString(),
-          deadline: permitDeadline,
-        };
-        const signature = await keyState.currentDerivedKey.signer.signTypedData(
-          domain,
-          types,
-          message
-        );
-        const { v, r, s } = ethers.Signature.from(signature);
-        permitV = v;
-        permitR = r;
-        permitS = s;
-      }
-
-      const originalTokenAddress = isCrossChain
-        ? MOCK_ERC20_ADDRESS
-        : MOCK2_ERC20_ADDRESS;
-
-      const originalToken = new ethers.Contract(
-        originalTokenAddress,
-        ERC20_ABI,
-        keyState.currentDerivedKey.signer
       );
-      // Permit for $PEPE
-      const callerOriginalBalance = await originalToken.balanceOf(
-        keyState.currentDerivedKey.signer.address
-      );
-      let permitVOriginal,
-        permitROriginal,
-        permitSOriginal,
-        permitDeadlineOriginal;
-      if (callerOriginalBalance > 0) {
-        const domain = {
-          name: await originalToken.name(),
-          version: "1",
-          chainId: 31337,
-          verifyingContract: originalTokenAddress,
-        };
-        const types = {
-          Permit: [
-            { name: "owner", type: "address" },
-            { name: "spender", type: "address" },
-            { name: "value", type: "uint256" },
-            { name: "nonce", type: "uint256" },
-            { name: "deadline", type: "uint256" },
-          ],
-        };
-        const permitNonce = await originalToken.nonces(
-          keyState.currentDerivedKey.signer.address
-        );
-        permitDeadlineOriginal = Math.floor(Date.now() / 1000) + 60 * 60;
-        const message = {
-          owner: keyState.currentDerivedKey.signer.address,
-          spender: BRIDGE_ADDRESS,
-          value: callerOriginalBalance.toString(),
-          nonce: permitNonce.toString(),
-          deadline: permitDeadlineOriginal,
-        };
-        const signature = await keyState.currentDerivedKey.signer.signTypedData(
-          domain,
-          types,
-          message
-        );
-        const { v, r, s } = ethers.Signature.from(signature);
-        permitVOriginal = v;
-        permitROriginal = r;
-        permitSOriginal = s;
-      }
+
+      // Generate signatures
       const unconfirmedMessage = ethers.solidityPacked(
         ["address", "uint256", "address", "uint256"],
         [
@@ -701,6 +514,12 @@ function Bridge() {
           ethers.getBytes(confirmingMessageHash)
         );
 
+      // Generate permits for all owned tokens
+      const permits = await getUserTokensAndPermits(
+        keyState.currentDerivedKey.signer,
+        bridge
+      );
+
       // Transaction parameters
       const txParams = [
         wrappedTokenAddress,
@@ -716,14 +535,14 @@ function Bridge() {
             : ethers.ZeroAddress,
           targetAddress: keyState.nextDerivedKey.signer.address,
           hasRelationship: true,
-          permitDeadline: permitDeadline || 0,
-          permitV: permitV || 0,
-          permitR: permitR || ethers.ZeroHash,
-          permitS: permitS || ethers.ZeroHash,
-          permitDeadlineOriginal: permitDeadlineOriginal || 0,
-          permitVOriginal: permitVOriginal || 0,
-          permitROriginal: permitROriginal || ethers.ZeroHash,
-          permitSOriginal: permitSOriginal || ethers.ZeroHash,
+          permits: permits.map((p) => ({
+            token: p.token,
+            amount: p.amount,
+            deadline: p.deadline,
+            v: p.v,
+            r: p.r,
+            s: p.s,
+          })),
         },
         {
           amount: ethers.parseEther("0"),
@@ -735,56 +554,31 @@ function Bridge() {
           prevPublicKeyHash: keyState.currentDerivedKey.signer.address,
           targetAddress: keyState.nextNextDerivedKey.signer.address,
           hasRelationship: false,
-          permitDeadline: 0, // Not used in confirming
-          permitV: 0,
-          permitR: ethers.ZeroHash,
-          permitS: ethers.ZeroHash,
-          permitDeadlineOriginal: 0,
-          permitVOriginal: 0,
-          permitROriginal: ethers.ZeroHash,
-          permitSOriginal: ethers.ZeroHash,
+          permits: [],
         },
       ];
 
-      // Get balance and fee data
+      // Estimate gas and calculate ETH to send
       const balance = await localProvider.getBalance(
         keyState.currentDerivedKey.signer.address
       );
       const feeData = await localProvider.getFeeData();
       const gasPrice = feeData.gasPrice;
-
-      // Estimate gas conservatively
       const gasEstimate = await bridge.unwrapPairWithTransfer.estimateGas(
         ...txParams,
-        { value: 0n } // Baseline without ETH
+        { value: 0n }
       );
       let gasCost = gasEstimate * gasPrice;
-      console.log("Initial Gas Estimate:", gasEstimate.toString());
-      console.log("Gas Price:", ethers.formatEther(gasPrice));
-      console.log("Initial Gas Cost:", ethers.formatEther(gasCost));
-      console.log("Balance:", ethers.formatEther(balance));
-
-      // Re-estimate with ETH transfer
-      const safeInitialValue = balance / 2n; // Start with half the balance
+      const safeInitialValue = balance / 2n;
       const gasEstimateWithEth =
         await bridge.unwrapPairWithTransfer.estimateGas(...txParams, {
           value: safeInitialValue,
         });
       gasCost = gasEstimateWithEth * gasPrice;
-      console.log("Gas Estimate with ETH:", gasEstimateWithEth.toString());
-      console.log("Base Gas Cost:", ethers.formatEther(gasCost));
-
-      // Apply a larger buffer based on observed max upfront cost
-      const observedGasCost = ethers.parseEther("0.0012"); // From wrap error + margin
+      const observedGasCost = ethers.parseEther("0.0012");
       const totalGasCost =
-        gasCost > observedGasCost ? gasCost * 2n : observedGasCost * 2n; // Double for safety
+        gasCost > observedGasCost ? gasCost * 2n : observedGasCost * 2n;
       const amountToSend = balance - totalGasCost;
-
-      console.log(
-        "Total Gas Cost (with buffer):",
-        ethers.formatEther(totalGasCost)
-      );
-      console.log("Amount to Send:", ethers.formatEther(amountToSend));
 
       if (amountToSend <= 0n) {
         throw new Error(
@@ -793,21 +587,28 @@ function Bridge() {
           )} ETH, Total Gas Cost: ${ethers.formatEther(totalGasCost)} ETH`
         );
       }
-      printBalances(isCrossChain, keyState.currentDerivedKey.signer);
-      printBalances(isCrossChain, keyState.nextNextDerivedKey.signer);
 
-      // Execute the transaction
+      // Print balances before
+      const allTokens = (await bridge.getSupportedTokens()).concat([
+        WRAPPED_TOKEN_ADDRESS,
+        Y_WRAPPED_TOKEN_ADDRESS,
+      ]);
+      await printBalances(keyState.currentDerivedKey.signer, allTokens);
+      await printBalances(keyState.nextNextDerivedKey.signer, allTokens);
+
+      // Execute transaction
       const tx = await bridge.unwrapPairWithTransfer(...txParams, {
         nonce,
         value: amountToSend,
-        gasLimit: (gasEstimateWithEth * 150n) / 100n, // 50% buffer
+        gasLimit: (gasEstimateWithEth * 150n) / 100n,
         gasPrice,
       });
 
       await localProvider.send("evm_mine", []);
       await tx.wait();
 
-      const filter = wrappedToken.filters.Transfer(null, null); // Mint events are Transfer from 0x0
+      // Log events
+      const filter = wrappedToken.filters.Transfer(null, null);
       const events = await wrappedToken.queryFilter(
         filter,
         tx.blockNumber - 1,
@@ -819,8 +620,18 @@ function Bridge() {
           event.args
         )
       );
-      printBalances(isCrossChain, keyState.currentDerivedKey.signer);
-      printBalances(isCrossChain, keyState.nextNextDerivedKey.signer);
+
+      // Print balances after
+      await printBalances(keyState.currentDerivedKey.signer, allTokens);
+      await printBalances(keyState.nextNextDerivedKey.signer, allTokens);
+
+      setStatus(
+        `Unwrapped ${ethers.formatEther(wrappedBalance)} $${
+          isCrossChain ? "WYDA" : "YPEPE"
+        } and transferred ${ethers.formatEther(amountToSend)} ETH to ${
+          keyState.nextNextDerivedKey.signer.address
+        }`
+      );
 
       const wallet =
         ethers.Wallet.fromPhrase(HARDHAT_MNEMONIC).connect(localProvider);
@@ -845,16 +656,16 @@ function Bridge() {
       <p>{status}</p>
       <p>Fee Collector: {feeCollector}</p>
       <button onClick={() => wrap(false)} disabled={log.length === 0}>
-        Wrap 10 $MOCK (On-Chain)
+        Wrap 10 $PEPE (On-Chain)
       </button>
       <button onClick={() => unwrap(false)} disabled={log.length === 0}>
-        Unwrap 5 $YMOCK (On-Chain)
+        Unwrap 5 $YPEPE (On-Chain)
       </button>
       <button onClick={() => wrap(true)} disabled={log.length === 0}>
-        Wrap 10 $MOCK (Cross-Chain)
+        Wrap 10 $YDA (Cross-Chain)
       </button>
       <button onClick={() => unwrap(true)} disabled={log.length === 0}>
-        Unwrap 5 $WMOCK (Cross-Chain)
+        Unwrap 5 $WYDA (Cross-Chain)
       </button>
     </div>
   );

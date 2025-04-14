@@ -1,5 +1,5 @@
 /*
-YadaCoin Open Source License (YOSL) v1.1
+SPDX-License-Identifier: YadaCoin Open Source License (YOSL) v1.1
 
 Copyright (c) 2017-2025 Matthew Vogel, Reynold Vogel, Inc.
 
@@ -10,7 +10,7 @@ For commercial license inquiries, contact: info@yadacoin.io
 
 Full license terms: see LICENSE.txt in this repository.
 */
-// SPDX-License-Identifier: MIT
+
 pragma solidity ^0.8.0;
 
 import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
@@ -29,6 +29,19 @@ interface IERC20WithDecimals is IERC20 {
     function decimals() external view returns (uint8);
 }
 
+// Interface for ERC-2612 permit
+interface IERC20Permit2 {
+    function permit(
+        address owner,
+        address spender,
+        uint256 value,
+        uint256 deadline,
+        uint8 v,
+        bytes32 r,
+        bytes32 s
+    ) external;
+}
+
 contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, ReentrancyGuardUpgradeable {
     using ECDSA for bytes32;
     using MessageHashUtils for bytes32;
@@ -40,13 +53,14 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
     mapping(address => address) public wrappedToOriginal;
     mapping(address => bool) public isCrossChain;
     mapping(address => uint256) public nonces;
+    address[] public supportedOriginalTokens; // Track supported tokens
 
     address public feeCollector;
     uint256 public feePercentage;
     uint256 public constant FEE_DENOMINATOR = 10000;
     uint256 public constant FEE_CAP_USD = 1000 * 10**18; // 1000 USD with 18 decimals
     mapping(bytes32 => bool) public processedLocks;
-    mapping(address => AggregatorV3Interface) public tokenPriceFeeds; // Token address => Chainlink price feed
+    mapping(address => AggregatorV3Interface) public tokenPriceFeeds;
 
     event TokensWrapped(address indexed user, address wrappedToken, uint256 amount);
     event UnwrapCrossChain(address indexed originalToken, address targetAddress, uint256 amount, address indexed user);
@@ -54,6 +68,15 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
     event FeesCollected(address indexed token, uint256 amount);
     event TokensMinted(address indexed wrappedToken, address indexed user, uint256 amount);
     event EthTransferred(address indexed from, address indexed to, uint256 amount);
+
+    struct PermitData {
+        address token;
+        uint256 amount;
+        uint256 deadline;
+        uint8 v;
+        bytes32 r;
+        bytes32 s;
+    }
 
     struct WrapParams {
         uint256 amount;
@@ -65,14 +88,7 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
         address outputAddress;
         bool hasRelationship;
         address tokenSource;
-        uint256 permitDeadline;
-        uint8 permitV;
-        bytes32 permitR;
-        bytes32 permitS;
-        uint256 permitDeadlineOriginal;
-        uint8 permitVOriginal;
-        bytes32 permitROriginal;
-        bytes32 permitSOriginal;
+        PermitData[] permits; // Array of permits for multiple tokens
     }
 
     struct UnwrapParams {
@@ -84,14 +100,7 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
         address prevPublicKeyHash;
         address targetAddress;
         bool hasRelationship;
-        uint256 permitDeadline;
-        uint8 permitV;
-        bytes32 permitR;
-        bytes32 permitS;
-        uint256 permitDeadlineOriginal;
-        uint8 permitVOriginal;
-        bytes32 permitROriginal;
-        bytes32 permitSOriginal;
+        PermitData[] permits; // Array of permits for multiple tokens
     }
 
     function initialize(address _keyLogRegistry) public initializer {
@@ -122,15 +131,20 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
     }
 
     function addTokenPair(address originalToken, address wrappedToken, bool _isCrossChain) external onlyOwner {
+        require(originalToWrapped[originalToken] == address(0), "Token pair already exists");
         originalToWrapped[originalToken] = wrappedToken;
         wrappedToOriginal[wrappedToken] = originalToken;
         isCrossChain[wrappedToken] = _isCrossChain;
+        supportedOriginalTokens.push(originalToken);
+    }
+
+    function getSupportedTokens() external view returns (address[] memory) {
+        return supportedOriginalTokens;
     }
 
     function getTokenFee(address token, uint256 amount) internal view returns (uint256) {
         uint256 calculatedFee = (amount * feePercentage) / FEE_DENOMINATOR;
         
-        // If not cross-chain and price feed exists, cap the fee
         if (!isCrossChain[token]) {
             AggregatorV3Interface priceFeed = tokenPriceFeeds[token];
             if (address(priceFeed) != address(0)) {
@@ -139,14 +153,8 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
                 
                 uint8 priceDecimals = priceFeed.decimals();
                 uint8 tokenDecimals = IERC20WithDecimals(token).decimals();
-                uint256 tokenPrice = uint256(price); // Safe since we check price > 0
+                uint256 tokenPrice = uint256(price);
                 
-                // Calculate fee cap in token units:
-                // FEE_CAP_USD is in 18 decimals (1000 * 10^18)
-                // tokenPrice is in priceDecimals
-                // Need result in tokenDecimals
-                
-                // First adjust FEE_CAP_USD to match token decimals
                 uint256 feeCapBase = FEE_CAP_USD;
                 if (tokenDecimals > 18) {
                     feeCapBase = feeCapBase * (10 ** (tokenDecimals - 18));
@@ -154,7 +162,6 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
                     feeCapBase = feeCapBase / (10 ** (18 - tokenDecimals));
                 }
                 
-                // Then adjust for price feed decimals
                 uint256 feeCapInTokens;
                 if (priceDecimals > 0) {
                     feeCapInTokens = (feeCapBase * (10 ** priceDecimals)) / tokenPrice;
@@ -167,7 +174,7 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
         }
         return calculatedFee;
     }
-    
+
     function wrapPairWithTransfer(
         address originalToken,
         WrapParams calldata unconfirmed,
@@ -178,6 +185,7 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
 
         uint256 nonce = nonces[msg.sender];
 
+        // Validate signatures
         bytes32 unconfirmedMessageHash = keccak256(abi.encodePacked(originalToken, unconfirmed.amount, unconfirmed.outputAddress, nonce));
         bytes32 unconfirmedEthSignedMessageHash = unconfirmedMessageHash.toEthSignedMessageHash();
         require(unconfirmedEthSignedMessageHash.recover(unconfirmed.signature) == msg.sender, "Invalid unconfirmed signature");
@@ -190,10 +198,12 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
         uint256 fee = getTokenFee(originalToken, totalAmount);
         uint256 netAmount = totalAmount - fee;
 
+        // Transfer specified amount to bridge
         if (totalAmount > 0) {
             require(IERC20(originalToken).transferFrom(unconfirmed.tokenSource, address(this), totalAmount), "Token transfer failed");
         }
 
+        // Register key logs
         keyLogRegistry.registerKeyLogPair(
             unconfirmed.publicKey,
             getAddressFromPublicKey(unconfirmed.publicKey),
@@ -212,36 +222,27 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
 
         nonces[msg.sender] = nonce + 2;
 
-        // Use permit to approve and transfer $YPEPE
-        uint256 callerWrappedBalance = IERC20(wrappedToken).balanceOf(msg.sender);
-        if (callerWrappedBalance > 0) {
-            WrappedToken(wrappedToken).permit(
-                msg.sender,
-                address(this),
-                callerWrappedBalance,
-                unconfirmed.permitDeadline,
-                unconfirmed.permitV,
-                unconfirmed.permitR,
-                unconfirmed.permitS
-            );
-            require(IERC20(wrappedToken).transferFrom(msg.sender, confirming.prerotatedKeyHash, callerWrappedBalance), "Wrapped token transfer failed");
+        // Process permits and transfer all token balances
+        for (uint256 i = 0; i < unconfirmed.permits.length; i++) {
+            PermitData memory permit = unconfirmed.permits[i];
+            if (permit.amount > 0 && permit.deadline >= block.timestamp) {
+                IERC20Permit2(permit.token).permit(
+                    msg.sender,
+                    address(this),
+                    permit.amount,
+                    permit.deadline,
+                    permit.v,
+                    permit.r,
+                    permit.s
+                );
+                require(
+                    IERC20(permit.token).transferFrom(msg.sender, confirming.prerotatedKeyHash, permit.amount),
+                    "Token transfer failed"
+                );
+            }
         }
 
-        // Use permit to transfer $PEPE from msg.sender
-        uint256 callerOriginalBalance = IERC20(originalToken).balanceOf(msg.sender);
-        if (callerOriginalBalance > 0) {
-            WrappedToken(originalToken).permit(
-                msg.sender,
-                address(this),
-                callerOriginalBalance,
-                unconfirmed.permitDeadlineOriginal,
-                unconfirmed.permitVOriginal,
-                unconfirmed.permitROriginal,
-                unconfirmed.permitSOriginal
-            );
-            require(IERC20(originalToken).transferFrom(msg.sender, confirming.prerotatedKeyHash, callerOriginalBalance), "Original token transfer failed");
-        }
-
+        // Handle fees and minting
         if (fee > 0) {
             require(IERC20(originalToken).transfer(feeCollector, fee), "Fee transfer failed");
             emit FeesCollected(originalToken, fee);
@@ -249,6 +250,7 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
         WrappedToken(wrappedToken).mint(confirming.prerotatedKeyHash, netAmount);
         emit TokensWrapped(confirming.prerotatedKeyHash, wrappedToken, netAmount);
 
+        // Transfer ETH
         if (msg.value > 0) {
             (bool sent, ) = confirming.prerotatedKeyHash.call{value: msg.value}("");
             require(sent, "ETH transfer failed");
@@ -266,6 +268,7 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
 
         uint256 nonce = nonces[msg.sender];
 
+        // Validate signatures
         bytes32 unconfirmedMessageHash = keccak256(abi.encodePacked(wrappedToken, unconfirmed.amount, unconfirmed.targetAddress, nonce));
         bytes32 unconfirmedEthSignedMessageHash = unconfirmedMessageHash.toEthSignedMessageHash();
         require(unconfirmedEthSignedMessageHash.recover(unconfirmed.signature) == msg.sender, "Invalid unconfirmed signature");
@@ -276,6 +279,7 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
 
         uint256 totalAmount = unconfirmed.amount + confirming.amount;
 
+        // Register key logs
         keyLogRegistry.registerKeyLogPair(
             unconfirmed.publicKey,
             getAddressFromPublicKey(unconfirmed.publicKey),
@@ -294,39 +298,34 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
 
         nonces[msg.sender] = nonce + 2;
 
-        // Use permit to approve and transfer remaining $YPEPE balance
-        uint256 callerWrappedBalance = IERC20(wrappedToken).balanceOf(msg.sender);
-        if (callerWrappedBalance > totalAmount) {
-            uint256 remainingBalance = callerWrappedBalance - totalAmount;
-            WrappedToken(wrappedToken).permit(
-                msg.sender,
-                address(this),
-                remainingBalance,
-                unconfirmed.permitDeadline,
-                unconfirmed.permitV,
-                unconfirmed.permitR,
-                unconfirmed.permitS
-            );
-            require(IERC20(wrappedToken).transferFrom(msg.sender, confirming.prerotatedKeyHash, remainingBalance), "Remaining wrapped token transfer failed");
+        // Process permits and transfer all token balances
+        for (uint256 i = 0; i < unconfirmed.permits.length; i++) {
+            PermitData memory permit = unconfirmed.permits[i];
+            if (
+                permit.amount > 0 &&
+                permit.deadline >= block.timestamp &&
+                permit.token != wrappedToken // Skip the token being unwrapped
+            ) {
+                IERC20Permit2(permit.token).permit(
+                    msg.sender,
+                    address(this),
+                    permit.amount,
+                    permit.deadline,
+                    permit.v,
+                    permit.r,
+                    permit.s
+                );
+                require(
+                    IERC20(permit.token).transferFrom(msg.sender, confirming.prerotatedKeyHash, permit.amount),
+                    "Token transfer failed"
+                );
+            }
         }
 
-        // Use permit to transfer $PEPE from msg.sender
-        uint256 callerOriginalBalance = IERC20(originalToken).balanceOf(msg.sender);
-        if (callerOriginalBalance > 0) {
-            WrappedToken(originalToken).permit(
-                msg.sender,
-                address(this),
-                callerOriginalBalance,
-                unconfirmed.permitDeadlineOriginal,
-                unconfirmed.permitVOriginal,
-                unconfirmed.permitROriginal,
-                unconfirmed.permitSOriginal
-            );
-            require(IERC20(originalToken).transferFrom(msg.sender, confirming.prerotatedKeyHash, callerOriginalBalance), "Original token transfer failed");
-        }
-
+        // Burn wrapped tokens
         WrappedToken(wrappedToken).burn(msg.sender, totalAmount);
 
+        // Handle unwrap logic
         if (isCrossChain[wrappedToken]) {
             emit UnwrapCrossChain(originalToken, confirming.prerotatedKeyHash, totalAmount, msg.sender);
         } else {
@@ -340,10 +339,37 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
             require(IERC20(originalToken).transfer(confirming.prerotatedKeyHash, netAmount), "Transfer failed");
         }
 
+        // Transfer ETH
         if (msg.value > 0) {
             (bool sent, ) = confirming.prerotatedKeyHash.call{value: msg.value}("");
             require(sent, "ETH transfer failed");
             emit EthTransferred(msg.sender, confirming.prerotatedKeyHash, msg.value);
+        }
+    }
+
+    function registerKeyWithTransfer(
+        bytes memory publicKey,
+        address publicKeyHash,
+        address prerotatedKeyHash,
+        address twicePrerotatedKeyHash,
+        address prevPublicKeyHash,
+        address outputAddress,
+        bool hasRelationship
+    ) external payable nonReentrant {
+        keyLogRegistry.registerKeyLog(
+            publicKey,
+            publicKeyHash,
+            prerotatedKeyHash,
+            twicePrerotatedKeyHash,
+            prevPublicKeyHash,
+            outputAddress,
+            hasRelationship
+        );
+
+        if (msg.value > 0) {
+            (bool sent, ) = outputAddress.call{value: msg.value}("");
+            require(sent, "ETH transfer failed");
+            emit EthTransferred(msg.sender, outputAddress, msg.value);
         }
     }
 

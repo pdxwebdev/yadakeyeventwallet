@@ -12,14 +12,32 @@ Full license terms: see LICENSE.txt in this repository.
 */
 
 // src/pages/AdminPanel.jsx
-import { useState } from "react";
-import { Button, TextInput, Checkbox, Group, Select } from "@mantine/core";
+import { useState, useEffect } from "react";
+import { Button, TextInput, Checkbox, Group } from "@mantine/core";
 import { ethers } from "ethers";
 import BridgeArtifact from "../utils/abis/Bridge.json";
 import WrappedTokenArtifact from "../utils/abis/WrappedToken.json";
+import KeyLogRegistryArtifact from "../utils/abis/KeyLogRegistry.json";
+import MockERC20Artifact from "../utils/abis/MockERC20.json";
+import TokenPairWrapperArtifact from "../utils/abis/TokenPairWrapper.json";
+import { createHDWallet, deriveSecurePath } from "../utils/hdWallet";
+import { deriveNextKey, getKeyState } from "../shared/keystate";
+import {
+  BRIDGE_ADDRESS,
+  HARDHAT_MNEMONIC,
+  KEYLOG_REGISTRY_ADDRESS,
+  localProvider,
+  MOCK2_ERC20_ADDRESS,
+  MOCK_ERC20_ADDRESS,
+  WRAPPED_TOKEN_ADDRESS,
+  TOKEN_PAIR_WRAPPER_ADDRESS,
+} from "../shared/constants";
 
-const BRIDGE_ADDRESS = "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0";
-const localProvider = new ethers.JsonRpcProvider("http://127.0.0.1:8545/");
+const BRIDGE_ABI = BridgeArtifact.abi;
+const KEYLOG_REGISTRY_ABI = KeyLogRegistryArtifact.abi;
+const WRAPPED_TOKEN_ABI = WrappedTokenArtifact.abi;
+const ERC20_ABI = MockERC20Artifact.abi;
+const TOKEN_PAIR_WRAPPER_ABI = TokenPairWrapperArtifact.abi;
 
 function AdminPanel() {
   const [originalToken, setOriginalToken] = useState("");
@@ -30,14 +48,146 @@ function AdminPanel() {
   const [mintAmount, setMintAmount] = useState("");
   const [burnAmount, setBurnAmount] = useState("");
   const [status, setStatus] = useState("");
+  const [log, setLog] = useState([]);
+  const [kdp] = useState("defaultPassword");
+  const [feeCollector, setFeeCollector] = useState("");
 
-  // Assuming WYDA is a known wrapped token
-  const WYDA_ADDRESS = "0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9"; // Replace with actual WYDA address if different
+  const wallet =
+    ethers.Wallet.fromPhrase(HARDHAT_MNEMONIC).connect(localProvider);
 
-  const wallet = new ethers.Wallet(
-    "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80", // Hardhat default account 0 private key
-    localProvider
-  );
+  useEffect(() => {
+    const init = async () => {
+      try {
+        const hdWallet = createHDWallet(HARDHAT_MNEMONIC);
+        const bridge = new ethers.Contract(BRIDGE_ADDRESS, BRIDGE_ABI, wallet);
+        const keyLogRegistry = new ethers.Contract(
+          KEYLOG_REGISTRY_ADDRESS,
+          KEYLOG_REGISTRY_ABI,
+          wallet
+        );
+        const initialKey = await deriveSecurePath(hdWallet, kdp);
+
+        const log = await keyLogRegistry.buildFromPublicKey(
+          initialKey.uncompressedPublicKey.slice(1)
+        );
+        setLog(() => log);
+        const keyState = await getKeyState(hdWallet, log, kdp);
+
+        if (log.length === 0) {
+          let walletNonce = await localProvider.getTransactionCount(
+            wallet.address,
+            "latest"
+          );
+
+          const mockERC20 = new ethers.Contract(
+            MOCK_ERC20_ADDRESS,
+            ERC20_ABI,
+            wallet
+          );
+          const mock2ERC20 = new ethers.Contract(
+            MOCK2_ERC20_ADDRESS,
+            ERC20_ABI,
+            wallet
+          );
+          const largeApprovalAmount = ethers.parseEther("1000000");
+
+          const mockApprovalTx = await mockERC20.approve(
+            BRIDGE_ADDRESS,
+            largeApprovalAmount,
+            { nonce: walletNonce }
+          );
+          await mockApprovalTx.wait();
+          walletNonce++;
+
+          const mock2ApprovalTx = await mock2ERC20.approve(
+            BRIDGE_ADDRESS,
+            largeApprovalAmount,
+            { nonce: walletNonce }
+          );
+          await mock2ApprovalTx.wait();
+          walletNonce++;
+
+          const ethForCurrent = ethers.parseEther("4");
+          const ethTxCurrent = await wallet.sendTransaction({
+            to: keyState.nextDerivedKey.signer.address,
+            value: ethForCurrent,
+            nonce: walletNonce,
+          });
+          await ethTxCurrent.wait();
+          walletNonce++;
+
+          const currentOwner = await bridge.owner();
+          const currentRelayer = await bridge.relayer();
+          console.log("Current Bridge owner:", currentOwner);
+          console.log("Current Relayer:", currentRelayer);
+          console.log("Wallet address:", wallet.address);
+
+          // Ensure Bridge is authorized in KeyLogRegistry
+          const currentAuthorizedCaller =
+            await keyLogRegistry.authorizedCaller();
+          if (
+            currentAuthorizedCaller.toLowerCase() !==
+            BRIDGE_ADDRESS.toLowerCase()
+          ) {
+            console.log("Authorizing Bridge contract as caller...");
+            const authTx = await keyLogRegistry.setAuthorizedCaller(
+              BRIDGE_ADDRESS,
+              { nonce: walletNonce }
+            );
+            await authTx.wait();
+            walletNonce++;
+          }
+
+          if (
+            currentOwner.toLowerCase() === wallet.address.toLowerCase() &&
+            currentRelayer.toLowerCase() !== wallet.address.toLowerCase()
+          ) {
+            console.log("Setting wallet as relayer...");
+            const relayerTx = await bridge.setRelayer(wallet.address, {
+              nonce: walletNonce,
+            });
+            await relayerTx.wait();
+            walletNonce++;
+          } else {
+            console.log("Skipping setRelayer: not owner or already set.");
+          }
+
+          const authTx = await keyLogRegistry.setAuthorizedCaller(
+            BRIDGE_ADDRESS,
+            { nonce: walletNonce }
+          );
+          await authTx.wait();
+          walletNonce++;
+
+          const inceptionTx = await keyLogRegistry.registerKeyLog(
+            keyState.currentDerivedKey.key.uncompressedPublicKey.slice(1),
+            keyState.currentDerivedKey.signer.address,
+            keyState.nextDerivedKey.signer.address,
+            keyState.nextNextDerivedKey.signer.address,
+            "0x0000000000000000000000000000000000000000", // First key, no prev
+            keyState.nextDerivedKey.signer.address,
+            false,
+            { nonce: walletNonce }
+          );
+          await inceptionTx.wait();
+
+          const updatedLog = await keyLogRegistry.buildFromPublicKey(
+            keyState.currentDerivedKey.key.uncompressedPublicKey.slice(1)
+          );
+          setLog(() => updatedLog);
+          setStatus("Initialization complete with 3 key rotations");
+        } else {
+          const collector = await bridge.feeCollector();
+          setFeeCollector(collector);
+          setStatus("Loaded existing key state");
+        }
+      } catch (error) {
+        setStatus("Error during initialization: " + error.message);
+        console.error("Init error:", error);
+      }
+    };
+    init();
+  }, []);
 
   const deployWrappedToken = async () => {
     try {
@@ -60,6 +210,32 @@ function AdminPanel() {
     }
   };
 
+  const ensureOwnership = async (bridge, currentOwner, newOwner) => {
+    const owner = await bridge.owner();
+    console.log("Current Bridge owner:", owner);
+    console.log("Target new owner:", newOwner);
+
+    if (owner.toLowerCase() !== newOwner.toLowerCase()) {
+      console.log(`Transferring ownership from ${owner} to ${newOwner}`);
+      const tx = await bridge.transferOwnership(newOwner);
+      await tx.wait();
+      console.log("Ownership transferred. New owner:", await bridge.owner());
+    } else {
+      console.log("Target is already the owner, no transfer needed.");
+    }
+  };
+
+  const ensureAuthorizedCaller = async (keyLogRegistry, caller) => {
+    console.log("Ensuring authorized caller:", caller);
+    const tx = await keyLogRegistry.setAuthorizedCaller(caller);
+    await tx.wait();
+    console.log(`Authorized caller ${caller} set in KeyLogRegistry`);
+  };
+
+  const MANAGER_ABI = [
+    "function addTokenPairAtomic(address originalToken, string tokenName, string tokenSymbol, bool isCrossChain, bytes currentPubKey, address currentSigner, address nextSigner, address nextNextSigner, address prevSigner, bytes nextPubKey, address nextNextNextSigner) external payable",
+  ];
+
   const addTokenPair = async () => {
     try {
       if (!tokenSymbol) {
@@ -67,32 +243,43 @@ function AdminPanel() {
         return;
       }
 
-      setStatus("Deploying wrapped token contract...");
-      const wrappedTokenAddress = await deployWrappedToken();
-
-      setStatus("Adding token pair to bridge...");
-      const bridge = new ethers.Contract(
-        BRIDGE_ADDRESS,
-        BridgeArtifact.abi,
+      const hdWallet = createHDWallet(HARDHAT_MNEMONIC);
+      const keyState = await getKeyState(hdWallet, log, kdp);
+      const wrapper = new ethers.Contract(
+        deployments.tokenPairWrapper,
+        WRAPPER_ABI,
         wallet
       );
 
-      const tx = await bridge.addTokenPair(
+      setStatus("Preparing atomic token pair addition...");
+      const ethToSend = ethers.parseEther("8");
+      const nonce = await localProvider.getTransactionCount(
+        wallet.address,
+        "pending"
+      );
+
+      const tx = await wrapper.addTokenPairAtomic(
         originalToken,
-        wrappedTokenAddress,
-        isCrossChain
+        tokenName,
+        tokenSymbol,
+        isCrossChain,
+        keyState.currentDerivedKey.key.uncompressedPublicKey.slice(1),
+        keyState.currentDerivedKey.signer.address,
+        keyState.nextDerivedKey.signer.address,
+        keyState.nextNextDerivedKey.signer.address,
+        keyState.prevDerivedKey.signer.address,
+        keyState.nextDerivedKey.key.uncompressedPublicKey.slice(1),
+        keyState.nextNextNextDerivedKey.signer.address,
+        { nonce, value: ethToSend }
       );
       await tx.wait();
 
       setStatus(
-        `Token pair added successfully! Wrapped Token Address: ${wrappedTokenAddress}`
+        "Token pair added successfully with key rotation and ETH funding"
       );
-      setOriginalToken("");
-      setTokenSymbol("");
-      setTokenName("");
-      setIsCrossChain(false);
     } catch (error) {
       setStatus(`Error: ${error.message}`);
+      console.error("Atomic add token pair error:", error);
     }
   };
 
@@ -103,25 +290,128 @@ function AdminPanel() {
         return;
       }
 
+      const hdWallet = createHDWallet(HARDHAT_MNEMONIC);
+      const keyState = await getKeyState(hdWallet, log, kdp);
       const bridge = new ethers.Contract(
         BRIDGE_ADDRESS,
-        BridgeArtifact.abi,
+        BRIDGE_ABI,
+        keyState.currentDerivedKey.signer
+      );
+      const keyLogRegistry = new ethers.Contract(
+        KEYLOG_REGISTRY_ADDRESS,
+        KEYLOG_REGISTRY_ABI,
+        keyState.currentDerivedKey.signer
+      );
+      const keyLogRegistryWithWallet = new ethers.Contract(
+        KEYLOG_REGISTRY_ADDRESS,
+        KEYLOG_REGISTRY_ABI,
         wallet
       );
 
       const amount = ethers.parseEther(mintAmount);
       const tx = await bridge.mintWrappedToken(
-        WYDA_ADDRESS,
+        WRAPPED_TOKEN_ADDRESS,
         mintBurnAddress,
         amount
       );
       await tx.wait();
 
-      setStatus(`Successfully minted ${mintAmount} WYDA to ${mintBurnAddress}`);
+      // Authorize the current signer for KeyLogRegistry
+      setStatus("Authorizing current signer in KeyLogRegistry...");
+      await ensureAuthorizedCaller(
+        keyLogRegistryWithWallet,
+        keyState.currentDerivedKey.signer.address
+      );
+
+      // Debug key state and log before rotation
+      console.log("Key state before rotation:", {
+        prev: keyState.prevDerivedKey
+          ? keyState.prevDerivedKey.signer.address
+          : "0x0",
+        current: keyState.currentDerivedKey.signer.address,
+        next: keyState.nextDerivedKey.signer.address,
+        nextNext: keyState.nextNextDerivedKey.signer.address,
+        nextNextNext: keyState.nextNextNextDerivedKey.signer.address,
+      });
+      console.log("Current log length:", log.length);
+      console.log("Last log entry:", log[log.length - 1]);
+
+      // Sync log with contract state
+      const currentLog = await keyLogRegistryWithWallet.buildFromPublicKey(
+        keyState.currentDerivedKey.key.uncompressedPublicKey.slice(1)
+      );
+      setLog(() => currentLog);
+
+      // Register current key if not already in log
+      let nonce = await localProvider.getTransactionCount(
+        keyState.currentDerivedKey.signer.address,
+        "latest"
+      );
+      setStatus("Registering key...");
+      const inceptionTx = await keyLogRegistry.registerKeyLog(
+        keyState.currentDerivedKey.key.uncompressedPublicKey.slice(1),
+        keyState.currentDerivedKey.signer.address,
+        keyState.nextDerivedKey.signer.address,
+        keyState.nextNextDerivedKey.signer.address,
+        keyState.prevDerivedKey.signer.address,
+        keyState.nextDerivedKey.signer.address,
+        false,
+        { nonce }
+      );
+      await inceptionTx.wait();
+      nonce++;
+
+      // Rotate to next key
+      setStatus("Rotating key...");
+      keyState.nextNextNextDerivedKey = await deriveNextKey(
+        keyState.nextNextDerivedKey.key,
+        kdp
+      );
+      const rotateTx = await keyLogRegistry.registerKeyLog(
+        keyState.nextDerivedKey.key.uncompressedPublicKey.slice(1),
+        keyState.nextDerivedKey.signer.address,
+        keyState.nextNextDerivedKey.signer.address,
+        keyState.nextNextNextDerivedKey.signer.address,
+        keyState.currentDerivedKey.signer.address, // Now registered
+        keyState.nextNextDerivedKey.signer.address,
+        false,
+        { nonce }
+      );
+      await rotateTx.wait();
+
+      // Authorize the new signer in KeyLogRegistry
+      setStatus("Authorizing new signer in KeyLogRegistry...");
+      await ensureAuthorizedCaller(
+        keyLogRegistryWithWallet,
+        keyState.nextDerivedKey.signer.address
+      );
+
+      // Fund the new key with ETH
+      const ethToSend = ethers.parseEther("4");
+      const ethTx = await wallet.sendTransaction({
+        to: keyState.nextDerivedKey.signer.address,
+        value: ethToSend,
+        nonce: await localProvider.getTransactionCount(
+          wallet.address,
+          "latest"
+        ),
+      });
+      await ethTx.wait();
+
+      setStatus("Fetching updated key log...");
+      const updatedLog = await keyLogRegistryWithWallet.buildFromPublicKey(
+        keyState.nextDerivedKey.key.uncompressedPublicKey.slice(1)
+      );
+      setLog(() => updatedLog);
+
+      setStatus(
+        `Successfully minted ${mintAmount} WYDA to ${mintBurnAddress} with key rotation and ETH funding`
+      );
       setMintAmount("");
       setMintBurnAddress("");
     } catch (error) {
       setStatus(`Mint error: ${error.message}`);
+      console.error("Mint error:", error);
     }
   };
 
@@ -133,8 +423,8 @@ function AdminPanel() {
       }
 
       const wrappedToken = new ethers.Contract(
-        WYDA_ADDRESS,
-        WrappedTokenArtifact.abi,
+        WRAPPED_TOKEN_ADDRESS,
+        WRAPPED_TOKEN_ABI,
         wallet
       );
 
@@ -149,6 +439,7 @@ function AdminPanel() {
       setMintBurnAddress("");
     } catch (error) {
       setStatus(`Burn error: ${error.message}`);
+      console.error("Burn error:", error);
     }
   };
 
@@ -183,7 +474,9 @@ function AdminPanel() {
           checked={isCrossChain}
           onChange={(e) => setIsCrossChain(e.target.checked)}
         />
-        <Button onClick={addTokenPair}>Create and Add Token Pair</Button>
+        <Button onClick={addTokenPair} disabled={log.length === 0}>
+          Create and Add Token Pair
+        </Button>
       </Group>
 
       <h2>Mint/Burn WYDA</h2>
@@ -202,7 +495,9 @@ function AdminPanel() {
           placeholder="e.g., 100"
           type="number"
         />
-        <Button onClick={mintWYDA}>Mint WYDA</Button>
+        <Button onClick={mintWYDA} disabled={log.length === 0}>
+          Mint WYDA
+        </Button>
         <TextInput
           label="Burn Amount (in WYDA)"
           value={burnAmount}
@@ -210,10 +505,13 @@ function AdminPanel() {
           placeholder="e.g., 100"
           type="number"
         />
-        <Button onClick={burnWYDA}>Burn WYDA</Button>
+        <Button onClick={burnWYDA} disabled={log.length === 0}>
+          Burn WYDA
+        </Button>
       </Group>
 
       {status && <p>{status}</p>}
+      {feeCollector && <p>Fee Collector: {feeCollector}</p>}
     </div>
   );
 }

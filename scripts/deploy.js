@@ -11,7 +11,7 @@ async function main() {
     ? JSON.parse(fs.readFileSync(deploymentsFile))
     : {};
 
-  // Deploy KeyLogRegistry (non-upgradeable for now)
+  // Deploy KeyLogRegistry
   const KeyLogRegistry = await ethers.getContractFactory("KeyLogRegistry");
   let keyLogRegistry;
   if (deployments.keyLogRegistry) {
@@ -25,16 +25,12 @@ async function main() {
   }
   const keyLogRegistryAddress = deployments.keyLogRegistry;
 
-  // Deploy Bridge as a proxy
+  // Deploy Bridge
   const Bridge = await ethers.getContractFactory("Bridge");
   let bridge;
   if (deployments.bridge) {
     bridge = await ethers.getContractAt("Bridge", deployments.bridge, deployer);
     console.log("Using existing Bridge proxy:", deployments.bridge);
-    // Optionally upgrade to a new version (e.g., BridgeV2)
-    // const BridgeV2 = await ethers.getContractFactory("BridgeV2");
-    // bridge = await upgrades.upgradeProxy(deployments.bridge, BridgeV2);
-    // console.log("Upgraded Bridge to V2 at same address:", deployments.bridge);
   } else {
     bridge = await upgrades.deployProxy(Bridge, [keyLogRegistryAddress], {
       initializer: "initialize",
@@ -46,7 +42,24 @@ async function main() {
   }
   const bridgeAddress = deployments.bridge;
 
-  // Deploy WrappedToken ($WYDA) - non-upgradeable for now
+  // Deploy TokenPairWrapper
+  const TokenPairWrapper = await ethers.getContractFactory("TokenPairWrapper");
+  let tokenPairWrapper;
+  if (deployments.tokenPairWrapper) {
+    tokenPairWrapper = await TokenPairWrapper.attach(deployments.tokenPairWrapper);
+    console.log("Using existing TokenPairWrapper:", deployments.tokenPairWrapper);
+  } else {
+    tokenPairWrapper = await TokenPairWrapper.deploy(bridgeAddress, keyLogRegistryAddress);
+    await tokenPairWrapper.waitForDeployment();
+    deployments.tokenPairWrapper = await tokenPairWrapper.getAddress();
+    console.log("TokenPairWrapper:", deployments.tokenPairWrapper);
+  }
+  const tokenPairWrapperAddress = deployments.tokenPairWrapper;
+
+  // Update output
+  console.log(`export const TOKEN_PAIR_WRAPPER_ADDRESS = "${tokenPairWrapperAddress}";`);
+
+  // Deploy WrappedToken ($WYDA)
   const WrappedToken = await ethers.getContractFactory("WrappedToken");
   let wrappedTokenWMOCK;
   if (deployments.wrappedTokenWMOCK) {
@@ -60,7 +73,7 @@ async function main() {
   }
   const wrappedTokenWMOCKAddress = deployments.wrappedTokenWMOCK;
 
-  // Deploy WrappedToken ($YPEPE) - non-upgradeable for now
+  // Deploy WrappedToken ($YPEPE)
   let wrappedTokenYMOCK;
   if (deployments.wrappedTokenYMOCK) {
     wrappedTokenYMOCK = await WrappedToken.attach(deployments.wrappedTokenYMOCK);
@@ -119,6 +132,7 @@ async function main() {
     await keyLogRegistry.setAuthorizedCaller(bridgeAddress);
     console.log("Set KeyLogRegistry authorized caller to Bridge");
 
+    // Configure Bridge (only owner can call these)
     await bridge.addTokenPair(yadaERC20Address, wrappedTokenWMOCKAddress, true);
     console.log("Added token pair: $YDA -> $WYDA (cross-chain)");
 
@@ -140,12 +154,13 @@ async function main() {
 
   // Output for React
   console.log("\nCopy these into your React component:");
-  console.log(`const BRIDGE_ADDRESS = "${bridgeAddress}";`);
-  console.log(`const KEYLOG_REGISTRY_ADDRESS = "${keyLogRegistryAddress}";`);
-  console.log(`const WRAPPED_TOKEN_ADDRESS = "${wrappedTokenWMOCKAddress}"; // $WYDA`);
-  console.log(`const Y_WRAPPED_TOKEN_ADDRESS = "${wrappedTokenYMOCKAddress}"; // $YPEPE`);
-  console.log(`const MOCK_ERC20_ADDRESS = "${yadaERC20Address}"; // $YDA`);
-  console.log(`const MOCK2_ERC20_ADDRESS = "${mockPepeAddress}"; // $PEPE`);
+  console.log(`export const BRIDGE_ADDRESS = "${bridgeAddress}";`);
+  console.log(`export const KEYLOG_REGISTRY_ADDRESS = "${keyLogRegistryAddress}";`);
+  console.log(`export const TOKEN_PAIR_WRAPPER_ADDRESS = "${tokenPairWrapperAddress}";`);
+  console.log(`export const WRAPPED_TOKEN_ADDRESS = "${wrappedTokenWMOCKAddress}"; // $WYDA`);
+  console.log(`export const Y_WRAPPED_TOKEN_ADDRESS = "${wrappedTokenYMOCKAddress}"; // $YPEPE`);
+  console.log(`export const MOCK_ERC20_ADDRESS = "${yadaERC20Address}"; // $YDA`);
+  console.log(`export const MOCK2_ERC20_ADDRESS = "${mockPepeAddress}"; // $PEPE`);
 
   return deployments;
 }

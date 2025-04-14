@@ -1,5 +1,5 @@
 /*
-YadaCoin Open Source License (YOSL) v1.1
+SPDX-License-Identifier: YadaCoin Open Source License (YOSL) v1.1
 
 Copyright (c) 2017-2025 Matthew Vogel, Reynold Vogel, Inc.
 
@@ -10,7 +10,7 @@ For commercial license inquiries, contact: info@yadacoin.io
 
 Full license terms: see LICENSE.txt in this repository.
 */
-// SPDX-License-Identifier: MIT
+
 pragma solidity ^0.8.0;
 
 import "@chainlink/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
