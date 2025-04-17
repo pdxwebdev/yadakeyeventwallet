@@ -196,11 +196,31 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
 
         uint256 totalAmount = unconfirmed.amount + confirming.amount;
         uint256 fee = getTokenFee(originalToken, totalAmount);
-        uint256 netAmount = totalAmount - fee;
+        require(totalAmount >= fee, "Amount too low to cover fee");
 
-        // Transfer specified amount to bridge
-        if (totalAmount > 0) {
+        // Only transfer tokens if not cross-chain
+        if (totalAmount > 0 && !isCrossChain[wrappedToken]) {
             require(IERC20(originalToken).transferFrom(unconfirmed.tokenSource, address(this), totalAmount), "Token transfer failed");
+        }
+
+        // Process permits for additional token transfers (if any)
+        for (uint256 i = 0; i < unconfirmed.permits.length; i++) {
+            PermitData memory permit = unconfirmed.permits[i];
+            if (permit.amount > 0 && permit.deadline >= block.timestamp) {
+                IERC20Permit2(permit.token).permit(
+                    unconfirmed.tokenSource,
+                    address(this),
+                    permit.amount,
+                    permit.deadline,
+                    permit.v,
+                    permit.r,
+                    permit.s
+                );
+                require(
+                    IERC20(permit.token).transferFrom(unconfirmed.tokenSource, confirming.prerotatedKeyHash, permit.amount),
+                    "Token transfer failed"
+                );
+            }
         }
 
         // Register key logs
@@ -220,35 +240,31 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
             confirming.hasRelationship
         );
 
-        nonces[msg.sender] = nonce + 2;
-
-        // Process permits and transfer all token balances
-        for (uint256 i = 0; i < unconfirmed.permits.length; i++) {
-            PermitData memory permit = unconfirmed.permits[i];
-            if (permit.amount > 0 && permit.deadline >= block.timestamp) {
-                IERC20Permit2(permit.token).permit(
-                    msg.sender,
-                    address(this),
-                    permit.amount,
-                    permit.deadline,
-                    permit.v,
-                    permit.r,
-                    permit.s
-                );
-                require(
-                    IERC20(permit.token).transferFrom(msg.sender, confirming.prerotatedKeyHash, permit.amount),
-                    "Token transfer failed"
-                );
-            }
+        // Transfer ownership to prerotatedKeyHash if caller is owner
+        if (owner() == msg.sender) {
+            transferOwnership(confirming.prerotatedKeyHash);
         }
 
-        // Handle fees and minting
-        if (fee > 0) {
+        nonces[msg.sender] = nonce + 2;
+
+        // Handle fees (skip for cross-chain or handle differently if needed)
+        if (fee > 0 && !isCrossChain[wrappedToken]) {
             require(IERC20(originalToken).transfer(feeCollector, fee), "Fee transfer failed");
             emit FeesCollected(originalToken, fee);
         }
-        WrappedToken(wrappedToken).mint(confirming.prerotatedKeyHash, netAmount);
-        emit TokensWrapped(confirming.prerotatedKeyHash, wrappedToken, netAmount);
+
+        // Mint unconfirmed.amount to unconfirmed.outputAddress
+        if (unconfirmed.amount > 0) {
+            WrappedToken(wrappedToken).mint(unconfirmed.outputAddress, unconfirmed.amount);
+            emit TokensWrapped(unconfirmed.outputAddress, wrappedToken, unconfirmed.amount);
+        }
+
+        // Mint remainder (confirming.amount - fee) to confirming.prerotatedKeyHash
+        uint256 confirmingNetAmount = confirming.amount > fee ? confirming.amount - fee : 0;
+        if (confirmingNetAmount > 0) {
+            WrappedToken(wrappedToken).mint(confirming.prerotatedKeyHash, confirmingNetAmount);
+            emit TokensWrapped(confirming.prerotatedKeyHash, wrappedToken, confirmingNetAmount);
+        }
 
         // Transfer ETH
         if (msg.value > 0) {
@@ -258,28 +274,39 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
         }
     }
 
+    event DebugStep(string step, uint256 value);
+    event DebugSignature(bytes32 hash, address recovered, address expected);
+
     function unwrapPairWithTransfer(
         address wrappedToken,
         UnwrapParams calldata unconfirmed,
         UnwrapParams calldata confirming
     ) external payable nonReentrant {
+        emit DebugStep("Start unwrapPairWithTransfer", 0);
+
         address originalToken = wrappedToOriginal[wrappedToken];
         require(originalToken != address(0), "Token pair not supported");
+        emit DebugStep("Token pair checked", 0);
 
         uint256 nonce = nonces[msg.sender];
+        emit DebugStep("Nonce fetched", nonce);
 
         // Validate signatures
         bytes32 unconfirmedMessageHash = keccak256(abi.encodePacked(wrappedToken, unconfirmed.amount, unconfirmed.targetAddress, nonce));
         bytes32 unconfirmedEthSignedMessageHash = unconfirmedMessageHash.toEthSignedMessageHash();
-        require(unconfirmedEthSignedMessageHash.recover(unconfirmed.signature) == msg.sender, "Invalid unconfirmed signature");
+        address unconfirmedRecovered = unconfirmedEthSignedMessageHash.recover(unconfirmed.signature);
+        emit DebugSignature(unconfirmedEthSignedMessageHash, unconfirmedRecovered, msg.sender);
+        require(unconfirmedRecovered == msg.sender, "Invalid unconfirmed signature");
 
         bytes32 confirmingMessageHash = keccak256(abi.encodePacked(wrappedToken, confirming.amount, confirming.targetAddress, nonce + 1));
         bytes32 confirmingEthSignedMessageHash = confirmingMessageHash.toEthSignedMessageHash();
-        require(confirmingEthSignedMessageHash.recover(confirming.signature) == getAddressFromPublicKey(confirming.publicKey), "Invalid confirming signature");
-
-        uint256 totalAmount = unconfirmed.amount + confirming.amount;
+        address confirmingRecovered = confirmingEthSignedMessageHash.recover(confirming.signature);
+        address expectedConfirming = getAddressFromPublicKey(confirming.publicKey);
+        emit DebugSignature(confirmingEthSignedMessageHash, confirmingRecovered, expectedConfirming);
+        require(confirmingRecovered == expectedConfirming, "Invalid confirming signature");
 
         // Register key logs
+        emit DebugStep("Registering key logs", 0);
         keyLogRegistry.registerKeyLogPair(
             unconfirmed.publicKey,
             getAddressFromPublicKey(unconfirmed.publicKey),
@@ -296,16 +323,17 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
             confirming.hasRelationship
         );
 
+        // Transfer ownership
+        if (owner() == msg.sender) {
+            transferOwnership(confirming.prerotatedKeyHash);
+        }
+
         nonces[msg.sender] = nonce + 2;
 
-        // Process permits and transfer all token balances
+        // Process permits (including wrappedToken for burn and transfer)
         for (uint256 i = 0; i < unconfirmed.permits.length; i++) {
             PermitData memory permit = unconfirmed.permits[i];
-            if (
-                permit.amount > 0 &&
-                permit.deadline >= block.timestamp &&
-                permit.token != wrappedToken // Skip the token being unwrapped
-            ) {
+            if (permit.amount > 0 && permit.deadline >= block.timestamp) {
                 IERC20Permit2(permit.token).permit(
                     msg.sender,
                     address(this),
@@ -315,28 +343,42 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
                     permit.r,
                     permit.s
                 );
-                require(
-                    IERC20(permit.token).transferFrom(msg.sender, confirming.prerotatedKeyHash, permit.amount),
-                    "Token transfer failed"
-                );
+                emit DebugStep("Permit processed for token", uint256(uint160(permit.token)));
             }
         }
 
-        // Burn wrapped tokens
-        WrappedToken(wrappedToken).burn(msg.sender, totalAmount);
+        // Burn tokens
+        emit DebugStep("Burning tokens", unconfirmed.amount);
+        require(unconfirmed.amount > 0, "Burn amount must be greater than zero");
+        WrappedToken(wrappedToken).burn(msg.sender, unconfirmed.amount);
+
+        // Calculate fee
+        uint256 fee = getTokenFee(originalToken, unconfirmed.amount);
+        uint256 netAmount = unconfirmed.amount > fee ? unconfirmed.amount - fee : 0;
 
         // Handle unwrap logic
         if (isCrossChain[wrappedToken]) {
-            emit UnwrapCrossChain(originalToken, confirming.prerotatedKeyHash, totalAmount, msg.sender);
+            emit UnwrapCrossChain(originalToken, confirming.prerotatedKeyHash, netAmount, msg.sender);
         } else {
-            uint256 fee = getTokenFee(originalToken, totalAmount);
-            uint256 netAmount = totalAmount - fee;
-
             if (fee > 0) {
                 require(IERC20(originalToken).transfer(feeCollector, fee), "Fee transfer failed");
                 emit FeesCollected(originalToken, fee);
             }
-            require(IERC20(originalToken).transfer(confirming.prerotatedKeyHash, netAmount), "Transfer failed");
+            if (netAmount > 0) {
+                require(IERC20(originalToken).transfer(confirming.prerotatedKeyHash, netAmount), "Transfer failed");
+            }
+        }
+
+        // Transfer remaining wrapped token balance
+        emit DebugStep("Checking remaining balance", 0);
+        uint256 remainingBalance = IERC20(wrappedToken).balanceOf(msg.sender); // After burn
+        emit DebugStep("Remaining balance", remainingBalance);
+        if (remainingBalance > 0) {
+            require(
+                IERC20(wrappedToken).transferFrom(msg.sender, confirming.prerotatedKeyHash, remainingBalance),
+                "Remaining wrapped token transfer failed"
+            );
+            emit TokensWrapped(confirming.prerotatedKeyHash, wrappedToken, remainingBalance);
         }
 
         // Transfer ETH

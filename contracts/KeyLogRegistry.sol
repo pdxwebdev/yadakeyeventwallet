@@ -48,7 +48,7 @@ contract KeyLogRegistry is Ownable {
         address prevPublicKeyHash,
         address outputAddress,
         bool hasRelationship
-    ) external onlyAuthorized {
+    ) external {
         // Step 1: Validate using validateTransaction for a single entry
         (KeyEventFlag flag, ) = validateTransaction(
             publicKey,
@@ -246,17 +246,12 @@ contract KeyLogRegistry is Ownable {
         KeyLogEntry memory entry;
         while (true) {
             uint256[] memory indices = byPublicKeyHash[currentAddress];
-            if (indices.length == 0) {
-                indices = byPrevPublicKeyHash[currentAddress];
-                if (indices.length == 0) {
-                    indices = byPrerotatedKeyHash[currentAddress];
-                    if (indices.length == 0) {
-                        break;
-                    }
+            if(indices.length == 0) {
+                indices = byPrerotatedKeyHash[currentAddress];
+                if(indices.length == 0) {
+                    KeyLogEntry[] memory emptyLog = new KeyLogEntry[](0);
+                    return emptyLog;
                 }
-                entry = keyLogEntries[indices[indices.length - 1]];
-                currentAddress = entry.publicKeyHash;
-                continue;
             }
 
             entry = keyLogEntries[indices[indices.length - 1]];

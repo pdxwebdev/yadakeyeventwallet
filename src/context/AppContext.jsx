@@ -29,6 +29,12 @@ export const AppProvider = ({ children }) => {
   const [log, setLog] = useState();
   const [hasKel, setHasKel] = useState(null);
   const [mfa, setMfa] = useState();
+  const [loading, setLoading] = useState();
+  const [signer, setSigner] = useState(null); // Current wallet signer
+  const [account, setAccount] = useState(""); // Current wallet address
+  const [isOperator, setIsOperator] = useState(false); // Flag for bridge operator
+  const [userKeyState, setUserKeyState] = useState({}); // { address: { log, keyState } }
+  const [selectedTestAccount, setSelectedTestAccount] = useState("");
 
   const getBalance = async () => {
     const res = await axios.get(
@@ -90,6 +96,18 @@ export const AppProvider = ({ children }) => {
         setWifBalance,
         mfa,
         setMfa,
+        loading,
+        setLoading,
+        signer,
+        setSigner,
+        account,
+        setAccount,
+        isOperator,
+        setIsOperator,
+        userKeyState,
+        setUserKeyState,
+        selectedTestAccount,
+        setSelectedTestAccount,
       }}
     >
       {children}

@@ -1,10 +1,101 @@
 import pkg from "hardhat";
 import fs from 'fs';
+import * as bip39 from "bip39";
+import * as bip32 from "bip32";
+import * as shajs from "sha.js";
+import * as tinysecp256k1 from "tiny-secp256k1";
 const { ethers, upgrades } = pkg;
 
+
+export const HARDHAT_MNEMONIC =
+  "test test test test test test test test test test test junk";
+
+const deriveIndex = async (factor, level) => {
+  const hash = await generateSHA256(factor + level);
+  return parseInt(hash.toString("hex"), 16) % 2147483647; // Modulo 2^31
+};
+
+
+function decompressPublicKey(compressedKey) {
+  if (!(compressedKey instanceof Buffer) || compressedKey.length !== 33) {
+    throw new Error("Invalid compressed public key");
+  }
+
+  // Check prefix (0x02 or 0x03 for compressed keys)
+  const prefix = compressedKey[0];
+  if (prefix !== 0x02 && prefix !== 0x03) {
+    throw new Error("Invalid compressed public key prefix");
+  }
+
+  // Extract x-coordinate (32 bytes after prefix)
+  const x = compressedKey.subarray(1, 33);
+
+  // Decompress to get y-coordinate using tiny-secp256k1
+  const point = tinysecp256k1.pointFromScalar(x, prefix === 0x03 ? true : false);
+  if (!point) {
+    throw new Error("Failed to decompress public key");
+  }
+
+  // Convert point to uncompressed format (0x04 prefix + x + y)
+  const uncompressed = Buffer.alloc(65);
+  uncompressed[0] = 0x04; // Uncompressed prefix
+  uncompressed.set(point.slice(0, 32), 1); // x-coordinate
+  uncompressed.set(point.slice(32, 64), 33); // y-coordinate
+
+  return uncompressed;
+}
+
+// Generate a secure derivation path
+const deriveSecurePath = async (root, secondFactor) => {
+  let currentNode = root;
+
+  // Fixed 4-level path
+  for (let level = 0; level < 4; level++) {
+    const index = await deriveIndex(secondFactor, level);
+    currentNode = currentNode.deriveHardened(index);
+  }
+  currentNode.uncompressedPublicKey = decompressPublicKey(Buffer.from(currentNode.publicKey))
+  return currentNode;
+};
+
+const generateSHA256 = async (input) => {
+  return new shajs.sha256().update(input).digest("hex");
+};
+
+// Function to create an HD wallet from mnemonic
+export const createHDWallet = (mnemonic) => {
+  if (!bip39.validateMnemonic(mnemonic)) {
+    throw new Error("Invalid mnemonic");
+  }
+
+  const seed = bip39.mnemonicToSeedSync(mnemonic);
+  const root = bip32.BIP32Factory(tinysecp256k1).fromSeed(seed);
+  return root.deriveHardened(0);
+};
+
 async function main() {
-  const [deployer] = await ethers.getSigners();
+  // const [deployer] = await ethers.getSigners();
+  const wallet = createHDWallet(HARDHAT_MNEMONIC);
+  const derivedKey = await deriveSecurePath(wallet, 'defaultPassword0');
+  const deployer = new ethers.Wallet(ethers.hexlify(derivedKey.privateKey), ethers.provider);
   console.log("Deploying with:", deployer.address);
+
+    // Fund the derived account
+  const [hardhatAccount] = await ethers.getSigners(); // Get a funded Hardhat account
+  const tx = await hardhatAccount.sendTransaction({
+    to: deployer.address,
+    value: ethers.parseEther("1000.0"), // Send 1 ETH to the derived account
+  });
+  await tx.wait();
+
+  const derivedKey2 = await deriveSecurePath(wallet, 'defaultPassword1');
+  const testAccount2 = new ethers.Wallet(ethers.hexlify(derivedKey2.privateKey), ethers.provider);
+  const tx2 = await hardhatAccount.sendTransaction({
+    to: testAccount2.address,
+    value: ethers.parseEther("1000.0"), // Send 1 ETH to the derived account
+  });
+  await tx2.wait();
+  console.log(`Funded ${deployer.address} with 1 ETH`);
 
   const deploymentsFile = "./deployments.json";
   let deployments = fs.existsSync(deploymentsFile)
@@ -22,23 +113,41 @@ async function main() {
     await keyLogRegistry.waitForDeployment();
     deployments.keyLogRegistry = await keyLogRegistry.getAddress();
     console.log("KeyLogRegistry:", deployments.keyLogRegistry);
+
+    // Transfer ownership to the derived account used in the React app
+    console.log("Transferring KeyLogRegistry ownership to derived address:", deployer.address);
+    await (await keyLogRegistry.transferOwnership(deployer.address)).wait();
+    console.log("KeyLogRegistry ownership transferred to:", deployer.address);
+    console.log("New KeyLogRegistry owner:", await keyLogRegistry.owner());
   }
   const keyLogRegistryAddress = deployments.keyLogRegistry;
 
   // Deploy Bridge
-  const Bridge = await ethers.getContractFactory("Bridge");
+  const Bridge = await ethers.getContractFactory("Bridge", deployer); // Explicitly use deployer
   let bridge;
   if (deployments.bridge) {
     bridge = await ethers.getContractAt("Bridge", deployments.bridge, deployer);
     console.log("Using existing Bridge proxy:", deployments.bridge);
   } else {
-    bridge = await upgrades.deployProxy(Bridge, [keyLogRegistryAddress], {
-      initializer: "initialize",
-      kind: "uups",
-    });
+    bridge = await upgrades.deployProxy(
+      Bridge,
+      [keyLogRegistryAddress],
+      {
+        initializer: "initialize",
+        kind: "uups",
+        deployer: deployer, // Ensure deployer is used
+      }
+    );
     await bridge.waitForDeployment();
     deployments.bridge = await bridge.getAddress();
-    console.log("Bridge:", deployments.bridge);
+    console.log("Bridge deployed to:", deployments.bridge);
+    console.log("Bridge owner:", await bridge.owner());
+    // Verify ownership
+    if ((await bridge.owner()) !== deployer.address) {
+      console.log("Transferring Bridge ownership to:", deployer.address);
+      await (await bridge.connect(deployer).transferOwnership(deployer.address)).wait();
+      console.log("New Bridge owner:", await bridge.owner());
+    }
   }
   const bridgeAddress = deployments.bridge;
 
@@ -129,17 +238,18 @@ async function main() {
 
   // Configure contracts (only if not already configured)
   if (!deployments.configured) {
-    await keyLogRegistry.setAuthorizedCaller(bridgeAddress);
+    // Connect keyLogRegistry to deployer to ensure the owner calls the function
+    await keyLogRegistry.connect(deployer).setAuthorizedCaller(bridgeAddress);
     console.log("Set KeyLogRegistry authorized caller to Bridge");
 
     // Configure Bridge (only owner can call these)
-    await bridge.addTokenPair(yadaERC20Address, wrappedTokenWMOCKAddress, true);
+    await bridge.connect(deployer).addTokenPair(yadaERC20Address, wrappedTokenWMOCKAddress, true);
     console.log("Added token pair: $YDA -> $WYDA (cross-chain)");
 
-    await bridge.addTokenPair(mockPepeAddress, wrappedTokenYMOCKAddress, false);
+    await bridge.connect(deployer).addTokenPair(mockPepeAddress, wrappedTokenYMOCKAddress, false);
     console.log("Added token pair: $PEPE -> $YPEPE (on-chain)");
 
-    await bridge.setTokenPriceFeed(mockPepeAddress, priceFeedAddress);
+    await bridge.connect(deployer).setTokenPriceFeed(mockPepeAddress, priceFeedAddress);
     console.log("Set price feed for $PEPE");
 
     deployments.configured = true;
@@ -161,7 +271,10 @@ async function main() {
   console.log(`export const Y_WRAPPED_TOKEN_ADDRESS = "${wrappedTokenYMOCKAddress}"; // $YPEPE`);
   console.log(`export const MOCK_ERC20_ADDRESS = "${yadaERC20Address}"; // $YDA`);
   console.log(`export const MOCK2_ERC20_ADDRESS = "${mockPepeAddress}"; // $PEPE`);
-
+  // After deploying the Bridge
+  const bridge2 = await ethers.getContractAt("Bridge", deployments.bridge, deployer);
+  console.log("Bridge proxy address:", deployments.bridge);
+  console.log("Bridge owner:", await bridge2.owner());
   return deployments;
 }
 

@@ -11,13 +11,17 @@ For commercial license inquiries, contact: info@yadacoin.io
 Full license terms: see LICENSE.txt in this repository.
 */
 
-// src/pages/Markets.jsx
+// src/components/Markets.jsx
 import { useState, useEffect } from "react";
 import { ethers } from "ethers";
 import BridgeArtifact from "../utils/abis/Bridge.json";
 import WrappedTokenArtifact from "../utils/abis/WrappedToken.json";
+import {
+  BRIDGE_ADDRESS,
+  MOCK2_ERC20_ADDRESS,
+  MOCK_ERC20_ADDRESS,
+} from "../shared/constants";
 
-const BRIDGE_ADDRESS = "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0";
 const localProvider = new ethers.JsonRpcProvider("http://127.0.0.1:8545/");
 
 function Markets() {
@@ -42,8 +46,8 @@ function Markets() {
 
       // Known original tokens from your setup
       const knownOriginalTokens = [
-        "0x5FC8d32690cc91D4c39d9d3abcBD16989F875707", // $MOCK
-        "0x0165878A594ca255338adfa4d48449f69242Eb8F", // $MOCK2
+        MOCK_ERC20_ADDRESS, // $MOCK
+        MOCK2_ERC20_ADDRESS, // $MOCK2
       ];
 
       const pairs = await Promise.all(

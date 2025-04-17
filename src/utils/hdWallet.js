@@ -19,8 +19,6 @@ import * as bitcoin from "bitcoinjs-lib";
 import * as ECPairFactory from "ecpair";
 import * as eccryptoJS from "eccrypto-js";
 import * as shajs from "sha.js";
-import bs58 from "bs58";
-import { useAppContext } from "../context/AppContext";
 import axios from "axios";
 
 const STORAGE_KEYS = { MNEMONIC: "mnemonic", PUBLIC_KEY: "publicKey" };
