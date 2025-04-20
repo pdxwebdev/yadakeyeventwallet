@@ -215,12 +215,15 @@ async function main() {
     mockPepe = await MockERC20.attach(deployments.pepeERC20_2);
     console.log("Using existing Mock PEPE:", deployments.pepeERC20_2);
   } else {
-    mockPepe = await MockERC20.deploy("Pepe", "PEPE", ethers.parseEther("1000"));
+    mockPepe = await MockERC20.connect(deployer).deploy("Pepe", "PEPE", ethers.parseEther("1000"));
     await mockPepe.waitForDeployment();
     deployments.pepeERC20_2 = await mockPepe.getAddress();
     console.log("Mock PEPE:", deployments.pepeERC20_2);
   }
   const mockPepeAddress = deployments.pepeERC20_2;
+  // Transfer 100 PEPE tokens to User 1 if balance is sufficient
+  const transferAmount = ethers.parseEther("100"); // 100 PEPE tokens
+  await mockPepe.connect(deployer).transfer(testAccount2.address, transferAmount);
 
   // Deploy Mock Price Feed
   const PriceFeedAggregatorV3 = await ethers.getContractFactory("PriceFeedAggregatorV3");

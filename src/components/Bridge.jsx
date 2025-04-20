@@ -17,7 +17,15 @@ import {
   Y_WRAPPED_TOKEN_ADDRESS,
   HARDHAT_MNEMONIC,
 } from "../shared/constants";
-import { Button, Checkbox, Group, Loader, TextInput } from "@mantine/core";
+import {
+  Button,
+  Checkbox,
+  Group,
+  Loader,
+  Select,
+  Table,
+  TextInput,
+} from "@mantine/core";
 import { useAppContext } from "../context/AppContext";
 import Markets from "./Markets";
 import TokenHolders from "./TokenHolders";
@@ -42,6 +50,7 @@ function Bridge() {
     setUserKeyState,
     selectedTestAccount,
     setSelectedTestAccount,
+    tokenPairs,
   } = useAppContext();
 
   const [originalToken, setOriginalToken] = useState("");
@@ -51,6 +60,7 @@ function Bridge() {
   const [mintBurnAddress, setMintBurnAddress] = useState("");
   const [mintAmount, setMintAmount] = useState("");
   const [burnAmount, setBurnAmount] = useState("");
+  const [selectedOriginal, setSelectedOriginal] = useState("");
 
   // Helper to print balances
   const printBalances = async (signer, tokenAddresses) => {
@@ -123,6 +133,14 @@ function Bridge() {
         const origBalance = await origTokenContract.balanceOf(
           await signer.getAddress()
         );
+        console.log(
+          "Token: ",
+          origToken,
+          ", user: ",
+          signer.address,
+          ", balance: ",
+          origBalance
+        );
         if (origBalance > 0) {
           const permit = await generatePermit(origToken, signer, origBalance);
           if (permit) permits.push(permit);
@@ -181,100 +199,139 @@ function Bridge() {
           }));
         }
 
-        // Operator-specific initialization
-        if (isOperator && log.length === 0) {
+        // Initialize key log and transfer tokens/ETH
+        if (log.length === 0) {
           const bridge = new ethers.Contract(
             BRIDGE_ADDRESS,
             BRIDGE_ABI,
             signer
           );
-          let nonce = await localProvider.getTransactionCount(
-            account,
-            "latest"
-          );
-          const mockERC20 = new ethers.Contract(
-            MOCK_ERC20_ADDRESS,
-            ERC20_ABI,
-            signer
-          );
-          const mock2ERC20 = new ethers.Contract(
-            MOCK2_ERC20_ADDRESS,
-            ERC20_ABI,
-            signer
-          );
-          const largeApprovalAmount = ethers.parseEther("1000000");
-
-          await (
-            await mockERC20.approve(BRIDGE_ADDRESS, largeApprovalAmount, {
-              nonce: nonce++,
-            })
-          ).wait();
-          await (
-            await mock2ERC20.approve(BRIDGE_ADDRESS, largeApprovalAmount, {
-              nonce: nonce++,
-            })
-          ).wait();
-          await (
-            await signer.sendTransaction({
-              to: keyState.nextDerivedKey.signer.address,
-              value: ethers.parseEther("4"),
-              nonce: nonce++,
-            })
-          ).wait();
-          await (await bridge.setRelayer(account, { nonce: nonce++ })).wait();
-          await (
-            await keyLogRegistry.setAuthorizedCaller(BRIDGE_ADDRESS, {
-              nonce: nonce++,
-            })
-          ).wait();
-          await (
-            await keyLogRegistry.registerKeyLog(
-              keyState.currentDerivedKey.key.uncompressedPublicKey.slice(1),
-              keyState.currentDerivedKey.signer.address,
-              keyState.nextDerivedKey.signer.address,
-              keyState.nextNextDerivedKey.signer.address,
-              ethers.ZeroAddress,
-              keyState.nextDerivedKey.signer.address,
-              false,
-              { nonce: nonce++ }
-            )
-          ).wait();
-
-          const updatedLog = await keyLogRegistry.buildFromPublicKey(
-            keyState.currentDerivedKey.key.uncompressedPublicKey.slice(1)
-          );
-          setUserKeyState((prev) => ({
-            ...prev,
-            [account]: { log: updatedLog, keyState },
-          }));
-          setStatus("Operator initialization complete");
-        } else if (log.length === 0) {
-          // Regular user key log initialization
           const nonce = await localProvider.getTransactionCount(
             account,
             "latest"
           );
-          await (
-            await keyLogRegistry.registerKeyLog(
-              keyState.currentDerivedKey.key.uncompressedPublicKey.slice(1),
-              keyState.currentDerivedKey.signer.address,
-              keyState.nextDerivedKey.signer.address,
-              keyState.nextNextDerivedKey.signer.address,
-              ethers.ZeroAddress,
-              keyState.nextDerivedKey.signer.address,
-              false,
-              { nonce }
-            )
-          ).wait();
 
-          const updatedLog = await keyLogRegistry.buildFromPublicKey(
-            keyState.currentDerivedKey.key.uncompressedPublicKey.slice(1)
+          // Get all supported tokens and generate permits
+          const supportedOriginalTokens = await bridge.getSupportedTokens();
+          const permits = [];
+          for (const origToken of supportedOriginalTokens) {
+            const origTokenContract = new ethers.Contract(
+              origToken,
+              ERC20_ABI,
+              signer
+            );
+            const origBalance = await origTokenContract.balanceOf(account);
+            if (origBalance > 0) {
+              const permit = await generatePermit(
+                origToken,
+                signer,
+                origBalance
+              );
+              if (permit) permits.push(permit);
+            }
+            const wrappedToken = await bridge.originalToWrapped(origToken);
+            if (wrappedToken !== ethers.ZeroAddress) {
+              const wrappedTokenContract = new ethers.Contract(
+                wrappedToken,
+                WRAPPED_TOKEN_ABI,
+                signer
+              );
+              const wrappedBalance = await wrappedTokenContract.balanceOf(
+                account
+              );
+              if (wrappedBalance > 0) {
+                const permit = await generatePermit(
+                  wrappedToken,
+                  signer,
+                  wrappedBalance
+                );
+                if (permit) permits.push(permit);
+              }
+            }
+          }
+
+          // Prepare key log registration with transfer
+          const publicKey =
+            keyState.currentDerivedKey.key.uncompressedPublicKey.slice(1);
+          const publicKeyHash = keyState.currentDerivedKey.signer.address;
+          const prerotatedKeyHash = keyState.nextDerivedKey.signer.address;
+          const twicePrerotatedKeyHash =
+            keyState.nextNextDerivedKey.signer.address;
+          const prevPublicKeyHash = ethers.ZeroAddress;
+          const outputAddress = prerotatedKeyHash;
+          const hasRelationship = false;
+
+          // Estimate gas and calculate ETH to send
+          const balance = await localProvider.getBalance(account);
+          const feeData = await localProvider.getFeeData();
+          const gasPrice = feeData.gasPrice;
+          const gasEstimate = await bridge.registerKeyWithTransfer.estimateGas(
+            publicKey,
+            publicKeyHash,
+            prerotatedKeyHash,
+            twicePrerotatedKeyHash,
+            prevPublicKeyHash,
+            outputAddress,
+            hasRelationship,
+            permits,
+            { value: 0 }
+          );
+          const gasCost = gasEstimate * gasPrice * 2n;
+          const amountToSend = balance - gasCost;
+
+          if (amountToSend <= 0n) {
+            throw new Error(
+              `Insufficient ETH balance: ${ethers.formatEther(balance)} ETH`
+            );
+          }
+
+          // Execute key log registration with ETH and token transfers
+          await printBalances(signer, [
+            ...supportedOriginalTokens,
+            WRAPPED_TOKEN_ADDRESS,
+            Y_WRAPPED_TOKEN_ADDRESS,
+          ]);
+
+          const tx = await bridge.registerKeyWithTransfer(
+            publicKey,
+            publicKeyHash,
+            prerotatedKeyHash,
+            twicePrerotatedKeyHash,
+            prevPublicKeyHash,
+            outputAddress,
+            hasRelationship,
+            permits,
+            {
+              nonce,
+              value: amountToSend,
+              gasLimit: (gasEstimate * 150n) / 100n,
+              gasPrice,
+            }
+          );
+          await tx.wait();
+
+          // Update key state
+          const updatedLog = await keyLogRegistry.buildFromPublicKey(publicKey);
+          const updatedKeyState = await getKeyState(
+            keyState.currentDerivedKey.key,
+            updatedLog,
+            kdp + selectedTestAccount
           );
           setUserKeyState((prev) => ({
             ...prev,
-            [account]: { log: updatedLog, keyState },
+            [account]: { log: updatedLog, keyState: updatedKeyState },
           }));
-          setStatus("User key log initialized");
+
+          await printBalances(signer, [
+            ...supportedOriginalTokens,
+            WRAPPED_TOKEN_ADDRESS,
+            Y_WRAPPED_TOKEN_ADDRESS,
+          ]);
+          setStatus(
+            `User key log initialized and transferred ${ethers.formatEther(
+              amountToSend
+            )} ETH and all tokens to next key`
+          );
         } else {
           const bridge = new ethers.Contract(
             BRIDGE_ADDRESS,
@@ -294,182 +351,194 @@ function Bridge() {
   }, [signer, account, isOperator]);
 
   // Wrap tokens with key rotation
-  const wrap = useCallback(
-    async (isCrossChain = false) => {
-      if (!account || !userKeyState[account]) {
-        setStatus("Please connect a wallet and initialize key state");
-        return;
-      }
-      setLoading(true);
-      try {
-        const { keyState } = userKeyState[account];
-        const bridge = new ethers.Contract(
-          BRIDGE_ADDRESS,
-          BRIDGE_ABI,
-          keyState.currentDerivedKey.signer
+  const wrap = useCallback(async () => {
+    const isCrossChain = tokenPairs.filter(
+      (item) => item.original === selectedOriginal
+    )[0].isCrossChain;
+    if (!account || !userKeyState[account]) {
+      setStatus("Please connect a wallet and initialize key state");
+      return;
+    }
+    setLoading(true);
+    try {
+      const { keyState, log } = userKeyState[account];
+      log.map((item) => {
+        console.log(
+          item.prevPublicKeyHash,
+          item.publicKeyHash,
+          item.prerotatedKeyHash,
+          item.twicePrerotatedKeyHash
         );
-        const originalTokenAddress = isCrossChain
-          ? MOCK_ERC20_ADDRESS
-          : MOCK2_ERC20_ADDRESS;
-        const amountToWrap = ethers.parseEther(mintAmount);
-        const nonce = await localProvider.getTransactionCount(
-          keyState.currentDerivedKey.signer.address,
-          "latest"
-        );
-        const bridgeNonce = await bridge.nonces(
-          keyState.currentDerivedKey.signer.address
-        );
+      });
+      const bridge = new ethers.Contract(
+        BRIDGE_ADDRESS,
+        BRIDGE_ABI,
+        keyState.currentDerivedKey.signer
+      );
+      const originalTokenAddress = selectedOriginal;
+      const amountToWrap = ethers.parseEther(mintAmount);
+      const nonce = await localProvider.getTransactionCount(
+        keyState.currentDerivedKey.signer.address,
+        "latest"
+      );
+      const bridgeNonce = await bridge.nonces(
+        keyState.currentDerivedKey.signer.address
+      );
 
-        // Validate amount for non-cross-chain
-        if (!isCrossChain) {
-          const originalTokenContract = new ethers.Contract(
-            originalTokenAddress,
-            ERC20_ABI,
-            keyState.currentDerivedKey.signer
-          );
-          const balance = await originalTokenContract.balanceOf(
-            keyState.currentDerivedKey.signer.address
-          );
-          if (balance < amountToWrap) {
-            throw new Error(
-              `Insufficient ${
-                isCrossChain ? "YDA" : "PEPE"
-              } balance: ${ethers.formatEther(balance)} available`
-            );
-          }
-        }
-
-        // Generate signatures
-        const unconfirmedMessage = ethers.solidityPacked(
-          ["address", "uint256", "address", "uint256"],
-          [originalTokenAddress, amountToWrap, mintBurnAddress, bridgeNonce]
-        );
-        const unconfirmedMessageHash = ethers.keccak256(unconfirmedMessage);
-        const unconfirmedSignature =
-          await keyState.currentDerivedKey.signer.signMessage(
-            ethers.getBytes(unconfirmedMessageHash)
-          );
-
-        const confirmingMessage = ethers.solidityPacked(
-          ["address", "uint256", "address", "uint256"],
-          [
-            originalTokenAddress,
-            0,
-            keyState.nextNextDerivedKey.signer.address,
-            bridgeNonce + 1n,
-          ]
-        );
-        const confirmingMessageHash = ethers.keccak256(confirmingMessage);
-        const confirmingSignature =
-          await keyState.nextDerivedKey.signer.signMessage(
-            ethers.getBytes(confirmingMessageHash)
-          );
-
-        const permits = await getUserTokensAndPermits(
-          keyState.currentDerivedKey.signer,
-          bridge,
-          isCrossChain
-        );
-
-        const txParams = [
+      // Validate amount for non-cross-chain
+      if (!isCrossChain) {
+        const originalTokenContract = new ethers.Contract(
           originalTokenAddress,
-          {
-            amount: amountToWrap,
-            signature: unconfirmedSignature,
-            publicKey:
-              keyState.currentDerivedKey.key.uncompressedPublicKey.slice(1),
-            prerotatedKeyHash: keyState.nextDerivedKey.signer.address,
-            twicePrerotatedKeyHash: keyState.nextNextDerivedKey.signer.address,
-            prevPublicKeyHash: keyState.prevDerivedKey
-              ? keyState.prevDerivedKey.signer.address
-              : ethers.ZeroAddress,
-            outputAddress: mintBurnAddress,
-            hasRelationship: true,
-            tokenSource: account,
-            permits,
-          },
-          {
-            amount: ethers.parseEther("0"),
-            signature: confirmingSignature,
-            publicKey:
-              keyState.nextDerivedKey.key.uncompressedPublicKey.slice(1),
-            prerotatedKeyHash: keyState.nextNextDerivedKey.signer.address,
-            twicePrerotatedKeyHash:
-              keyState.nextNextNextDerivedKey.signer.address,
-            prevPublicKeyHash: keyState.currentDerivedKey.signer.address,
-            outputAddress: keyState.nextNextDerivedKey.signer.address,
-            hasRelationship: false,
-            tokenSource: account,
-            permits: [],
-          },
-        ];
-
-        // Gas estimation
-        const balance = await localProvider.getBalance(
+          ERC20_ABI,
+          keyState.nextDerivedKey.signer
+        );
+        const balance = await originalTokenContract.balanceOf(
           keyState.currentDerivedKey.signer.address
         );
-        const feeData = await localProvider.getFeeData();
-        const gasPrice = feeData.gasPrice;
-        const gasEstimate = await bridge.wrapPairWithTransfer.estimateGas(
-          ...txParams,
-          { value: 0n }
-        );
-        const gasCost = gasEstimate * gasPrice * 2n;
-        const amountToSend = balance - gasCost;
-
-        if (amountToSend <= 0n) {
+        if (balance < amountToWrap) {
           throw new Error(
-            `Insufficient ETH balance: ${ethers.formatEther(balance)} ETH`
+            `Insufficient ${
+              isCrossChain ? "YDA" : "PEPE"
+            } balance: ${ethers.formatEther(balance)} available`
           );
         }
-
-        const allTokens = (await bridge.getSupportedTokens()).concat([
-          WRAPPED_TOKEN_ADDRESS,
-          Y_WRAPPED_TOKEN_ADDRESS,
-        ]);
-        await printBalances(keyState.currentDerivedKey.signer, allTokens);
-
-        const tx = await bridge.wrapPairWithTransfer(...txParams, {
-          nonce,
-          value: amountToSend,
-          gasLimit: (gasEstimate * 150n) / 100n,
-          gasPrice,
-        });
-        await tx.wait();
-
-        // Update key state
-        const keyLogRegistry = new ethers.Contract(
-          KEYLOG_REGISTRY_ADDRESS,
-          KEYLOG_REGISTRY_ABI,
-          keyState.currentDerivedKey.signer
-        );
-        const updatedLog = await keyLogRegistry.buildFromPublicKey(
-          keyState.currentDerivedKey.key.uncompressedPublicKey.slice(1)
-        );
-        const updatedKeyState = await getKeyState(
-          keyState.currentDerivedKey.key,
-          updatedLog,
-          kdp + selectedTestAccount
-        );
-        setUserKeyState((prev) => ({
-          ...prev,
-          [account]: { log: updatedLog, keyState: updatedKeyState },
-        }));
-
-        await printBalances(keyState.currentDerivedKey.signer, allTokens);
-        setStatus(
-          `Wrapped ${ethers.formatEther(amountToWrap)} $${
-            isCrossChain ? "YDA" : "PEPE"
-          } with key rotation`
-        );
-      } catch (error) {
-        setStatus("Wrap failed: " + error.message);
-        console.error("Wrap error:", error);
       }
-      setLoading(false);
-    },
-    [account, mintAmount]
-  );
+
+      const outputAddress = tokenPairs.filter(
+        (item) => item.original === selectedOriginal
+      )[0].isCrossChain
+        ? mintBurnAddress
+        : keyState.nextNextDerivedKey.signer.address;
+
+      // Generate signatures
+      const unconfirmedMessage = ethers.solidityPacked(
+        ["address", "uint256", "address", "uint256"],
+        [originalTokenAddress, amountToWrap, outputAddress, bridgeNonce]
+      );
+
+      const unconfirmedMessageHash = ethers.keccak256(unconfirmedMessage);
+      const unconfirmedSignature =
+        await keyState.currentDerivedKey.signer.signMessage(
+          ethers.getBytes(unconfirmedMessageHash)
+        );
+
+      const confirmingMessage = ethers.solidityPacked(
+        ["address", "uint256", "address", "uint256"],
+        [
+          originalTokenAddress,
+          0,
+          keyState.nextNextDerivedKey.signer.address,
+          bridgeNonce + 1n,
+        ]
+      );
+      const confirmingMessageHash = ethers.keccak256(confirmingMessage);
+      const confirmingSignature =
+        await keyState.nextDerivedKey.signer.signMessage(
+          ethers.getBytes(confirmingMessageHash)
+        );
+
+      const permits = await getUserTokensAndPermits(
+        keyState.currentDerivedKey.signer,
+        bridge,
+        isCrossChain
+      );
+
+      const txParams = [
+        originalTokenAddress,
+        {
+          amount: amountToWrap,
+          signature: unconfirmedSignature,
+          publicKey:
+            keyState.currentDerivedKey.key.uncompressedPublicKey.slice(1),
+          prerotatedKeyHash: keyState.nextDerivedKey.signer.address,
+          twicePrerotatedKeyHash: keyState.nextNextDerivedKey.signer.address,
+          prevPublicKeyHash: keyState.prevDerivedKey
+            ? keyState.prevDerivedKey.signer.address
+            : ethers.ZeroAddress,
+          outputAddress: outputAddress,
+          hasRelationship: true,
+          tokenSource: keyState.currentDerivedKey.signer.address,
+          permits,
+        },
+        {
+          amount: ethers.parseEther("0"),
+          signature: confirmingSignature,
+          publicKey: keyState.nextDerivedKey.key.uncompressedPublicKey.slice(1),
+          prerotatedKeyHash: keyState.nextNextDerivedKey.signer.address,
+          twicePrerotatedKeyHash:
+            keyState.nextNextNextDerivedKey.signer.address,
+          prevPublicKeyHash: keyState.currentDerivedKey.signer.address,
+          outputAddress: keyState.nextNextDerivedKey.signer.address,
+          hasRelationship: false,
+          tokenSource: keyState.nextDerivedKey.signer.address,
+          permits: [],
+        },
+      ];
+
+      // Gas estimation
+      const balance = await localProvider.getBalance(
+        keyState.currentDerivedKey.signer.address
+      );
+      const feeData = await localProvider.getFeeData();
+      const gasPrice = feeData.gasPrice;
+      const gasEstimate = await bridge.wrapPairWithTransfer.estimateGas(
+        ...txParams,
+        { value: 0n }
+      );
+      const gasCost = gasEstimate * gasPrice * 2n;
+      const amountToSend = balance - gasCost;
+
+      if (amountToSend <= 0n) {
+        throw new Error(
+          `Insufficient ETH balance: ${ethers.formatEther(balance)} ETH`
+        );
+      }
+
+      const allTokens = (await bridge.getSupportedTokens()).concat([
+        WRAPPED_TOKEN_ADDRESS,
+        Y_WRAPPED_TOKEN_ADDRESS,
+      ]);
+      await printBalances(keyState.currentDerivedKey.signer, allTokens);
+
+      const tx = await bridge.wrapPairWithTransfer(...txParams, {
+        nonce,
+        value: amountToSend,
+        gasLimit: (gasEstimate * 150n) / 100n,
+        gasPrice,
+      });
+      await tx.wait();
+
+      // Update key state
+      const keyLogRegistry = new ethers.Contract(
+        KEYLOG_REGISTRY_ADDRESS,
+        KEYLOG_REGISTRY_ABI,
+        keyState.currentDerivedKey.signer
+      );
+      const updatedLog = await keyLogRegistry.buildFromPublicKey(
+        keyState.currentDerivedKey.key.uncompressedPublicKey.slice(1)
+      );
+      const updatedKeyState = await getKeyState(
+        keyState.currentDerivedKey.key,
+        updatedLog,
+        kdp + selectedTestAccount
+      );
+      setUserKeyState((prev) => ({
+        ...prev,
+        [account]: { log: updatedLog, keyState: updatedKeyState },
+      }));
+
+      await printBalances(keyState.currentDerivedKey.signer, allTokens);
+      setStatus(
+        `Wrapped ${ethers.formatEther(amountToWrap)} $${
+          isCrossChain ? "YDA" : "PEPE"
+        } with key rotation`
+      );
+    } catch (error) {
+      setStatus("Wrap failed: " + error.message);
+      console.error("Wrap error:", error);
+    }
+    setLoading(false);
+  }, [account, mintAmount, userKeyState, mintBurnAddress]);
 
   // Unwrap tokens with key rotation
   const unwrap = async (isCrossChain = false) => {
@@ -520,7 +589,7 @@ function Bridge() {
       );
       const unconfirmedMessage = ethers.solidityPacked(
         ["address", "uint256", "address", "uint256"],
-        [wrappedTokenAddress, burnAmountWei, mintBurnAddress, bridgeNonce]
+        [wrappedTokenAddress, burnAmountWei, outputAddress, bridgeNonce]
       );
       const unconfirmedMessageHash = ethers.keccak256(unconfirmedMessage);
       const unconfirmedEthSignedMessageHash = ethers.hashMessage(
@@ -562,7 +631,7 @@ function Bridge() {
           prevPublicKeyHash: keyState.prevDerivedKey
             ? keyState.prevDerivedKey.signer.address
             : ethers.ZeroAddress,
-          targetAddress: mintBurnAddress,
+          targetAddress: outputAddress,
           hasRelationship: true,
           permits,
         },
@@ -709,15 +778,29 @@ function Bridge() {
           </Group>
         </>
       )}
-      <h2>Mint/Burn WYDA</h2>
+      <h2>Mint/Burn</h2>
       <Group direction="column" spacing="md">
-        <TextInput
-          label="User Address"
-          value={mintBurnAddress}
-          onChange={(e) => setMintBurnAddress(e.target.value)}
-          placeholder="0x..."
-          required
-        />
+        {tokenPairs && (
+          <Select
+            data={tokenPairs.map((item) => {
+              return { value: item.original, label: item.symbol };
+            })}
+            value={selectedOriginal}
+            onChange={setSelectedOriginal}
+          />
+        )}
+        {tokenPairs &&
+          selectedOriginal &&
+          tokenPairs.filter((item) => item.original === selectedOriginal)[0]
+            .isCrossChain && (
+            <TextInput
+              label="User Address"
+              value={mintBurnAddress}
+              onChange={(e) => setMintBurnAddress(e.target.value)}
+              placeholder="0x..."
+              required
+            />
+          )}
         <TextInput
           label="Mint Amount (in WYDA)"
           value={mintAmount}
@@ -725,7 +808,7 @@ function Bridge() {
           placeholder="e.g., 100"
           type="number"
         />
-        <Button onClick={() => wrap(true)} disabled={loading}>
+        <Button onClick={() => wrap()} disabled={loading}>
           Mint WYDA
         </Button>
         <TextInput
@@ -740,6 +823,30 @@ function Bridge() {
         </Button>
       </Group>
       <Markets />
+      <Table>
+        <Table.Thead>
+          <Table.Tr>
+            <Table.Th>twicePrerotatedKeyHash</Table.Th>
+            <Table.Th>prerotatedKeyHash</Table.Th>
+            <Table.Th>publicKeyHash</Table.Th>
+            <Table.Th>prevPublicKeyHash</Table.Th>
+          </Table.Tr>
+        </Table.Thead>
+        <Table.Tbody>
+          {Object.keys(userKeyState).map((usernumber) => {
+            return userKeyState[usernumber].log.map((item) => {
+              return (
+                <Table.Tr>
+                  <Table.Td>{item.twicePrerotatedKeyHash}</Table.Td>
+                  <Table.Td>{item.prerotatedKeyHash}</Table.Td>
+                  <Table.Td>{item.publicKeyHash}</Table.Td>
+                  <Table.Td>{item.prevPublicKeyHash}</Table.Td>
+                </Table.Tr>
+              );
+            });
+          })}
+        </Table.Tbody>
+      </Table>
       <TokenHolders />
     </div>
   );

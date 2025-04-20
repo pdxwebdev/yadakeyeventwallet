@@ -34,6 +34,7 @@ contract KeyLogRegistry is Ownable {
     mapping(address => uint256[]) public byPublicKeyHash;
     mapping(address => uint256[]) public byPrevPublicKeyHash;
     mapping(address => uint256[]) public byPrerotatedKeyHash;
+    mapping(address => uint256[]) public byTwicePrerotatedKeyHash;
 
     event KeyLogRegistered(address indexed publicKeyHash, uint256 index);
     event KeyRotated(address indexed publicKeyHash, uint256 index);
@@ -81,6 +82,9 @@ contract KeyLogRegistry is Ownable {
         }
         if (prerotatedKeyHash != address(0)) {
             byPrerotatedKeyHash[prerotatedKeyHash].push(newIndex);
+        }
+        if (twicePrerotatedKeyHash != address(0)) {
+            byTwicePrerotatedKeyHash[twicePrerotatedKeyHash].push(newIndex);
         }
 
         // Step 3: Emit events
@@ -142,6 +146,9 @@ contract KeyLogRegistry is Ownable {
         if (unconfirmedPrerotatedKeyHash != address(0)) {
             byPrerotatedKeyHash[unconfirmedPrerotatedKeyHash].push(unconfirmedIndex);
         }
+        if (unconfirmedTwicePrerotatedKeyHash != address(0)) {
+            byTwicePrerotatedKeyHash[unconfirmedTwicePrerotatedKeyHash].push(unconfirmedIndex);
+        }
 
         keyLogEntries.push(KeyLogEntry({
             twicePrerotatedKeyHash: confirmingTwicePrerotatedKeyHash,
@@ -161,6 +168,9 @@ contract KeyLogRegistry is Ownable {
         }
         if (confirmingPrerotatedKeyHash != address(0)) {
             byPrerotatedKeyHash[confirmingPrerotatedKeyHash].push(confirmingIndex);
+        }
+        if (confirmingTwicePrerotatedKeyHash != address(0)) {
+            byTwicePrerotatedKeyHash[confirmingTwicePrerotatedKeyHash].push(confirmingIndex);
         }
 
         // Step 3: Emit events
@@ -232,6 +242,23 @@ contract KeyLogRegistry is Ownable {
         require(publicKey.length == 64, "Public key must be 64 bytes");
         bytes32 hash = keccak256(publicKey);
         return address(uint160(uint256(hash)));
+    }
+
+    // Add this function to KeyLogRegistry.sol
+    function getLatestEntryByPrerotatedKeyHash(address prerotatedKeyHash) public view returns (KeyLogEntry memory, bool) {
+        uint256[] memory indices = byPrerotatedKeyHash[prerotatedKeyHash];
+        if (indices.length == 0) {
+            indices = byTwicePrerotatedKeyHash[prerotatedKeyHash];
+            if (indices.length == 0) {
+                KeyLogEntry memory emptyEntry;
+                return (emptyEntry, false);
+            }
+        }
+        KeyLogEntry memory entry = keyLogEntries[indices[indices.length - 1]];
+        address currentAddress = entry.prerotatedKeyHash;
+        indices = byPublicKeyHash[currentAddress];
+        require(indices.length == 0, "Not the latest key rotation.");
+        return (entry, true);
     }
 
     function buildFromPublicKey(bytes memory publicKey) public view returns (KeyLogEntry[] memory) {

@@ -21,61 +21,24 @@ import {
   MOCK2_ERC20_ADDRESS,
   MOCK_ERC20_ADDRESS,
 } from "../shared/constants";
+import { useAppContext } from "../context/AppContext";
 
 const localProvider = new ethers.JsonRpcProvider("http://127.0.0.1:8545/");
 
 function Markets() {
-  const [tokenPairs, setTokenPairs] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+  const {
+    fetchTokenPairs,
+    setTokenPairs,
+    tokenPairs,
+    loading,
+    setLoading,
+    error,
+    setError,
+  } = useAppContext();
 
   useEffect(() => {
     fetchTokenPairs();
   }, []);
-
-  const fetchTokenPairs = async () => {
-    try {
-      setLoading(true);
-      setError("");
-
-      const bridge = new ethers.Contract(
-        BRIDGE_ADDRESS,
-        BridgeArtifact.abi,
-        localProvider
-      );
-
-      // Known original tokens from your setup
-      const knownOriginalTokens = [
-        MOCK_ERC20_ADDRESS, // $MOCK
-        MOCK2_ERC20_ADDRESS, // $MOCK2
-      ];
-
-      const pairs = await Promise.all(
-        knownOriginalTokens.map(async (original) => {
-          const wrapped = await bridge.originalToWrapped(original);
-          if (wrapped !== ethers.ZeroAddress) {
-            const wrappedContract = new ethers.Contract(
-              wrapped,
-              WrappedTokenArtifact.abi,
-              localProvider
-            );
-            const name = await wrappedContract.name();
-            const symbol = await wrappedContract.symbol();
-            const isCrossChain = await bridge.isCrossChain(wrapped);
-            return { original, wrapped, name, symbol, isCrossChain };
-          }
-          return null;
-        })
-      );
-
-      const filteredPairs = pairs.filter((pair) => pair !== null);
-      setTokenPairs(filteredPairs);
-      setLoading(false);
-    } catch (err) {
-      setError(`Error fetching token pairs: ${err.message}`);
-      setLoading(false);
-    }
-  };
 
   return (
     <div style={{ padding: "20px" }}>

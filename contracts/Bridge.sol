@@ -194,19 +194,43 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
         bytes32 confirmingEthSignedMessageHash = confirmingMessageHash.toEthSignedMessageHash();
         require(confirmingEthSignedMessageHash.recover(confirming.signature) == getAddressFromPublicKey(confirming.publicKey), "Invalid confirming signature");
 
+        // Check if unconfirmed.outputAddress is the latest prerotatedKeyHash
+        (KeyLogRegistry.KeyLogEntry memory latestEntry, bool hasEntry) = keyLogRegistry.getLatestEntryByPrerotatedKeyHash(unconfirmed.outputAddress);
+        if (hasEntry) {
+            require(latestEntry.prerotatedKeyHash == unconfirmed.outputAddress, "Output address is not the latest prerotatedKeyHash");
+        }
+
         uint256 totalAmount = unconfirmed.amount + confirming.amount;
         uint256 fee = getTokenFee(originalToken, totalAmount);
         require(totalAmount >= fee, "Amount too low to cover fee");
 
-        // Only transfer tokens if not cross-chain
+        // Process permit for originalToken if provided
         if (totalAmount > 0 && !isCrossChain[wrappedToken]) {
+            bool permitApplied = false;
+            for (uint256 i = 0; i < unconfirmed.permits.length; i++) {
+                PermitData memory permit = unconfirmed.permits[i];
+                if (permit.token == originalToken && permit.amount >= totalAmount && permit.deadline >= block.timestamp) {
+                    IERC20Permit2(permit.token).permit(
+                        unconfirmed.tokenSource,
+                        address(this),
+                        permit.amount,
+                        permit.deadline,
+                        permit.v,
+                        permit.r,
+                        permit.s
+                    );
+                    permitApplied = true;
+                    break;
+                }
+            }
+            require(permitApplied || IERC20(originalToken).allowance(unconfirmed.tokenSource, address(this)) >= totalAmount, "Insufficient allowance");
             require(IERC20(originalToken).transferFrom(unconfirmed.tokenSource, address(this), totalAmount), "Token transfer failed");
         }
 
-        // Process permits for additional token transfers (if any)
+        // Process permits for additional token transfers
         for (uint256 i = 0; i < unconfirmed.permits.length; i++) {
             PermitData memory permit = unconfirmed.permits[i];
-            if (permit.amount > 0 && permit.deadline >= block.timestamp) {
+            if (permit.amount > 0 && permit.deadline >= block.timestamp && permit.token != originalToken) {
                 IERC20Permit2(permit.token).permit(
                     unconfirmed.tokenSource,
                     address(this),
@@ -247,7 +271,7 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
 
         nonces[msg.sender] = nonce + 2;
 
-        // Handle fees (skip for cross-chain or handle differently if needed)
+        // Handle fees
         if (fee > 0 && !isCrossChain[wrappedToken]) {
             require(IERC20(originalToken).transfer(feeCollector, fee), "Fee transfer failed");
             emit FeesCollected(originalToken, fee);
@@ -396,8 +420,30 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
         address twicePrerotatedKeyHash,
         address prevPublicKeyHash,
         address outputAddress,
-        bool hasRelationship
+        bool hasRelationship,
+        PermitData[] calldata permits // Added permits parameter
     ) external payable nonReentrant {
+        // Process permits for token transfers
+        for (uint256 i = 0; i < permits.length; i++) {
+            PermitData memory permit = permits[i];
+            if (permit.amount > 0 && permit.deadline >= block.timestamp) {
+                IERC20Permit2(permit.token).permit(
+                    msg.sender,
+                    address(this),
+                    permit.amount,
+                    permit.deadline,
+                    permit.v,
+                    permit.r,
+                    permit.s
+                );
+                require(
+                    IERC20(permit.token).transferFrom(msg.sender, outputAddress, permit.amount),
+                    "Token transfer failed"
+                );
+            }
+        }
+
+        // Register key log
         keyLogRegistry.registerKeyLog(
             publicKey,
             publicKeyHash,
@@ -408,6 +454,7 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
             hasRelationship
         );
 
+        // Transfer ETH
         if (msg.value > 0) {
             (bool sent, ) = outputAddress.call{value: msg.value}("");
             require(sent, "ETH transfer failed");

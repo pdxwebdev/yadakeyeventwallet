@@ -4,12 +4,21 @@ import { Loader, Table, Pagination, Button, Group } from "@mantine/core"; // Add
 import WrappedTokenArtifact from "../utils/abis/WrappedToken.json";
 import {
   localProvider,
+  MOCK2_ERC20_ADDRESS,
+  MOCK_ERC20_ADDRESS,
   WRAPPED_TOKEN_ADDRESS,
   Y_WRAPPED_TOKEN_ADDRESS,
 } from "../shared/constants";
 import { useAppContext } from "../context/AppContext";
 
 const WRAPPED_TOKEN_ABI = WrappedTokenArtifact.abi;
+
+const tokens = {
+  [WRAPPED_TOKEN_ADDRESS]: "WYDA",
+  [Y_WRAPPED_TOKEN_ADDRESS]: "YPEPE",
+  [MOCK_ERC20_ADDRESS]: "YDA",
+  [MOCK2_ERC20_ADDRESS]: "PEPE",
+};
 
 function TokenHolders() {
   const { loading, setLoading } = useAppContext();
@@ -23,7 +32,12 @@ function TokenHolders() {
   const fetchTokenHolders = async () => {
     setLoading(true);
     try {
-      const wrappedTokens = [WRAPPED_TOKEN_ADDRESS, Y_WRAPPED_TOKEN_ADDRESS];
+      const wrappedTokens = [
+        WRAPPED_TOKEN_ADDRESS,
+        Y_WRAPPED_TOKEN_ADDRESS,
+        MOCK2_ERC20_ADDRESS,
+        MOCK_ERC20_ADDRESS,
+      ];
       const holdersSet = new Set();
 
       // Query Transfer events for both tokens
@@ -117,9 +131,7 @@ function TokenHolders() {
               {paginatedHolders.map((holder, index) => (
                 <tr key={index}>
                   <td>{holder.address}</td>
-                  <td>
-                    {holder.token === WRAPPED_TOKEN_ADDRESS ? "WYDA" : "YPEPE"}
-                  </td>
+                  <td>{tokens[holder.token]}</td>
                   <td>{holder.balance}</td>
                 </tr>
               ))}

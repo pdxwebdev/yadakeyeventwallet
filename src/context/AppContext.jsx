@@ -15,6 +15,16 @@ Full license terms: see LICENSE.txt in this repository.
 import axios from "axios";
 import React, { createContext, useState, useContext } from "react";
 import { getP2PKH } from "../utils/hdWallet";
+import { ethers } from "ethers";
+import BridgeArtifact from "../utils/abis/Bridge.json";
+import WrappedTokenArtifact from "../utils/abis/WrappedToken.json";
+import {
+  BRIDGE_ADDRESS,
+  MOCK2_ERC20_ADDRESS,
+  MOCK_ERC20_ADDRESS,
+} from "../shared/constants";
+
+const localProvider = new ethers.JsonRpcProvider("http://127.0.0.1:8545/");
 
 const AppContext = createContext();
 
@@ -35,6 +45,8 @@ export const AppProvider = ({ children }) => {
   const [isOperator, setIsOperator] = useState(false); // Flag for bridge operator
   const [userKeyState, setUserKeyState] = useState({}); // { address: { log, keyState } }
   const [selectedTestAccount, setSelectedTestAccount] = useState("");
+  const [tokenPairs, setTokenPairs] = useState([]);
+  const [error, setError] = useState("");
 
   const getBalance = async () => {
     const res = await axios.get(
@@ -69,6 +81,50 @@ export const AppProvider = ({ children }) => {
       )}`
     );
     setHasKel(() => res.data.status);
+  };
+
+  const fetchTokenPairs = async () => {
+    try {
+      setLoading(true);
+      setError("");
+
+      const bridge = new ethers.Contract(
+        BRIDGE_ADDRESS,
+        BridgeArtifact.abi,
+        localProvider
+      );
+
+      // Known original tokens from your setup
+      const knownOriginalTokens = [
+        MOCK_ERC20_ADDRESS, // $MOCK
+        MOCK2_ERC20_ADDRESS, // $MOCK2
+      ];
+
+      const pairs = await Promise.all(
+        knownOriginalTokens.map(async (original) => {
+          const wrapped = await bridge.originalToWrapped(original);
+          if (wrapped !== ethers.ZeroAddress) {
+            const wrappedContract = new ethers.Contract(
+              wrapped,
+              WrappedTokenArtifact.abi,
+              localProvider
+            );
+            const name = await wrappedContract.name();
+            const symbol = await wrappedContract.symbol();
+            const isCrossChain = await bridge.isCrossChain(wrapped);
+            return { original, wrapped, name, symbol, isCrossChain };
+          }
+          return null;
+        })
+      );
+
+      const filteredPairs = pairs.filter((pair) => pair !== null);
+      setTokenPairs(filteredPairs);
+      setLoading(false);
+    } catch (err) {
+      setError(`Error fetching token pairs: ${err.message}`);
+      setLoading(false);
+    }
   };
 
   return (
@@ -108,6 +164,11 @@ export const AppProvider = ({ children }) => {
         setUserKeyState,
         selectedTestAccount,
         setSelectedTestAccount,
+        tokenPairs,
+        setTokenPairs,
+        fetchTokenPairs,
+        error,
+        setError,
       }}
     >
       {children}
