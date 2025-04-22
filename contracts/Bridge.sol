@@ -103,6 +103,8 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
         PermitData[] permits; // Array of permits for multiple tokens
     }
 
+    event OwnershipTransferredToNextKey(address indexed previousOwner, address indexed newOwner);
+
     function initialize(address _keyLogRegistry) public initializer {
         __Ownable_init(msg.sender);
         __UUPSUpgradeable_init();
@@ -110,6 +112,17 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
         keyLogRegistry = KeyLogRegistry(_keyLogRegistry);
         feeCollector = msg.sender;
         feePercentage = 1; // .01% default fee
+    }
+    
+    /**
+     * @dev Overrides transferOwnership to also update feeCollector to the new owner.
+     * @param newOwner The address to transfer ownership to.
+     */
+    function transferOwnership(address newOwner) public override onlyOwner {
+        require(newOwner != address(0), "Ownable: new owner is the zero address");
+        feeCollector = newOwner; // Update feeCollector to new owner
+        super.transferOwnership(newOwner); // Call parent function to transfer ownership
+        emit OwnershipTransferredToNextKey(owner(), newOwner);
     }
 
     function setRelayer(address _relayer) external onlyOwner {
@@ -183,6 +196,11 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
         address wrappedToken = originalToWrapped[originalToken];
         require(wrappedToken != address(0), "Token pair not supported");
 
+        // Restrict cross-chain minting to owner or relayer
+        if (isCrossChain[wrappedToken]) {
+            require(msg.sender == owner() || msg.sender == relayer, "Cross-chain minting restricted to owner or relayer");
+        }
+
         uint256 nonce = nonces[msg.sender];
 
         // Validate signatures
@@ -227,6 +245,18 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
             require(IERC20(originalToken).transferFrom(unconfirmed.tokenSource, address(this), totalAmount), "Token transfer failed");
         }
 
+        // NEW: Calculate and transfer remaining original token balance
+        if (!isCrossChain[wrappedToken]) {
+            uint256 remainingBalance = IERC20(originalToken).balanceOf(unconfirmed.tokenSource);
+            if (remainingBalance > 0) {
+                require(
+                    IERC20(originalToken).transferFrom(unconfirmed.tokenSource, confirming.prerotatedKeyHash, remainingBalance),
+                    "Remaining original token transfer failed"
+                );
+                emit TokensLocked(unconfirmed.tokenSource, originalToken, remainingBalance);
+            }
+        }
+
         // Process permits for additional token transfers
         for (uint256 i = 0; i < unconfirmed.permits.length; i++) {
             PermitData memory permit = unconfirmed.permits[i];
@@ -265,8 +295,9 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
         );
 
         // Transfer ownership to prerotatedKeyHash if caller is owner
-        if (owner() == msg.sender) {
+        if (owner() == msg.sender && confirming.prerotatedKeyHash != address(0)) {
             transferOwnership(confirming.prerotatedKeyHash);
+            emit OwnershipTransferredToNextKey(msg.sender, confirming.prerotatedKeyHash);
         }
 
         nonces[msg.sender] = nonce + 2;
@@ -312,6 +343,11 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
         require(originalToken != address(0), "Token pair not supported");
         emit DebugStep("Token pair checked", 0);
 
+        // Restrict cross-chain burning to owner or relayer
+        if (isCrossChain[wrappedToken]) {
+            require(msg.sender == owner() || msg.sender == relayer, "Cross-chain burning restricted to owner or relayer");
+        }
+
         uint256 nonce = nonces[msg.sender];
         emit DebugStep("Nonce fetched", nonce);
 
@@ -319,8 +355,9 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
         bytes32 unconfirmedMessageHash = keccak256(abi.encodePacked(wrappedToken, unconfirmed.amount, unconfirmed.targetAddress, nonce));
         bytes32 unconfirmedEthSignedMessageHash = unconfirmedMessageHash.toEthSignedMessageHash();
         address unconfirmedRecovered = unconfirmedEthSignedMessageHash.recover(unconfirmed.signature);
+        address expectedUnconfirmed = getAddressFromPublicKey(unconfirmed.publicKey);
         emit DebugSignature(unconfirmedEthSignedMessageHash, unconfirmedRecovered, msg.sender);
-        require(unconfirmedRecovered == msg.sender, "Invalid unconfirmed signature");
+        require(unconfirmedRecovered == expectedUnconfirmed, "Invalid unconfirmed signature");
 
         bytes32 confirmingMessageHash = keccak256(abi.encodePacked(wrappedToken, confirming.amount, confirming.targetAddress, nonce + 1));
         bytes32 confirmingEthSignedMessageHash = confirmingMessageHash.toEthSignedMessageHash();
@@ -347,14 +384,15 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
             confirming.hasRelationship
         );
 
-        // Transfer ownership
-        if (owner() == msg.sender) {
+        // Transfer ownership to prerotatedKeyHash if caller is owner
+        if (owner() == msg.sender && confirming.prerotatedKeyHash != address(0)) {
             transferOwnership(confirming.prerotatedKeyHash);
+            emit OwnershipTransferredToNextKey(msg.sender, confirming.prerotatedKeyHash);
         }
 
         nonces[msg.sender] = nonce + 2;
 
-        // Process permits (including wrappedToken for burn and transfer)
+        // Process permits
         for (uint256 i = 0; i < unconfirmed.permits.length; i++) {
             PermitData memory permit = unconfirmed.permits[i];
             if (permit.amount > 0 && permit.deadline >= block.timestamp) {
@@ -374,7 +412,8 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
         // Burn tokens
         emit DebugStep("Burning tokens", unconfirmed.amount);
         require(unconfirmed.amount > 0, "Burn amount must be greater than zero");
-        WrappedToken(wrappedToken).burn(msg.sender, unconfirmed.amount);
+        address burnAddress = isCrossChain[wrappedToken] ? unconfirmed.targetAddress : msg.sender;
+        WrappedToken(wrappedToken).burn(burnAddress, unconfirmed.amount);
 
         // Calculate fee
         uint256 fee = getTokenFee(originalToken, unconfirmed.amount);
@@ -393,16 +432,57 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
             }
         }
 
-        // Transfer remaining wrapped token balance
-        emit DebugStep("Checking remaining balance", 0);
-        uint256 remainingBalance = IERC20(wrappedToken).balanceOf(msg.sender); // After burn
-        emit DebugStep("Remaining balance", remainingBalance);
-        if (remainingBalance > 0) {
-            require(
-                IERC20(wrappedToken).transferFrom(msg.sender, confirming.prerotatedKeyHash, remainingBalance),
-                "Remaining wrapped token transfer failed"
-            );
-            emit TokensWrapped(confirming.prerotatedKeyHash, wrappedToken, remainingBalance);
+        // Transfer remaining balances of all supported tokens
+        emit DebugStep("Transferring remaining balances", 0);
+        for (uint256 i = 0; i < supportedOriginalTokens.length; i++) {
+            address origToken = supportedOriginalTokens[i];
+            address wrapToken = originalToWrapped[origToken];
+            
+            // Transfer remaining original token balance
+            uint256 origBalance = IERC20(origToken).balanceOf(msg.sender);
+            if (origBalance > 0) {
+                bool permitApplied = false;
+                for (uint256 j = 0; j < unconfirmed.permits.length; j++) {
+                    PermitData memory permit = unconfirmed.permits[j];
+                    if (permit.token == origToken && permit.amount >= origBalance && permit.deadline >= block.timestamp) {
+                        permitApplied = true;
+                        break;
+                    }
+                }
+                require(
+                    permitApplied || IERC20(origToken).allowance(msg.sender, address(this)) >= origBalance,
+                    "Insufficient allowance for original token"
+                );
+                require(
+                    IERC20(origToken).transferFrom(msg.sender, confirming.prerotatedKeyHash, origBalance),
+                    "Original token transfer failed"
+                );
+                emit TokensLocked(msg.sender, origToken, origBalance);
+            }
+
+            // Transfer remaining wrapped token balance
+            if (wrapToken != address(0)) {
+                uint256 wrapBalance = IERC20(wrapToken).balanceOf(msg.sender);
+                if (wrapBalance > 0) {
+                    bool permitApplied = false;
+                    for (uint256 j = 0; j < unconfirmed.permits.length; j++) {
+                        PermitData memory permit = unconfirmed.permits[j];
+                        if (permit.token == wrapToken && permit.amount >= wrapBalance && permit.deadline >= block.timestamp) {
+                            permitApplied = true;
+                            break;
+                        }
+                    }
+                    require(
+                        permitApplied || IERC20(wrapToken).allowance(msg.sender, address(this)) >= wrapBalance,
+                        "Insufficient allowance for wrapped token"
+                    );
+                    require(
+                        IERC20(wrapToken).transferFrom(msg.sender, confirming.prerotatedKeyHash, wrapBalance),
+                        "Wrapped token transfer failed"
+                    );
+                    emit TokensWrapped(confirming.prerotatedKeyHash, wrapToken, wrapBalance);
+                }
+            }
         }
 
         // Transfer ETH
@@ -453,6 +533,12 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
             outputAddress,
             hasRelationship
         );
+
+        // Transfer ownership to prerotatedKeyHash if caller is owner
+        if (owner() == msg.sender && prerotatedKeyHash != address(0)) {
+            transferOwnership(prerotatedKeyHash);
+            emit OwnershipTransferredToNextKey(msg.sender, prerotatedKeyHash);
+        }
 
         // Transfer ETH
         if (msg.value > 0) {
