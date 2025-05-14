@@ -25,11 +25,13 @@ import {
   Select,
   Table,
   TextInput,
+  Switch,
 } from "@mantine/core";
 import { useAppContext } from "../context/AppContext";
 import Markets from "./Markets";
 import TokenHolders from "./TokenHolders";
 import WalletConnector from "./WalletConnector";
+import { QrReader } from "react-qr-reader"; // Import QR code reader
 
 const BRIDGE_ABI = BridgeArtifact.abi;
 const KEYLOG_REGISTRY_ABI = KeyLogRegistryArtifact.abi;
@@ -61,6 +63,10 @@ function Bridge() {
   const [mintAmount, setMintAmount] = useState("");
   const [burnAmount, setBurnAmount] = useState("");
   const [selectedOriginal, setSelectedOriginal] = useState("");
+
+  // New state for key source toggle and QR code data
+  const [useQRCode, setUseQRCode] = useState(false);
+  const [qrKeyData, setQrKeyData] = useState(null);
 
   // Helper to print balances
   const printBalances = async (signer, tokenAddresses) => {
@@ -114,7 +120,7 @@ function Bridge() {
       return { token: tokenAddress, amount, deadline: permitDeadline, v, r, s };
     } catch (error) {
       console.warn(`Permit not supported for ${tokenAddress}:`, error);
-      return null; // Skip tokens without permit support
+      return null;
     }
   };
 
@@ -123,7 +129,6 @@ function Bridge() {
     const supportedOriginalTokens = await bridge.getSupportedTokens();
 
     for (const origToken of supportedOriginalTokens) {
-      // Generate permit for original token
       const origTokenContract = new ethers.Contract(
         origToken,
         ERC20_ABI,
@@ -141,11 +146,10 @@ function Bridge() {
         ethers.formatEther(origBalance)
       );
       if (origBalance > 0) {
-        const permit = await generatePermit(origToken, signer, origBalance); // Use full balance
+        const permit = await generatePermit(origToken, signer, origBalance);
         if (permit) permits.push(permit);
       }
 
-      // Generate permit for wrapped token
       const wrappedToken = await bridge.originalToWrapped(origToken);
       if (wrappedToken !== ethers.ZeroAddress) {
         const wrappedTokenContract = new ethers.Contract(
@@ -169,6 +173,54 @@ function Bridge() {
     return permits;
   };
 
+  // Handle QR code scan
+  // Handle QR code scan with pipe-separated data
+  const handleQRScan = (data) => {
+    if (data) {
+      try {
+        // Split the pipe-separated string
+        const [
+          publicKey,
+          prerotatedKeyHash,
+          twicePrerotatedKeyHash,
+          signature,
+          nextPublicKey,
+          nextSignature,
+        ] = data.split("|");
+
+        // Validate the data
+        if (
+          publicKey &&
+          ethers.isAddress(prerotatedKeyHash) &&
+          ethers.isAddress(twicePrerotatedKeyHash) &&
+          signature &&
+          nextPublicKey &&
+          nextSignature
+        ) {
+          setQrKeyData({
+            publicKey,
+            prerotatedKeyHash,
+            twicePrerotatedKeyHash,
+            signature,
+            nextPublicKey,
+            nextSignature,
+          });
+          setStatus("QR code scanned successfully");
+        } else {
+          setStatus("Invalid QR code data: missing or invalid fields");
+        }
+      } catch (error) {
+        setStatus("Error parsing QR code: " + error.message);
+        console.error("QR parse error:", error);
+      }
+    }
+  };
+
+  const handleQRError = (error) => {
+    setStatus("QR scan error: " + error.message);
+    console.error("QR scan error:", error);
+  };
+
   // Initialize user key log
   useEffect(() => {
     const initUser = async () => {
@@ -176,7 +228,11 @@ function Bridge() {
       setLoading(true);
       try {
         let { log, keyState } = userKeyState[account] || {};
-        const signer = keyState.currentDerivedKey.signer;
+        const signer = useQRCode
+          ? localProvider.getSigner() // Use default signer for QR code
+          : keyState?.currentDerivedKey?.signer;
+        if (!signer) throw new Error("No signer available");
+
         const keyLogRegistry = new ethers.Contract(
           KEYLOG_REGISTRY_ADDRESS,
           KEYLOG_REGISTRY_ABI,
@@ -184,22 +240,34 @@ function Bridge() {
         );
         const owner = await keyLogRegistry.owner();
         console.log("KeyLogRegistry owner:", owner);
+
         if (!log) {
-          log = await keyLogRegistry.buildFromPublicKey(
-            keyState.currentDerivedKey.key.uncompressedPublicKey.slice(1)
-          );
-          keyState = await getKeyState(
-            hdWallet,
-            log,
-            kdp + selectedTestAccount
-          );
+          let publicKey;
+          if (useQRCode && qrKeyData) {
+            publicKey = qrKeyData.publicKey;
+          } else {
+            if (!keyState) {
+              const hdWallet = createHDWallet(HARDHAT_MNEMONIC);
+              keyState = await getKeyState(
+                hdWallet,
+                [],
+                kdp + selectedTestAccount
+              );
+            }
+            publicKey =
+              keyState.currentDerivedKey.key.uncompressedPublicKey.slice(1);
+          }
+
+          log = await keyLogRegistry.buildFromPublicKey(publicKey);
+          keyState = useQRCode
+            ? { currentDerivedKey: { signer } } // Minimal key state for QR
+            : await getKeyState(hdWallet, log, kdp + selectedTestAccount);
           setUserKeyState((prev) => ({
             ...prev,
             [account]: { log, keyState },
           }));
         }
 
-        // Initialize key log and transfer tokens/ETH
         if (log.length === 0) {
           const bridge = new ethers.Contract(
             BRIDGE_ADDRESS,
@@ -211,7 +279,6 @@ function Bridge() {
             "latest"
           );
 
-          // Get all supported tokens and generate permits
           const supportedOriginalTokens = await bridge.getSupportedTokens();
           const permits = [];
           for (const origToken of supportedOriginalTokens) {
@@ -250,18 +317,27 @@ function Bridge() {
             }
           }
 
-          // Prepare key log registration with transfer
-          const publicKey =
-            keyState.currentDerivedKey.key.uncompressedPublicKey.slice(1);
-          const publicKeyHash = keyState.currentDerivedKey.signer.address;
-          const prerotatedKeyHash = keyState.nextDerivedKey.signer.address;
-          const twicePrerotatedKeyHash =
-            keyState.nextNextDerivedKey.signer.address;
+          let publicKey,
+            publicKeyHash,
+            prerotatedKeyHash,
+            twicePrerotatedKeyHash;
+          if (useQRCode && qrKeyData) {
+            publicKey = qrKeyData.publicKey;
+            publicKeyHash = ethers.computeAddress(`0x${publicKey}`);
+            prerotatedKeyHash = qrKeyData.prerotatedKeyHash;
+            twicePrerotatedKeyHash = qrKeyData.twicePrerotatedKeyHash;
+          } else {
+            publicKey =
+              keyState.currentDerivedKey.key.uncompressedPublicKey.slice(1);
+            publicKeyHash = keyState.currentDerivedKey.signer.address;
+            prerotatedKeyHash = keyState.nextDerivedKey.signer.address;
+            twicePrerotatedKeyHash = keyState.nextNextDerivedKey.signer.address;
+          }
+
           const prevPublicKeyHash = ethers.ZeroAddress;
           const outputAddress = prerotatedKeyHash;
           const hasRelationship = false;
 
-          // Estimate gas and calculate ETH to send
           const balance = await localProvider.getBalance(account);
           const feeData = await localProvider.getFeeData();
           const gasPrice = feeData.gasPrice;
@@ -285,7 +361,6 @@ function Bridge() {
             );
           }
 
-          // Execute key log registration with ETH and token transfers
           await printBalances(signer, [
             ...supportedOriginalTokens,
             WRAPPED_TOKEN_ADDRESS,
@@ -310,13 +385,14 @@ function Bridge() {
           );
           await tx.wait();
 
-          // Update key state
           const updatedLog = await keyLogRegistry.buildFromPublicKey(publicKey);
-          const updatedKeyState = await getKeyState(
-            keyState.currentDerivedKey.key,
-            updatedLog,
-            kdp + selectedTestAccount
-          );
+          const updatedKeyState = useQRCode
+            ? { currentDerivedKey: { signer } }
+            : await getKeyState(
+                keyState.currentDerivedKey.key,
+                updatedLog,
+                kdp + selectedTestAccount
+              );
           setUserKeyState((prev) => ({
             ...prev,
             [account]: { log: updatedLog, keyState: updatedKeyState },
@@ -348,7 +424,7 @@ function Bridge() {
       setLoading(false);
     };
     initUser();
-  }, [signer, account, isOperator]);
+  }, [signer, account, isOperator, useQRCode, qrKeyData]);
 
   // Wrap tokens with key rotation
   const wrap = useCallback(async () => {
@@ -359,23 +435,18 @@ function Bridge() {
       setStatus("Please connect a wallet and initialize key state");
       return;
     }
+    if (useQRCode && !qrKeyData) {
+      setStatus("Please scan a QR code to provide key data");
+      return;
+    }
     setLoading(true);
     try {
       const { keyState, log } = userKeyState[account];
-      log.map((item) => {
-        console.log(
-          item.prevPublicKeyHash,
-          item.publicKeyHash,
-          item.prerotatedKeyHash,
-          item.twicePrerotatedKeyHash
-        );
-      });
       const bridge = new ethers.Contract(
         BRIDGE_ADDRESS,
         BRIDGE_ABI,
         keyState.currentDerivedKey.signer
       );
-      console.log("Fee collector: ", await bridge.feeCollector());
       const originalTokenAddress = selectedOriginal;
       const amountToWrap = ethers.parseEther(mintAmount);
       const nonce = await localProvider.getTransactionCount(
@@ -386,12 +457,11 @@ function Bridge() {
         keyState.currentDerivedKey.signer.address
       );
 
-      // Validate amount for non-cross-chain
       if (!isCrossChain) {
         const originalTokenContract = new ethers.Contract(
           originalTokenAddress,
           ERC20_ABI,
-          keyState.nextDerivedKey.signer
+          keyState.currentDerivedKey.signer
         );
         const balance = await originalTokenContract.balanceOf(
           keyState.currentDerivedKey.signer.address
@@ -405,40 +475,65 @@ function Bridge() {
         }
       }
 
-      const outputAddress = tokenPairs.filter(
-        (item) => item.original === selectedOriginal
-      )[0].isCrossChain
-        ? mintBurnAddress
-        : keyState.nextNextDerivedKey.signer.address;
+      let publicKey,
+        prerotatedKeyHash,
+        twicePrerotatedKeyHash,
+        prevPublicKeyHash,
+        nextPublicKey,
+        outputAddress,
+        unconfirmedSignature,
+        confirmingSignature;
 
-      // Generate signatures
-      const unconfirmedMessage = ethers.solidityPacked(
-        ["address", "uint256", "address", "uint256"],
-        [originalTokenAddress, amountToWrap, outputAddress, bridgeNonce]
-      );
+      if (useQRCode && qrKeyData) {
+        publicKey = qrKeyData.publicKey;
+        prerotatedKeyHash = qrKeyData.prerotatedKeyHash;
+        twicePrerotatedKeyHash = qrKeyData.twicePrerotatedKeyHash;
+        prevPublicKeyHash = ethers.ZeroAddress; // Adjust based on your needs
+        nextPublicKey = qrKeyData.nextPublicKey;
+        outputAddress = isCrossChain
+          ? mintBurnAddress
+          : qrKeyData.prerotatedKeyHash;
+        unconfirmedSignature = qrKeyData.signature;
+        confirmingSignature = qrKeyData.nextSignature;
+      } else {
+        publicKey =
+          keyState.currentDerivedKey.key.uncompressedPublicKey.slice(1);
+        prerotatedKeyHash = keyState.nextDerivedKey.signer.address;
+        twicePrerotatedKeyHash = keyState.nextNextDerivedKey.signer.address;
+        prevPublicKeyHash = keyState.prevDerivedKey
+          ? keyState.prevDerivedKey.signer.address
+          : ethers.ZeroAddress;
+        nextPublicKey =
+          keyState.nextDerivedKey.key.uncompressedPublicKey.slice(1);
+        outputAddress = isCrossChain
+          ? mintBurnAddress
+          : keyState.nextNextDerivedKey.signer.address;
 
-      const unconfirmedMessageHash = ethers.keccak256(unconfirmedMessage);
-      const unconfirmedSignature =
-        await keyState.currentDerivedKey.signer.signMessage(
-          ethers.getBytes(unconfirmedMessageHash)
+        const unconfirmedMessage = ethers.solidityPacked(
+          ["address", "uint256", "address", "uint256"],
+          [originalTokenAddress, amountToWrap, outputAddress, bridgeNonce]
         );
+        const unconfirmedMessageHash = ethers.keccak256(unconfirmedMessage);
+        unconfirmedSignature =
+          await keyState.currentDerivedKey.signer.signMessage(
+            ethers.getBytes(unconfirmedMessageHash)
+          );
 
-      const confirmingMessage = ethers.solidityPacked(
-        ["address", "uint256", "address", "uint256"],
-        [
-          originalTokenAddress,
-          0,
-          keyState.nextNextDerivedKey.signer.address,
-          bridgeNonce + 1n,
-        ]
-      );
-      const confirmingMessageHash = ethers.keccak256(confirmingMessage);
-      const confirmingSignature =
-        await keyState.nextDerivedKey.signer.signMessage(
+        const confirmingMessage = ethers.solidityPacked(
+          ["address", "uint256", "address", "uint256"],
+          [
+            originalTokenAddress,
+            0,
+            keyState.nextNextDerivedKey.signer.address,
+            bridgeNonce + 1n,
+          ]
+        );
+        const confirmingMessageHash = ethers.keccak256(confirmingMessage);
+        confirmingSignature = await keyState.nextDerivedKey.signer.signMessage(
           ethers.getBytes(confirmingMessageHash)
         );
+      }
 
-      // Generate permits, ensuring originalToken permit covers full balance
       const permits = await getUserTokensAndPermits(
         keyState.currentDerivedKey.signer,
         bridge
@@ -449,34 +544,39 @@ function Bridge() {
         {
           amount: amountToWrap,
           signature: unconfirmedSignature,
-          publicKey:
-            keyState.currentDerivedKey.key.uncompressedPublicKey.slice(1),
-          prerotatedKeyHash: keyState.nextDerivedKey.signer.address,
-          twicePrerotatedKeyHash: keyState.nextNextDerivedKey.signer.address,
-          prevPublicKeyHash: keyState.prevDerivedKey
-            ? keyState.prevDerivedKey.signer.address
-            : ethers.ZeroAddress,
-          outputAddress: outputAddress,
+          publicKey,
+          prerotatedKeyHash,
+          twicePrerotatedKeyHash,
+          prevPublicKeyHash,
+          outputAddress,
           hasRelationship: true,
           tokenSource: keyState.currentDerivedKey.signer.address,
-          permits, // Includes permit for full originalToken balance
+          permits,
         },
         {
           amount: ethers.parseEther("0"),
           signature: confirmingSignature,
-          publicKey: keyState.nextDerivedKey.key.uncompressedPublicKey.slice(1),
-          prerotatedKeyHash: keyState.nextNextDerivedKey.signer.address,
-          twicePrerotatedKeyHash:
-            keyState.nextNextNextDerivedKey.signer.address,
-          prevPublicKeyHash: keyState.currentDerivedKey.signer.address,
-          outputAddress: keyState.nextNextDerivedKey.signer.address,
+          publicKey: nextPublicKey,
+          prerotatedKeyHash: useQRCode
+            ? qrKeyData.twicePrerotatedKeyHash
+            : keyState.nextNextDerivedKey.signer.address,
+          twicePrerotatedKeyHash: useQRCode
+            ? ethers.computeAddress(`0x${qrKeyData.nextPublicKey}`)
+            : keyState.nextNextNextDerivedKey.signer.address,
+          prevPublicKeyHash: useQRCode
+            ? ethers.computeAddress(`0x${publicKey}`)
+            : keyState.currentDerivedKey.signer.address,
+          outputAddress: useQRCode
+            ? qrKeyData.prerotatedKeyHash
+            : keyState.nextNextDerivedKey.signer.address,
           hasRelationship: false,
-          tokenSource: keyState.nextDerivedKey.signer.address,
+          tokenSource: useQRCode
+            ? qrKeyData.prerotatedKeyHash
+            : keyState.nextDerivedKey.signer.address,
           permits: [],
         },
       ];
 
-      // Gas estimation
       const balance = await localProvider.getBalance(
         keyState.currentDerivedKey.signer.address
       );
@@ -509,20 +609,19 @@ function Bridge() {
       });
       await tx.wait();
 
-      // Update key state
       const keyLogRegistry = new ethers.Contract(
         KEYLOG_REGISTRY_ADDRESS,
         KEYLOG_REGISTRY_ABI,
         keyState.currentDerivedKey.signer
       );
-      const updatedLog = await keyLogRegistry.buildFromPublicKey(
-        keyState.currentDerivedKey.key.uncompressedPublicKey.slice(1)
-      );
-      const updatedKeyState = await getKeyState(
-        keyState.currentDerivedKey.key,
-        updatedLog,
-        kdp + selectedTestAccount
-      );
+      const updatedLog = await keyLogRegistry.buildFromPublicKey(publicKey);
+      const updatedKeyState = useQRCode
+        ? { currentDerivedKey: { signer: keyState.currentDerivedKey.signer } }
+        : await getKeyState(
+            keyState.currentDerivedKey.key,
+            updatedLog,
+            kdp + selectedTestAccount
+          );
       setUserKeyState((prev) => ({
         ...prev,
         [account]: { log: updatedLog, keyState: updatedKeyState },
@@ -539,14 +638,27 @@ function Bridge() {
       console.error("Wrap error:", error);
     }
     setLoading(false);
-  }, [account, mintAmount, userKeyState, mintBurnAddress, selectedOriginal]);
+  }, [
+    account,
+    mintAmount,
+    userKeyState,
+    mintBurnAddress,
+    selectedOriginal,
+    useQRCode,
+    qrKeyData,
+  ]);
 
+  // Unwrap tokens with key rotation
   const unwrap = useCallback(async () => {
     const isCrossChain = tokenPairs.filter(
       (item) => item.original === selectedOriginal
     )[0].isCrossChain;
     if (!account || !userKeyState[account]) {
       setStatus("Please connect a wallet and initialize key state");
+      return;
+    }
+    if (useQRCode && !qrKeyData) {
+      setStatus("Please scan a QR code to provide key data");
       return;
     }
     setLoading(true);
@@ -567,15 +679,13 @@ function Bridge() {
       );
       const burnAmountWei = ethers.parseEther(burnAmount);
 
-      const outputAddress = tokenPairs.filter(
-        (item) => item.original === selectedOriginal
-      )[0].isCrossChain
+      const outputAddress = isCrossChain
         ? mintBurnAddress
+        : useQRCode
+        ? qrKeyData.prerotatedKeyHash
         : keyState.nextNextDerivedKey.signer.address;
 
-      const burnAddress = tokenPairs.filter(
-        (item) => item.original === selectedOriginal
-      )[0].isCrossChain
+      const burnAddress = isCrossChain
         ? mintBurnAddress
         : keyState.currentDerivedKey.signer.address;
 
@@ -597,33 +707,58 @@ function Bridge() {
       );
       const bridgeNonce = await bridge.nonces(signerAddress);
 
-      const unconfirmedMessage = ethers.solidityPacked(
-        ["address", "uint256", "address", "uint256"],
-        [wrappedTokenAddress, burnAmountWei, outputAddress, bridgeNonce]
-      );
-      const unconfirmedMessageHash = ethers.keccak256(unconfirmedMessage);
-      // Ensure the message is signed with the Ethereum signed message prefix
-      const unconfirmedSignature =
-        await keyState.currentDerivedKey.signer.signMessage(
-          ethers.getBytes(unconfirmedMessageHash)
-        );
+      let publicKey,
+        prerotatedKeyHash,
+        twicePrerotatedKeyHash,
+        prevPublicKeyHash,
+        nextPublicKey,
+        unconfirmedSignature,
+        confirmingSignature;
 
-      const confirmingMessage = ethers.solidityPacked(
-        ["address", "uint256", "address", "uint256"],
-        [
-          wrappedTokenAddress,
-          0,
-          keyState.nextNextDerivedKey.signer.address,
-          bridgeNonce + 1n,
-        ]
-      );
-      const confirmingMessageHash = ethers.keccak256(confirmingMessage);
-      const confirmingSignature =
-        await keyState.nextDerivedKey.signer.signMessage(
+      if (useQRCode && qrKeyData) {
+        publicKey = qrKeyData.publicKey;
+        prerotatedKeyHash = qrKeyData.prerotatedKeyHash;
+        twicePrerotatedKeyHash = qrKeyData.twicePrerotatedKeyHash;
+        prevPublicKeyHash = ethers.ZeroAddress;
+        nextPublicKey = qrKeyData.nextPublicKey;
+        unconfirmedSignature = qrKeyData.signature;
+        confirmingSignature = qrKeyData.nextSignature;
+      } else {
+        publicKey =
+          keyState.currentDerivedKey.key.uncompressedPublicKey.slice(1);
+        prerotatedKeyHash = keyState.nextDerivedKey.signer.address;
+        twicePrerotatedKeyHash = keyState.nextNextDerivedKey.signer.address;
+        prevPublicKeyHash = keyState.prevDerivedKey
+          ? keyState.prevDerivedKey.signer.address
+          : ethers.ZeroAddress;
+        nextPublicKey =
+          keyState.nextDerivedKey.key.uncompressedPublicKey.slice(1);
+
+        const unconfirmedMessage = ethers.solidityPacked(
+          ["address", "uint256", "address", "uint256"],
+          [wrappedTokenAddress, burnAmountWei, outputAddress, bridgeNonce]
+        );
+        const unconfirmedMessageHash = ethers.keccak256(unconfirmedMessage);
+        unconfirmedSignature =
+          await keyState.currentDerivedKey.signer.signMessage(
+            ethers.getBytes(unconfirmedMessageHash)
+          );
+
+        const confirmingMessage = ethers.solidityPacked(
+          ["address", "uint256", "address", "uint256"],
+          [
+            wrappedTokenAddress,
+            0,
+            keyState.nextNextDerivedKey.signer.address,
+            bridgeNonce + 1n,
+          ]
+        );
+        const confirmingMessageHash = ethers.keccak256(confirmingMessage);
+        confirmingSignature = await keyState.nextDerivedKey.signer.signMessage(
           ethers.getBytes(confirmingMessageHash)
         );
+      }
 
-      // Generate permits, ensuring originalToken permit covers full balance
       const permits = await getUserTokensAndPermits(
         keyState.currentDerivedKey.signer,
         bridge
@@ -634,13 +769,10 @@ function Bridge() {
         {
           amount: burnAmountWei,
           signature: unconfirmedSignature,
-          publicKey:
-            keyState.currentDerivedKey.key.uncompressedPublicKey.slice(1),
-          prerotatedKeyHash: keyState.nextDerivedKey.signer.address,
-          twicePrerotatedKeyHash: keyState.nextNextDerivedKey.signer.address,
-          prevPublicKeyHash: keyState.prevDerivedKey
-            ? keyState.prevDerivedKey.signer.address
-            : ethers.ZeroAddress,
+          publicKey,
+          prerotatedKeyHash,
+          twicePrerotatedKeyHash,
+          prevPublicKeyHash,
           targetAddress: outputAddress,
           hasRelationship: true,
           permits,
@@ -648,18 +780,24 @@ function Bridge() {
         {
           amount: ethers.parseEther("0"),
           signature: confirmingSignature,
-          publicKey: keyState.nextDerivedKey.key.uncompressedPublicKey.slice(1),
-          prerotatedKeyHash: keyState.nextNextDerivedKey.signer.address,
-          twicePrerotatedKeyHash:
-            keyState.nextNextNextDerivedKey.signer.address,
-          prevPublicKeyHash: keyState.currentDerivedKey.signer.address,
-          targetAddress: keyState.nextNextDerivedKey.signer.address,
+          publicKey: nextPublicKey,
+          prerotatedKeyHash: useQRCode
+            ? qrKeyData.twicePrerotatedKeyHash
+            : keyState.nextNextDerivedKey.signer.address,
+          twicePrerotatedKeyHash: useQRCode
+            ? ethers.computeAddress(`0x${qrKeyData.nextPublicKey}`)
+            : keyState.nextNextNextDerivedKey.signer.address,
+          prevPublicKeyHash: useQRCode
+            ? ethers.computeAddress(`0x${publicKey}`)
+            : keyState.currentDerivedKey.signer.address,
+          targetAddress: useQRCode
+            ? qrKeyData.prerotatedKeyHash
+            : keyState.nextNextDerivedKey.signer.address,
           hasRelationship: false,
           permits: [],
         },
       ];
 
-      // Estimate gas with try-catch for detailed error
       const gasEstimate = await bridge.unwrapPairWithTransfer.estimateGas(
         ...txParams,
         { value: 0n }
@@ -697,14 +835,14 @@ function Bridge() {
         KEYLOG_REGISTRY_ABI,
         keyState.currentDerivedKey.signer
       );
-      const updatedLog = await keyLogRegistry.buildFromPublicKey(
-        keyState.currentDerivedKey.key.uncompressedPublicKey.slice(1)
-      );
-      const updatedKeyState = await getKeyState(
-        keyState.currentDerivedKey.key,
-        updatedLog,
-        kdp + selectedTestAccount
-      );
+      const updatedLog = await keyLogRegistry.buildFromPublicKey(publicKey);
+      const updatedKeyState = useQRCode
+        ? { currentDerivedKey: { signer: keyState.currentDerivedKey.signer } }
+        : await getKeyState(
+            keyState.currentDerivedKey.key,
+            updatedLog,
+            kdp + selectedTestAccount
+          );
       setUserKeyState((prev) => ({
         ...prev,
         [account]: { log: updatedLog, keyState: updatedKeyState },
@@ -721,9 +859,16 @@ function Bridge() {
       console.error("Unwrap error:", error);
     }
     setLoading(false);
-  }, [account, userKeyState, mintBurnAddress, selectedOriginal, burnAmount]);
+  }, [
+    account,
+    userKeyState,
+    mintBurnAddress,
+    selectedOriginal,
+    burnAmount,
+    useQRCode,
+    qrKeyData,
+  ]);
 
-  // Add token pair (operator only)
   const addTokenPair = async () => {
     if (!isOperator) {
       setStatus("Only the bridge operator can add token pairs");
@@ -753,6 +898,29 @@ function Bridge() {
       <WalletConnector />
       <p>Connected Account: {account || "Not connected"}</p>
       <p>Status: {status}</p>
+
+      {/* Toggle between in-app key rotation and QR code */}
+      <Group direction="column" spacing="md">
+        <Switch
+          label="Use QR Code for Keys"
+          checked={useQRCode}
+          onChange={(e) => setUseQRCode(e.currentTarget.checked)}
+        />
+        {useQRCode && (
+          <div>
+            <h3>Scan QR Code</h3>
+            <QrReader
+              onResult={(result, error) => {
+                if (result) handleQRScan(result?.text);
+                if (error) handleQRError(error);
+              }}
+              style={{ width: "300px" }}
+              constraints={{ facingMode: "environment" }}
+            />
+          </div>
+        )}
+      </Group>
+
       {isOperator && (
         <>
           <h2>Create Token Pair</h2>

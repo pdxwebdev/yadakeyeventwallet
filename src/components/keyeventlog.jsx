@@ -748,9 +748,7 @@ export default function KeyEventLog(props) {
   const handleSeedImport = async () => {
     const wallet = createHDWallet(mnemonic);
 
-    let a = await deriveSecurePath(wallet, mfa); //0/0 --> //0/0/0
-
-    const pk = Buffer.from(a.publicKey).toString("hex");
+    const pk = Buffer.from(wallet.publicKey).toString("hex");
     const res = await axios.get(
       `${
         import.meta.env.VITE_API_URL
@@ -759,18 +757,19 @@ export default function KeyEventLog(props) {
     console.log(res.data);
     if (res.data.key_event_log) {
       for (let i = 1; i < res.data.key_event_log.length; i++) {
-        a = await deriveSecurePath(a, mfa); //0/0 --> //0/0/0
+        a = await deriveSecurePath(wallet, mfa); //0/0 --> //0/0/0
       }
 
-      setHdWallet(a);
+      setHdWallet(wallet);
       kels[id].kel = res.data.key_event_log.map((txn) => {
         txn.status = "onchain";
         return txn;
       });
-
-      kels[id].kel[kels[id].kel.length - 1].mfa = mfa;
-      kels[id].kel[kels[id].kel.length - 1].key = a;
-      setKels({ ...kels, [id]: kels[id] });
+      if (kels[id].kel.length > 0) {
+        kels[id].kel[kels[id].kel.length - 1].mfa = mfa;
+        kels[id].kel[kels[id].kel.length - 1].key = a;
+        setKels({ ...kels, [id]: kels[id] });
+      }
     }
   };
 
@@ -868,15 +867,15 @@ export default function KeyEventLog(props) {
         /> */}
         {/* <Button onClick={handleWifImport}>Import</Button> */}
 
-        {/* <p>Import Seed</p>
+        <p>Import Seed</p>
         <input
           type="text"
           value={mnemonic}
           onChange={(e) => {
             setMnemonic(e.currentTarget.value);
           }}
-        /> */}
-        {/* <Button onClick={handleSeedImport}>Import</Button> */}
+        />
+        <Button onClick={handleSeedImport}>Import</Button>
 
         {/* <input
           placeholder="Address"

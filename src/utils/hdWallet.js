@@ -133,8 +133,11 @@ export const syncWalletWithKel = async (wallet, mfa, key_event_log) => {
 };
 
 const deriveIndex = async (factor, level) => {
-  const hash = await generateSHA256(factor + level);
-  return parseInt(hash.toString("hex"), 16) % 2147483647; // Modulo 2^31
+  const hash = BigInt('0x' + await generateSHA256(factor + level));
+  const modulo = BigInt(2147483647);
+  const remainder = hash % modulo;
+  console.log(remainder.toString());
+  return Number(remainder);
 };
 
 // Generate a secure derivation path
@@ -144,9 +147,11 @@ export const deriveSecurePath = async (root, secondFactor) => {
   // Fixed 4-level path
   for (let level = 0; level < 4; level++) {
     const index = await deriveIndex(secondFactor, level);
+    console.log(index)
     currentNode = currentNode.deriveHardened(index);
   }
   currentNode.uncompressedPublicKey = decompressPublicKey(Buffer.from(currentNode.publicKey))
+  console.log(getP2PKH(currentNode.publicKey))
   return currentNode;
 };
 
