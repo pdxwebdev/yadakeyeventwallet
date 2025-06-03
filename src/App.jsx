@@ -22,6 +22,8 @@ import AdminPanel from "./pages/AdminPanel";
 import Markets from "./components/Markets";
 import { LoadingOverlay } from "@mantine/core";
 import { useAppContext } from "./context/AppContext";
+import Wallet2 from "./pages/Wallet2";
+import { Notifications } from "@mantine/notifications";
 
 // Main App component with the router
 function App() {
@@ -44,6 +46,9 @@ function App() {
           <Link to="/wallet" style={{ marginRight: "10px" }}>
             Wallet
           </Link>
+          <Link to="/wallet2" style={{ marginRight: "10px" }}>
+            Wallet2
+          </Link>
           <Link to="/sandbox" style={{ marginRight: "10px" }}>
             Sandbox
           </Link>
@@ -58,6 +63,7 @@ function App() {
           <Route path="/" element={<Home />} />
           <Route path="/sandbox" element={<Sandbox />} />
           <Route path="/wallet" element={<Wallet />} />
+          <Route path="/wallet2" element={<Wallet2 />} />
           <Route path="/wif-to-hd" element={<WifToHdConversion />} />
           <Route
             path="/whitepaper"

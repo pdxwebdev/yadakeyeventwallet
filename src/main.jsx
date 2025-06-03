@@ -30,14 +30,52 @@ import "@mantine/core/styles.css";
 // import "@mantine/core/styles/InlineInput.css";
 // import "@mantine/core/styles/Flex.css";
 // import "@mantine/core/styles/FloatingIndicator.css";
-
-const theme = createTheme({
-  /** Put your mantine theme override here */
-});
+import "@mantine/notifications/styles.css";
 
 const root = ReactDOM.createRoot(document.getElementById("root"));
 root.render(
-  <MantineProvider theme={theme}>
+  <MantineProvider
+    forceColorScheme="dark" // Enforce dark theme
+    theme={{
+      primaryColor: "teal", // Changed to teal for buttons
+      colors: {
+        // Optional: Customize dark theme colors
+        dark: [
+          "#C1C2C5", // Lightest
+          "#A6A7AB",
+          "#909296",
+          "#5C5F66",
+          "#373A40",
+          "#2C2E33",
+          "#25262B",
+          "#1A1B1E", // Darker
+          "#141517",
+          "#101113", // Darkest
+        ],
+      },
+      components: {
+        Anchor: {
+          defaultProps: {
+            color: "teal.4", // Default link color
+          },
+          styles: (theme) => ({
+            root: {
+              color: theme.colors.teal[4], // Unvisited links
+              "&:visited": {
+                color: theme.colors.teal[6], // Visited links
+              },
+              "&:hover": {
+                color: theme.colors.teal[3], // Hover state
+                textDecoration: "underline",
+              },
+            },
+          }),
+        },
+      },
+    }}
+    withGlobalStyles
+    withNormalizeCSS
+  >
     <AppProvider>
       <App />
     </AppProvider>

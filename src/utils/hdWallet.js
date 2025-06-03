@@ -337,3 +337,8 @@ export const testDerivation = () => {
       0
   );
 };
+
+export const fromWIF = (wif, hdWallet) => {
+  const ECPair = ECPairFactory.ECPairFactory(tinySecp256k1);
+  return ECPair.fromWIF(wif);
+};

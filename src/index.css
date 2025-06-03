@@ -1,0 +1,22 @@
+/* src/index.css */
+
+/* Reset default link styles */
+a {
+  color: #4bc0c8; /* Matches theme.colors.teal[4] */
+  text-decoration: none;
+}
+
+a:visited {
+  color: #26a69a; /* Matches theme.colors.teal[6] */
+}
+
+a:hover {
+  color: #80deea; /* Matches theme.colors.teal[3] */
+  text-decoration: underline;
+}
+
+/* Optional: Ensure body matches dark theme */
+body {
+  background-color: #1a1b1e; /* Matches theme.colors.dark[7] */
+  color: #c1c2c5; /* Matches theme.colors.dark[0] */
+}

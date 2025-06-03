@@ -31,7 +31,6 @@ import { useAppContext } from "../context/AppContext";
 import Markets from "./Markets";
 import TokenHolders from "./TokenHolders";
 import WalletConnector from "./WalletConnector";
-import { QrReader } from "react-qr-reader"; // Import QR code reader
 
 const BRIDGE_ABI = BridgeArtifact.abi;
 const KEYLOG_REGISTRY_ABI = KeyLogRegistryArtifact.abi;
