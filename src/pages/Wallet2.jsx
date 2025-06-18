@@ -675,79 +675,167 @@ const Wallet2 = () => {
   }, [privateKey, isInitialized, isSubmitting, parsedData, confirmedLogLength]); // Updated dependency
 
   const fetchTransactions = async () => {
-    const publicKey = Buffer.from(privateKey.publicKey).toString("hex");
-    const origin = window.location.origin;
-    const endpoints = [
-      {
-        url: `${
-          import.meta.env.VITE_API_URL
-        }/get-past-sent-txns?page=1&public_key=${publicKey}&origin=${encodeURIComponent(
-          origin
-        )}`,
-        key: "past_transactions",
-        status: "Confirmed",
-        type: "Sent",
-      },
-      {
-        url: `${
-          import.meta.env.VITE_API_URL
-        }/get-past-pending-sent-txns?page=1&public_key=${publicKey}&origin=${encodeURIComponent(
-          origin
-        )}`,
-        key: "past_pending_transactions",
-        status: "Pending",
-        type: "Sent",
-      },
-      {
-        url: `${
-          import.meta.env.VITE_API_URL
-        }/get-past-received-txns?page=1&public_key=${publicKey}&origin=${encodeURIComponent(
-          origin
-        )}`,
-        key: "past_transactions",
-        status: "Confirmed",
-        type: "Received",
-      },
-      {
-        url: `${
-          import.meta.env.VITE_API_URL
-        }/get-past-pending-received-txns?page=1&public_key=${publicKey}&origin=${encodeURIComponent(
-          origin
-        )}`,
-        key: "past_pending_transactions",
-        status: "Pending",
-        type: "Received",
-      },
-    ];
+    if (!privateKey || !parsedData) return;
+
     try {
-      const allTransactions = [];
-      for (const endpoint of endpoints) {
-        const response = await fetch(endpoint.url);
-        if (!response.ok) throw new Error(`Failed to fetch ${endpoint.url}`);
-        const data = await response.json();
-        const txns = (data[endpoint.key] || []).flatMap((tx) => {
-          return {
-            id: tx.id,
-            to: tx.outputs
-              .filter((item) => item.to !== parsedData.address1)
-              .map((item) => item.to)
-              .join(", "),
-            amount: tx.outputs
-              .reduce(
-                (sum, output) =>
-                  output.to === parsedData.address1 ? sum + output.value : sum,
-                0
-              )
-              .toFixed(8),
-            date: new Date(tx.time * 1000).toLocaleDateString(),
-            status: endpoint.status,
-            type: endpoint.type,
-          };
-        });
-        allTransactions.push(...txns);
+      // Step 1: Get the key event log to find public keys for address2 and address3
+      const { log: keyEventLog } = await getKeyLog(privateKey);
+      console.log("DEBUG: Key event log for fetchTransactions:", keyEventLog);
+
+      // Map addresses to their public keys
+      const addressToPublicKey = new Map();
+
+      // Add public key for address1 (current key)
+      const publicKey1 = Buffer.from(privateKey.publicKey).toString("hex");
+      addressToPublicKey.set(parsedData.address1, publicKey1);
+
+      // Find public keys for address2 and address3 from pending log entries
+      for (const entry of keyEventLog) {
+        if (entry.mempool) {
+          // Pending entry: prerotated_key_hash corresponds to address2
+          if (
+            getP2PKH(Buffer.from(entry.public_key, "hex")) ===
+            parsedData.address2
+          ) {
+            addressToPublicKey.set(parsedData.address2, entry.public_key);
+          }
+          // Pending entry: twice_prerotated_key_hash corresponds to address3
+          if (
+            getP2PKH(Buffer.from(entry.public_key, "hex")) ===
+            parsedData.address3
+          ) {
+            addressToPublicKey.set(parsedData.address3, entry.public_key);
+          }
+        }
       }
-      allTransactions.sort((a, b) => new Date(b.date) - new Date(a.date));
-      setTransactions(allTransactions);
+
+      console.log(
+        "DEBUG: Address to public key mapping:",
+        Object.fromEntries(addressToPublicKey)
+      );
+
+      // Get unique public keys to fetch transactions (filter out undefined)
+      const publicKeys = Array.from(addressToPublicKey.values()).filter(
+        (pk) => pk
+      );
+
+      if (publicKeys.length === 0) {
+        console.log("DEBUG: No public keys available to fetch transactions");
+        setTransactions([]);
+        return;
+      }
+
+      const origin = window.location.origin;
+      const endpoints = [
+        {
+          key: "past_transactions",
+          status: "Confirmed",
+          type: "Sent",
+          getUrl: (publicKey) =>
+            `${
+              import.meta.env.VITE_API_URL
+            }/get-past-sent-txns?page=1&public_key=${publicKey}&origin=${encodeURIComponent(
+              origin
+            )}`,
+        },
+        {
+          key: "past_pending_transactions",
+          status: "Pending",
+          type: "Sent",
+          getUrl: (publicKey) =>
+            `${
+              import.meta.env.VITE_API_URL
+            }/get-past-pending-sent-txns?page=1&public_key=${publicKey}&origin=${encodeURIComponent(
+              origin
+            )}`,
+        },
+        {
+          key: "past_transactions",
+          status: "Confirmed",
+          type: "Received",
+          getUrl: (publicKey) =>
+            `${
+              import.meta.env.VITE_API_URL
+            }/get-past-received-txns?page=1&public_key=${publicKey}&origin=${encodeURIComponent(
+              origin
+            )}`,
+        },
+        {
+          key: "past_pending_transactions",
+          status: "Pending",
+          type: "Received",
+          getUrl: (publicKey) =>
+            `${
+              import.meta.env.VITE_API_URL
+            }/get-past-pending-received-txns?page=1&public_key=${publicKey}&origin=${encodeURIComponent(
+              origin
+            )}`,
+        },
+      ];
+
+      const allTransactions = [];
+
+      // Step 2: Fetch transactions for each public key
+      for (const publicKey of publicKeys) {
+        // Find the address corresponding to this public key
+        const address = Array.from(addressToPublicKey.entries()).find(
+          ([, pk]) => pk === publicKey
+        )?.[0];
+
+        if (!address) {
+          console.warn(`No address found for public key: ${publicKey}`);
+          continue;
+        }
+
+        for (const endpoint of endpoints) {
+          const url = endpoint.getUrl(publicKey);
+          try {
+            const response = await fetch(url);
+            if (!response.ok) {
+              console.warn(`Failed to fetch ${url}: ${response.statusText}`);
+              continue; // Skip to next endpoint if fetch fails
+            }
+            const data = await response.json();
+            const txns = (data[endpoint.key] || []).map((tx) => ({
+              id: tx.id,
+              to: tx.outputs
+                .filter((item) => item.to !== address) // Exclude self-addressed outputs
+                .map((item) => item.to)
+                .join(", "),
+              amount: tx.outputs
+                .reduce((sum, output) => {
+                  // For Received, sum outputs to this address
+                  // For Sent, sum outputs not to this address
+                  if (endpoint.type === "Received") {
+                    return output.to === address ? sum + output.value : sum;
+                  } else {
+                    return output.to !== address ? sum + output.value : sum;
+                  }
+                }, 0)
+                .toFixed(8),
+              date: new Date(tx.time * 1000).toLocaleDateString(),
+              status: endpoint.status,
+              type: endpoint.type,
+              address: address, // Track which address this transaction belongs to
+            }));
+            allTransactions.push(...txns);
+          } catch (error) {
+            console.warn(`Error fetching ${url}:`, error);
+            continue; // Continue with next endpoint
+          }
+        }
+      }
+
+      // Remove duplicates by transaction ID
+      const uniqueTransactions = Array.from(
+        new Map(allTransactions.map((tx) => [tx.id, tx])).values()
+      );
+
+      // Sort transactions by date (newest first)
+      uniqueTransactions.sort((a, b) => new Date(b.date) - new Date(a.date));
+
+      setTransactions(uniqueTransactions);
+      console.log("DEBUG: Fetched transactions:", uniqueTransactions);
     } catch (error) {
       console.error("Error fetching transactions:", error);
       notifications.show({
@@ -975,7 +1063,7 @@ const Wallet2 = () => {
                   import.meta.env.VITE_API_URL
                 }/get-graph-wallet?address=${getP2PKH(
                   privateKey.publicKey
-                )}&amount_needed=${totalAmount}`
+                )}&amount_needed=${balance}`
               );
               const inputs = res.data.unspent_transactions.reduce(
                 (accumulator, utxo) => {
@@ -1006,6 +1094,11 @@ const Wallet2 = () => {
                 value: Number(r.amount),
               }));
 
+              transactionOutputs.push({
+                to: parsedData.address2,
+                value: balance - totalAmount,
+              });
+
               const actualTxn = new Transaction({
                 key: privateKey,
                 public_key: Buffer.from(privateKey.publicKey).toString("hex"),
@@ -1020,6 +1113,14 @@ const Wallet2 = () => {
               });
               await actualTxn.hashAndSign();
 
+              let newTransactionOutputs = [
+                {
+                  to: newParsedData.address2,
+                  value: 0,
+                },
+              ];
+              newTransactionOutputs[0].value = balance - totalAmount;
+
               const zeroValueTxn = new Transaction({
                 key: newPrivateKey,
                 public_key: Buffer.from(newPrivateKey.publicKey).toString(
@@ -1027,8 +1128,8 @@ const Wallet2 = () => {
                 ),
                 twice_prerotated_key_hash: newParsedData.address3,
                 prerotated_key_hash: newParsedData.address2,
-                inputs: [],
-                outputs: [{ to: newParsedData.address2, value: 0 }],
+                inputs: [{ id: actualTxn.id }],
+                outputs: newTransactionOutputs,
                 relationship: "",
                 relationship_hash: await generateSHA256(""),
                 public_key_hash: newPublicKeyHash,
@@ -1037,21 +1138,16 @@ const Wallet2 = () => {
               await zeroValueTxn.hashAndSign();
 
               setLoading(true);
-              const [actualResponse, zeroValueResponse] = await Promise.all([
-                axios.post(
-                  `${import.meta.env.VITE_API_URL}/transaction?origin=${
-                    window.location.origin
-                  }&username_signature=1`,
-                  [actualTxn.toJson(), zeroValueTxn.toJson()],
-                  { headers: { "Content-Type": "application/json" } }
-                ),
-              ]);
+              const actualResponse = await axios.post(
+                `${import.meta.env.VITE_API_URL}/transaction?origin=${
+                  window.location.origin
+                }&username_signature=1`,
+                [actualTxn.toJson(), zeroValueTxn.toJson()],
+                { headers: { "Content-Type": "application/json" } }
+              );
 
               setLoading(false);
-              if (
-                actualResponse.status === 200 &&
-                zeroValueResponse.status === 200
-              ) {
+              if (actualResponse.status === 200) {
                 setTransactions([
                   {
                     id: actualTxn.hash,
