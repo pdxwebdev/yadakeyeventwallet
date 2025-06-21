@@ -16,6 +16,7 @@ import {
   NumberInput,
   Flex,
   Loader,
+  Accordion, // Add Accordion to imports
 } from "@mantine/core";
 import { Transaction } from "../utils/transaction";
 import Webcam from "react-webcam";
@@ -678,52 +679,59 @@ const Wallet2 = () => {
     if (!privateKey || !parsedData) return;
 
     try {
-      // Step 1: Get the key event log to find public keys for address2 and address3
+      // Step 1: Get the key event log
       const { log: keyEventLog } = await getKeyLog(privateKey);
       console.log("DEBUG: Key event log for fetchTransactions:", keyEventLog);
 
-      // Map addresses to their public keys
-      const addressToPublicKey = new Map();
+      // Initialize key log entries with empty transactions arrays and totals
+      const keyLogWithTransactions = keyEventLog.map((entry) => ({
+        ...entry,
+        transactions: [],
+        totalReceived: 0,
+        totalSent: 0,
+      }));
 
-      // Add public key for address1 (current key)
-      const publicKey1 = Buffer.from(privateKey.publicKey).toString("hex");
-      addressToPublicKey.set(parsedData.address1, publicKey1);
+      // Step 2: Collect all public keys from the key event log
+      const publicKeys = keyEventLog
+        .map((entry) => entry.public_key)
+        .filter((pk) => pk); // Filter out undefined public keys
 
-      // Find public keys for address2 and address3 from pending log entries
-      for (const entry of keyEventLog) {
-        if (entry.mempool) {
-          // Pending entry: prerotated_key_hash corresponds to address2
-          if (
-            getP2PKH(Buffer.from(entry.public_key, "hex")) ===
-            parsedData.address2
-          ) {
-            addressToPublicKey.set(parsedData.address2, entry.public_key);
-          }
-          // Pending entry: twice_prerotated_key_hash corresponds to address3
-          if (
-            getP2PKH(Buffer.from(entry.public_key, "hex")) ===
-            parsedData.address3
-          ) {
-            addressToPublicKey.set(parsedData.address3, entry.public_key);
-          }
-        }
-      }
-
-      console.log(
-        "DEBUG: Address to public key mapping:",
-        Object.fromEntries(addressToPublicKey)
-      );
-
-      // Get unique public keys to fetch transactions (filter out undefined)
-      const publicKeys = Array.from(addressToPublicKey.values()).filter(
-        (pk) => pk
-      );
+      console.log("DEBUG: Public keys to fetch transactions:", publicKeys);
 
       if (publicKeys.length === 0) {
         console.log("DEBUG: No public keys available to fetch transactions");
-        setTransactions([]);
+        setTransactions(keyLogWithTransactions);
         return;
       }
+
+      // Map public keys to their addresses (public_key_hash)
+      const publicKeyToAddress = new Map();
+      keyEventLog.forEach((entry) => {
+        if (entry.public_key) {
+          publicKeyToAddress.set(entry.public_key, entry.public_key_hash);
+        }
+      });
+
+      // Map prerotated and twice_prerotated key hashes to their rotation indices
+      const keyHashToRotation = new Map();
+      keyEventLog.forEach((entry, index) => {
+        keyHashToRotation.set(entry.public_key_hash, index);
+        if (entry.prerotated_key_hash) {
+          keyHashToRotation.set(entry.prerotated_key_hash, index + 1);
+        }
+        if (entry.twice_prerotated_key_hash) {
+          keyHashToRotation.set(entry.twice_prerotated_key_hash, index + 2);
+        }
+      });
+
+      console.log(
+        "DEBUG: Public key to address mapping:",
+        Object.fromEntries(publicKeyToAddress)
+      );
+      console.log(
+        "DEBUG: Key hash to rotation mapping:",
+        Object.fromEntries(keyHashToRotation)
+      );
 
       const origin = window.location.origin;
       const endpoints = [
@@ -773,19 +781,24 @@ const Wallet2 = () => {
         },
       ];
 
-      const allTransactions = [];
-
-      // Step 2: Fetch transactions for each public key
+      // Step 3: Fetch transactions for each public key
       for (const publicKey of publicKeys) {
-        // Find the address corresponding to this public key
-        const address = Array.from(addressToPublicKey.entries()).find(
-          ([, pk]) => pk === publicKey
-        )?.[0];
-
+        const address = publicKeyToAddress.get(publicKey);
         if (!address) {
           console.warn(`No address found for public key: ${publicKey}`);
           continue;
         }
+
+        // Find the current key log entry to access prerotated_key_hash and twice_prerotated_key_hash
+        const currentEntry = keyLogWithTransactions.find(
+          (entry) => entry.public_key === publicKey
+        );
+        const prerotatedKeyHash = currentEntry?.prerotated_key_hash;
+        const twicePrerotatedKeyHash = currentEntry?.twice_prerotated_key_hash;
+
+        const transactionsForKey = [];
+        let totalReceivedForKey = 0;
+        let totalSentForKey = 0;
 
         for (const endpoint of endpoints) {
           const url = endpoint.getUrl(publicKey);
@@ -793,54 +806,89 @@ const Wallet2 = () => {
             const response = await fetch(url);
             if (!response.ok) {
               console.warn(`Failed to fetch ${url}: ${response.statusText}`);
-              continue; // Skip to next endpoint if fetch fails
+              continue;
             }
             const data = await response.json();
-            const txns = (data[endpoint.key] || []).map((tx) => ({
-              id: tx.id,
-              to: tx.outputs
-                .filter((item) => item.to !== address) // Exclude self-addressed outputs
-                .map((item) => item.to)
-                .join(", "),
-              amount: tx.outputs
+            const txns = (data[endpoint.key] || []).map((tx) => {
+              const amount = tx.outputs
                 .reduce((sum, output) => {
-                  // For Received, sum outputs to this address
-                  // For Sent, sum outputs not to this address
                   if (endpoint.type === "Received") {
                     return output.to === address ? sum + output.value : sum;
                   } else {
                     return output.to !== address ? sum + output.value : sum;
                   }
                 }, 0)
-                .toFixed(8),
-              date: new Date(tx.time * 1000).toLocaleDateString(),
-              status: endpoint.status,
-              type: endpoint.type,
-              address: address, // Track which address this transaction belongs to
-            }));
-            allTransactions.push(...txns);
+                .toFixed(8);
+              // Accumulate totals based on transaction type
+              if (endpoint.type === "Received") {
+                totalReceivedForKey += parseFloat(amount);
+              } else if (endpoint.type === "Sent") {
+                totalSentForKey += parseFloat(amount);
+              }
+              // Construct "to" field with actual addresses
+              const toAddresses = tx.outputs.map((item) => {
+                const outputAddress = item.to;
+                // Check if the output is to the next rotation(s)
+                if (outputAddress === prerotatedKeyHash) {
+                  return `Rotation ${keyHashToRotation.get(
+                    outputAddress
+                  )} (${outputAddress})`;
+                } else if (outputAddress === twicePrerotatedKeyHash) {
+                  return `Rotation ${keyHashToRotation.get(
+                    outputAddress
+                  )} (${outputAddress})`;
+                } else if (outputAddress === address) {
+                  return `Self (${outputAddress})`;
+                } else {
+                  return outputAddress;
+                }
+              });
+              const toField = toAddresses.join(", ") || address; // Fallback to own address if no outputs
+              return {
+                id: tx.id,
+                to: toField,
+                amount,
+                date: new Date(tx.time * 1000).toLocaleDateString(),
+                status: endpoint.status,
+                type: endpoint.type,
+                address: address,
+                public_key: publicKey,
+              };
+            });
+            transactionsForKey.push(...txns);
           } catch (error) {
             console.warn(`Error fetching ${url}:`, error);
-            continue; // Continue with next endpoint
+            continue;
           }
+        }
+
+        // Assign transactions and totals to the corresponding key log entry
+        const entryIndex = keyLogWithTransactions.findIndex(
+          (entry) => entry.public_key === publicKey
+        );
+        if (entryIndex !== -1) {
+          keyLogWithTransactions[entryIndex].transactions = transactionsForKey;
+          keyLogWithTransactions[entryIndex].totalReceived =
+            totalReceivedForKey.toFixed(8);
+          keyLogWithTransactions[entryIndex].totalSent =
+            totalSentForKey.toFixed(8);
         }
       }
 
-      // Remove duplicates by transaction ID
-      const uniqueTransactions = Array.from(
-        new Map(allTransactions.map((tx) => [tx.id, tx])).values()
-      );
+      // Sort key log entries by rotation (index in original log)
+      keyLogWithTransactions.sort((a, b) => {
+        const aIndex = keyEventLog.indexOf(a);
+        const bIndex = keyEventLog.indexOf(b);
+        return aIndex - bIndex;
+      });
 
-      // Sort transactions by date (newest first)
-      uniqueTransactions.sort((a, b) => new Date(b.date) - new Date(a.date));
-
-      setTransactions(uniqueTransactions);
-      console.log("DEBUG: Fetched transactions:", uniqueTransactions);
+      setTransactions(keyLogWithTransactions);
+      console.log("DEBUG: Key log with transactions:", keyLogWithTransactions);
     } catch (error) {
       console.error("Error fetching transactions:", error);
       notifications.show({
         title: "Error",
-        message: "Failed to load transactions",
+        message: "Failed to load key event log and transactions",
         color: "red",
       });
     }
@@ -889,374 +937,204 @@ const Wallet2 = () => {
     fetchBalance();
   }, [privateKey, isInitialized]);
 
-  const capture = async () => {
-    if (hasScanned) return; // Prevent multiple scans
-
-    const imageSrc = webcamRef.current?.getScreenshot();
-    if (!imageSrc) return;
-
-    const img = new Image();
-    img.src = imageSrc;
-    img.onload = async () => {
-      const canvas = document.createElement("canvas");
-      canvas.width = img.width;
-      canvas.height = img.height;
-      const ctx = canvas.getContext("2d");
-      ctx.drawImage(img, 0, 0, img.width, img.height);
-      const imageData = ctx.getImageData(0, 0, img.width, img.height);
-      const code = jsQR(imageData.data, imageData.width, imageData.height);
-
-      if (code) {
-        setHasScanned(true); // Mark as scanned to stop interval
-        setIsScannerOpen(false); // Close scanner modal immediately
-        try {
-          // Parse QR code: wif|address2|address3|prevaddress1|rotation
-          const [wifString, address2, address3, prevaddress1, rotation] =
-            code.data.split("|");
-          console.log("DEBUG: Parsed QR code:", {
-            wifString: wifString.slice(0, 10) + "...",
-            address2,
-            address3,
-            prevaddress1,
-            rotation,
-          });
-          const newPrivateKey = fromWIF(wifString);
-          const address1 = getP2PKH(newPrivateKey.publicKey);
-          const newParsedData = {
-            address1,
-            wif: wifString,
-            address2,
-            address3,
-            prevaddress1,
-            rotation: parseInt(rotation, 10),
-          };
-          const newPublicKeyHash = address1;
-          console.log("DEBUG: New parsed data:", newParsedData);
-
-          // Fetch key event log for the scanned key
-          const { isValidKey, log: fetchedLog } = await getKeyLog(
-            newPrivateKey
-          );
-          console.log(
-            "DEBUG: Fetched log:",
-            JSON.stringify(fetchedLog, null, 2)
-          );
-          console.log("DEBUG: Confirmed log length:", confirmedLogLength);
-
-          if (!isValidKey) {
-            notifications.show({
-              title: "Error",
-              message: "Failed to fetch key event log. Please try again.",
-              color: "red",
-            });
-            setHasScanned(false); // Allow rescanning
-            setIsScannerOpen(true); // Reopen scanner
-            return;
-          }
-
-          // Check rotation
-          // Determine expected rotation based on context
-          const isTransactionFlow = recipients[0].address !== "";
-          const expectedRotation = isTransactionFlow
-            ? confirmedLogLengthRef.current + 1 // Transaction flow: expect next rotation
-            : confirmedLogLengthRef.current; // Non-transaction flow: expect current rotation
-
-          if (newParsedData.rotation !== expectedRotation) {
-            notifications.show({
-              title: "Incorrect Key Rotation",
-              message: `This wallet requires the key for rotation ${expectedRotation} to ${
-                isTransactionFlow
-                  ? "process the transaction"
-                  : "sign transactions"
-              }. Please scan the QR code for rotation ${expectedRotation}.`,
-              color: "yellow",
-              autoClose: 10000,
-            });
-            setHasScanned(false); // Allow rescanning
-            setIsScannerOpen(true); // Reopen scanner
-            return;
-          }
-
-          // Validate continuity for non-initial keys
-          // Continuity check for non-initial keys (rotation > 0)
-          if (newParsedData.rotation > 0) {
-            if (confirmedLogLengthRef.current === 0) {
-              notifications.show({
-                title: "Invalid QR Code",
-                message: `No confirmed key event log entries found, but rotation ${newParsedData.rotation} requires a previous key.`,
-                color: "red",
-              });
-              resetWalletState();
-              setHasScanned(false);
-              setIsScannerOpen(true);
-              return;
-            }
-
-            let isValidContinuity = false;
-            if (isTransactionFlow) {
-              // Transaction flow: Validate against current parsedData (rotation N)
-              // Scanned key is at rotation N+1, so prevaddress1 should be current address1,
-              // address2 should be current address3
-              isValidContinuity =
-                newParsedData.prevaddress1 === parsedData.address1 &&
-                newParsedData.address2 === parsedData.address3 &&
-                (!newParsedData.prevaddress1 ||
-                  parsedData.address1 === newParsedData.prevaddress1);
-            } else {
-              // Non-transaction flow: Validate against last confirmed log entry (rotation N-1)
-              const lastConfirmedEntry = fetchedLog.find(
-                (entry) =>
-                  !entry.mempool &&
-                  fetchedLog.indexOf(entry) ===
-                    confirmedLogLengthRef.current - 1
-              );
-              if (!lastConfirmedEntry) {
-                notifications.show({
-                  title: "Invalid QR Code",
-                  message:
-                    "No confirmed key event log entries found for continuity check.",
-                  color: "red",
-                });
-                setHasScanned(false);
-                setIsScannerOpen(true);
-                return;
-              }
-              isValidContinuity =
-                lastConfirmedEntry.prerotated_key_hash === newPublicKeyHash &&
-                lastConfirmedEntry.twice_prerotated_key_hash ===
-                  newParsedData.address2 &&
-                (!newParsedData.prevaddress1 ||
-                  lastConfirmedEntry.public_key_hash ===
-                    newParsedData.prevaddress1);
-            }
-
-            if (!isValidContinuity) {
-              notifications.show({
-                title: "Invalid QR Code",
-                message: `The scanned key (rotation ${
-                  newParsedData.rotation
-                }) does not maintain continuity with the previous key (rotation ${
-                  isTransactionFlow
-                    ? confirmedLogLengthRef.current
-                    : confirmedLogLengthRef.current - 1
-                }). Please ensure the key is part of the same key chain and scan again.`,
-                color: "red",
-              });
-              setHasScanned(false);
-              setIsScannerOpen(true);
-              return;
-            }
-          }
-
-          // Handle transaction or key update
-          if (recipients[0].address !== "") {
-            // Transaction flow
-
-            // Process transaction (same as original)
-            const totalAmount = recipients.reduce(
-              (sum, r) => sum + Number(r.amount),
-              0
-            );
-            try {
-              const res = await axios.get(
-                `${
-                  import.meta.env.VITE_API_URL
-                }/get-graph-wallet?address=${getP2PKH(
-                  privateKey.publicKey
-                )}&amount_needed=${balance}`
-              );
-              const inputs = res.data.unspent_transactions.reduce(
-                (accumulator, utxo) => {
-                  if (accumulator.total >= totalAmount) return accumulator;
-                  const utxoValue = utxo.outputs.reduce(
-                    (sum, output) => sum + output.value,
-                    0
-                  );
-                  accumulator.selected.push({ id: utxo.id });
-                  accumulator.total += utxoValue;
-                  return accumulator;
-                },
-                { selected: [], total: 0 }
-              );
-
-              if (inputs.total < totalAmount) {
-                notifications.show({
-                  title: "Error",
-                  message: "Insufficient funds",
-                  color: "red",
-                });
-                setHasScanned(false);
-                return;
-              }
-
-              const transactionOutputs = recipients.map((r) => ({
-                to: r.address,
-                value: Number(r.amount),
-              }));
-
-              transactionOutputs.push({
-                to: parsedData.address2,
-                value: balance - totalAmount,
-              });
-
-              const actualTxn = new Transaction({
-                key: privateKey,
-                public_key: Buffer.from(privateKey.publicKey).toString("hex"),
-                twice_prerotated_key_hash: parsedData.address3,
-                prerotated_key_hash: parsedData.address2,
-                inputs: inputs.selected,
-                outputs: transactionOutputs,
-                relationship: "",
-                relationship_hash: await generateSHA256(""),
-                public_key_hash: getP2PKH(privateKey.publicKey),
-                prev_public_key_hash: parsedData.prevaddress1,
-              });
-              await actualTxn.hashAndSign();
-
-              let newTransactionOutputs = [
-                {
-                  to: newParsedData.address2,
-                  value: 0,
-                },
-              ];
-              newTransactionOutputs[0].value = balance - totalAmount;
-
-              const zeroValueTxn = new Transaction({
-                key: newPrivateKey,
-                public_key: Buffer.from(newPrivateKey.publicKey).toString(
-                  "hex"
-                ),
-                twice_prerotated_key_hash: newParsedData.address3,
-                prerotated_key_hash: newParsedData.address2,
-                inputs: [{ id: actualTxn.id }],
-                outputs: newTransactionOutputs,
-                relationship: "",
-                relationship_hash: await generateSHA256(""),
-                public_key_hash: newPublicKeyHash,
-                prev_public_key_hash: getP2PKH(privateKey.publicKey),
-              });
-              await zeroValueTxn.hashAndSign();
-
-              setLoading(true);
-              const actualResponse = await axios.post(
-                `${import.meta.env.VITE_API_URL}/transaction?origin=${
-                  window.location.origin
-                }&username_signature=1`,
-                [actualTxn.toJson(), zeroValueTxn.toJson()],
-                { headers: { "Content-Type": "application/json" } }
-              );
-
-              setLoading(false);
-              if (actualResponse.status === 200) {
-                setTransactions([
-                  {
-                    id: actualTxn.hash,
-                    to: transactionOutputs
-                      .filter((item) => item.to !== parsedData?.address1)
-                      .map((item) => item.to)
-                      .join(", "),
-                    amount: totalAmount.toFixed(8),
-                    date: new Date().toLocaleDateString(),
-                    status: "Pending",
-                    type: "Sent",
-                  },
-                  ...transactions,
-                ]);
-
-                // Update wallet state
-                localStorage.removeItem("walletPrivateKey");
-                localStorage.removeItem("walletWif");
-                localStorage.removeItem("walletParsedData");
-                localStorage.removeItem("walletIsWaitingForConfirmation");
-                localStorage.removeItem("walletSubmissionTime");
-                localStorage.removeItem("walletIsInitialized");
-
-                setPrivateKey(newPrivateKey);
-                setWif(wifString);
-                setParsedData(newParsedData);
-                setIsInitialized(false);
-                setRecipients([{ address: "", amount: "" }]);
-
-                notifications.show({
-                  title: "Success",
-                  message:
-                    "Transaction and key rotation confirmation submitted successfully. Waiting for initialization of the new key.",
-                  color: "green",
-                });
-
-                const initStatus = await checkInitializationStatus();
-                if (initStatus.status === "no_transaction") {
-                  await initializeKeyEventLog();
-                }
-              } else {
-                throw new Error(
-                  "Transaction or confirmation submission failed"
-                );
-              }
-            } catch (error) {
-              console.error("DEBUG: Transaction error:", error);
-              notifications.show({
-                title: "Transaction Failed",
-                message: `Failed to process transaction: ${error.message}`,
-                color: "red",
-              });
-              setHasScanned(false);
-              return;
-            }
-          } else {
-            // Non-transaction key scan
-            localStorage.removeItem("walletPrivateKey");
-            localStorage.removeItem("walletWif");
-            localStorage.removeItem("walletParsedData");
-            localStorage.removeItem("walletIsWaitingForConfirmation");
-            localStorage.removeItem("walletSubmissionTime");
-            localStorage.removeItem("walletIsInitialized");
-
-            setPrivateKey(newPrivateKey);
-            setWif(wifString);
-            setParsedData(newParsedData);
-            setIsInitialized(false);
-
-            console.log("DEBUG: privateKey set:", newPrivateKey);
-            notifications.show({
-              title: "Key Loaded",
-              message: `Wallet key for rotation ${newParsedData.rotation} loaded successfully. You can now send transactions.`,
-              color: "green",
-            });
-
-            const initStatus = await checkInitializationStatus();
-            if (initStatus.status === "no_transaction") {
-              notifications.show({
-                title: "No Key Event Log Entry",
-                message: "Submitting wallet initialization transaction.",
-                color: "yellow",
-              });
-              await initializeKeyEventLog();
-            } else if (initStatus.status === "pending_mempool") {
-              notifications.show({
-                title: "Pending Transaction",
-                message: `Key at rotation ${newParsedData.rotation} has a pending transaction in mempool. Waiting for confirmation.`,
-                color: "yellow",
-              });
-            }
-          }
-        } catch (error) {
-          console.error("DEBUG: QR code parsing error:", error);
-          notifications.show({
-            title: "Error",
-            message:
-              "Invalid QR code format or invalid WIF. Please check the QR code and try again.",
-            color: "red",
-          });
-          resetWalletState();
-          setHasScanned(false);
-          setIsScannerOpen(true);
-        }
+  const capture = () => {
+    return new Promise((resolve, reject) => {
+      const imageSrc = webcamRef.current?.getScreenshot();
+      if (!imageSrc) {
+        reject(new Error("Failed to capture image from webcam"));
+        return;
       }
-    };
+
+      const img = new Image();
+      img.src = imageSrc;
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        canvas.width = img.width;
+        canvas.height = img.height;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, img.width, img.height);
+        const imageData = ctx.getImageData(0, 0, img.width, img.height);
+        const code = jsQR(imageData.data, imageData.width, imageData.height);
+
+        if (code) {
+          resolve(code.data);
+        } else {
+          reject(new Error("No QR code found"));
+        }
+      };
+      img.onerror = () => reject(new Error("Failed to load captured image"));
+    });
   };
 
-  // Sign transaction
+  // Process scanned QR code
+  const processScannedQR = async (qrData, isTransactionFlow = false) => {
+    try {
+      // Parse QR code: wif|address2|address3|prevaddress1|rotation
+      const [wifString, address2, address3, prevaddress1, rotation] =
+        qrData.split("|");
+      console.log("DEBUG: Parsed QR code:", {
+        wifString: wifString.slice(0, 10) + "...",
+        address2,
+        address3,
+        prevaddress1,
+        rotation,
+      });
+
+      const newPrivateKey = fromWIF(wifString);
+      const address1 = getP2PKH(newPrivateKey.publicKey);
+      const newParsedData = {
+        address1,
+        wif: wifString,
+        address2,
+        address3,
+        prevaddress1,
+        rotation: parseInt(rotation, 10),
+      };
+      const newPublicKeyHash = address1;
+      console.log("DEBUG: New parsed data:", newParsedData);
+
+      // Fetch key event log for the scanned key
+      const { isValidKey, log: fetchedLog } = await getKeyLog(newPrivateKey);
+      console.log("DEBUG: Fetched log:", JSON.stringify(fetchedLog, null, 2));
+      console.log("DEBUG: Confirmed log length:", confirmedLogLength);
+
+      if (!isValidKey) {
+        throw new Error("Failed to fetch key event log");
+      }
+
+      // Determine expected rotation
+      const expectedRotation = isTransactionFlow
+        ? confirmedLogLengthRef.current + 1 // Transaction flow: expect next rotation
+        : confirmedLogLengthRef.current; // Non-transaction flow: expect current rotation
+
+      if (newParsedData.rotation !== expectedRotation) {
+        throw new Error(
+          `Incorrect key rotation. Expected rotation ${expectedRotation}, got ${newParsedData.rotation}`
+        );
+      }
+
+      // Validate continuity for non-initial keys
+      if (newParsedData.rotation > 0) {
+        if (confirmedLogLengthRef.current === 0) {
+          throw new Error(
+            `No confirmed key event log entries found, but rotation ${newParsedData.rotation} requires a previous key`
+          );
+        }
+
+        let isValidContinuity = false;
+        if (isTransactionFlow) {
+          // Transaction flow: Validate against current parsedData (rotation N)
+          isValidContinuity =
+            newParsedData.prevaddress1 === parsedData.address1 &&
+            newParsedData.address2 === parsedData.address3 &&
+            (!newParsedData.prevaddress1 ||
+              parsedData.address1 === newParsedData.prevaddress1);
+        } else {
+          // Non-transaction flow: Validate against last confirmed log entry (rotation N-1)
+          const lastConfirmedEntry = fetchedLog.find(
+            (entry) =>
+              !entry.mempool &&
+              fetchedLog.indexOf(entry) === confirmedLogLengthRef.current - 1
+          );
+          if (!lastConfirmedEntry) {
+            throw new Error(
+              "No confirmed key event log entries found for continuity check"
+            );
+          }
+          isValidContinuity =
+            lastConfirmedEntry.prerotated_key_hash === newPublicKeyHash &&
+            lastConfirmedEntry.twice_prerotated_key_hash ===
+              newParsedData.address2 &&
+            (!newParsedData.prevaddress1 ||
+              lastConfirmedEntry.public_key_hash ===
+                newParsedData.prevaddress1);
+        }
+
+        if (!isValidContinuity) {
+          throw new Error(
+            `The scanned key (rotation ${newParsedData.rotation}) does not maintain continuity with the previous key`
+          );
+        }
+      }
+
+      return { newPrivateKey, newParsedData, newPublicKeyHash };
+    } catch (error) {
+      console.error("DEBUG: QR code parsing error:", error);
+      throw error;
+    }
+  };
+  // Handle key scan for initial wallet setup or key update
+  const handleKeyScan = async () => {
+    try {
+      setIsScannerOpen(true);
+      let qrData;
+      let attempts = 0;
+      const maxAttempts = 100; // ~30 seconds at 300ms intervals
+
+      while (attempts < maxAttempts) {
+        try {
+          qrData = await capture();
+          break;
+        } catch (error) {
+          attempts++;
+          await new Promise((resolve) => setTimeout(resolve, 300));
+        }
+      }
+
+      if (!qrData) {
+        throw new Error("No QR code scanned within time limit");
+      }
+
+      setIsScannerOpen(false);
+      const { newPrivateKey, newParsedData } = await processScannedQR(qrData);
+
+      // Update wallet state
+      localStorage.removeItem("walletPrivateKey");
+      localStorage.removeItem("walletWif");
+      localStorage.removeItem("walletParsedData");
+      localStorage.removeItem("walletIsWaitingForConfirmation");
+      localStorage.removeItem("walletSubmissionTime");
+      localStorage.removeItem("walletIsInitialized");
+
+      setPrivateKey(newPrivateKey);
+      setWif(newParsedData.wif);
+      setParsedData(newParsedData);
+      setIsInitialized(false);
+
+      notifications.show({
+        title: "Key Loaded",
+        message: `Wallet key for rotation ${newParsedData.rotation} loaded successfully. You can now send transactions.`,
+        color: "green",
+      });
+
+      const initStatus = await checkInitializationStatus();
+      if (initStatus.status === "no_transaction") {
+        notifications.show({
+          title: "No Key Event Log Entry",
+          message: "Submitting wallet initialization transaction.",
+          color: "yellow",
+        });
+        await initializeKeyEventLog();
+      } else if (initStatus.status === "pending_mempool") {
+        notifications.show({
+          title: "Pending Transaction",
+          message: `Key at rotation ${newParsedData.rotation} has a pending transaction in mempool. Waiting for confirmation.`,
+          color: "yellow",
+        });
+      }
+    } catch (error) {
+      console.error("DEBUG: Key scan error:", error);
+      notifications.show({
+        title: "Error",
+        message:
+          error.message || "Failed to process QR code. Please try again.",
+        color: "red",
+      });
+      setIsScannerOpen(true); // Reopen scanner for retry
+    }
+  };
+
+  // Sign transaction with key rotation
   const signTransaction = async () => {
     if (!privateKey || recipients.length === 0) {
       notifications.show({
@@ -1285,7 +1163,7 @@ const Wallet2 = () => {
     );
 
     try {
-      // Step 1: Prompt user to rotate key and scan the next key
+      // Prompt user to scan the next key
       notifications.show({
         title: "Key Rotation Required",
         message: `Please rotate your key to rotation ${
@@ -1295,18 +1173,167 @@ const Wallet2 = () => {
       });
       setIsTransactionFlow(true);
       setIsScannerOpen(true);
-      setHasScanned(false);
 
-      // Wait for the new key to be scanned (handled in capture function)
-      // The capture function will update privateKey, parsedData, and wif
-      // We will proceed with transaction creation after the new key is validated
+      let qrData;
+      let attempts = 0;
+      const maxAttempts = 100; // ~30 seconds at 300ms intervals
+
+      while (attempts < maxAttempts) {
+        try {
+          qrData = await capture();
+          break;
+        } catch (error) {
+          attempts++;
+          await new Promise((resolve) => setTimeout(resolve, 300));
+        }
+      }
+
+      if (!qrData) {
+        throw new Error("No QR code scanned within time limit");
+      }
+
+      setIsScannerOpen(false);
+      const { newPrivateKey, newParsedData, newPublicKeyHash } =
+        await processScannedQR(qrData, true);
+
+      // Process transaction
+      try {
+        const res = await axios.get(
+          `${import.meta.env.VITE_API_URL}/get-graph-wallet?address=${getP2PKH(
+            privateKey.publicKey
+          )}&amount_needed=${balance}`
+        );
+        const inputs = res.data.unspent_transactions.reduce(
+          (accumulator, utxo) => {
+            if (accumulator.total >= totalAmount) return accumulator;
+            const utxoValue = utxo.outputs.reduce(
+              (sum, output) => sum + output.value,
+              0
+            );
+            accumulator.selected.push({ id: utxo.id });
+            accumulator.total += utxoValue;
+            return accumulator;
+          },
+          { selected: [], total: 0 }
+        );
+
+        if (inputs.total < totalAmount) {
+          throw new Error("Insufficient funds");
+        }
+
+        const transactionOutputs = recipients.map((r) => ({
+          to: r.address,
+          value: Number(r.amount),
+        }));
+
+        transactionOutputs.push({
+          to: parsedData.address2,
+          value: balance - totalAmount,
+        });
+
+        const actualTxn = new Transaction({
+          key: privateKey,
+          public_key: Buffer.from(privateKey.publicKey).toString("hex"),
+          twice_prerotated_key_hash: parsedData.address3,
+          prerotated_key_hash: parsedData.address2,
+          inputs: inputs.selected,
+          outputs: transactionOutputs,
+          relationship: "",
+          relationship_hash: await generateSHA256(""),
+          public_key_hash: getP2PKH(privateKey.publicKey),
+          prev_public_key_hash: parsedData.prevaddress1,
+        });
+        await actualTxn.hashAndSign();
+
+        let newTransactionOutputs = [
+          {
+            to: newParsedData.address2,
+            value: balance - totalAmount,
+          },
+        ];
+
+        const zeroValueTxn = new Transaction({
+          key: newPrivateKey,
+          public_key: Buffer.from(newPrivateKey.publicKey).toString("hex"),
+          twice_prerotated_key_hash: newParsedData.address3,
+          prerotated_key_hash: newParsedData.address2,
+          inputs: [{ id: actualTxn.id }],
+          outputs: newTransactionOutputs,
+          relationship: "",
+          relationship_hash: await generateSHA256(""),
+          public_key_hash: newPublicKeyHash,
+          prev_public_key_hash: getP2PKH(privateKey.publicKey),
+        });
+        await zeroValueTxn.hashAndSign();
+
+        setLoading(true);
+        const actualResponse = await axios.post(
+          `${import.meta.env.VITE_API_URL}/transaction?origin=${
+            window.location.origin
+          }&username_signature=1`,
+          [actualTxn.toJson(), zeroValueTxn.toJson()],
+          { headers: { "Content-Type": "application/json" } }
+        );
+
+        setLoading(false);
+        if (actualResponse.status === 200) {
+          setTransactions([
+            {
+              id: actualTxn.hash,
+              to: transactionOutputs
+                .filter((item) => item.to !== parsedData?.address1)
+                .map((item) => item.to)
+                .join(", "),
+              amount: totalAmount.toFixed(8),
+              date: new Date().toLocaleDateString(),
+              status: "Pending",
+              type: "Sent",
+            },
+            ...transactions,
+          ]);
+
+          // Update wallet state
+          localStorage.removeItem("walletPrivateKey");
+          localStorage.removeItem("walletWif");
+          localStorage.removeItem("walletParsedData");
+          localStorage.removeItem("walletIsWaitingForConfirmation");
+          localStorage.removeItem("walletSubmissionTime");
+          localStorage.removeItem("walletIsInitialized");
+
+          setPrivateKey(newPrivateKey);
+          setWif(newParsedData.wif);
+          setParsedData(newParsedData);
+          setIsInitialized(false);
+          setRecipients([{ address: "", amount: "" }]);
+          setIsTransactionFlow(false);
+
+          notifications.show({
+            title: "Success",
+            message:
+              "Transaction and key rotation confirmation submitted successfully. Waiting for initialization of the new key.",
+            color: "green",
+          });
+
+          const initStatus = await checkInitializationStatus();
+          if (initStatus.status === "no_transaction") {
+            await initializeKeyEventLog();
+          }
+        } else {
+          throw new Error("Transaction or confirmation submission failed");
+        }
+      } catch (error) {
+        console.error("DEBUG: Transaction error:", error);
+        throw new Error(`Failed to process transaction: ${error.message}`);
+      }
     } catch (error) {
-      console.error("Error preparing transaction:", error);
+      console.error("DEBUG: Transaction scan error:", error);
       notifications.show({
-        title: "Transaction Failed",
-        message: error.message,
+        title: "Error",
+        message:
+          error.message || "Failed to process QR code. Please try again.",
         color: "red",
       });
+      setIsScannerOpen(true); // Reopen scanner for retry
     }
   };
 
@@ -1415,7 +1442,7 @@ const Wallet2 = () => {
           <>
             <Text mb="md">Please scan a QR code to load your wallet.</Text>
             <Button
-              onClick={() => setIsScannerOpen(true)}
+              onClick={handleKeyScan}
               color="teal"
               variant="outline"
               mt="md"
@@ -1447,11 +1474,7 @@ const Wallet2 = () => {
               Please scan the correct key (rotation {confirmedLogLength}) to
               proceed.
             </Text>
-            <Button
-              onClick={() => setIsScannerOpen(true)}
-              color="teal"
-              variant="outline"
-            >
+            <Button onClick={handleKeyScan} color="teal" variant="outline">
               Scan Key (Rotation: {confirmedLogLength})
             </Button>
             <Button onClick={resetWalletState} color="red" variant="outline">
@@ -1517,16 +1540,12 @@ const Wallet2 = () => {
             <Text mb="md">
               {parsedData.rotation === log.length
                 ? `Wallet is ready. You can send transactions with this key (rotation ${parsedData.rotation}).`
-                : confirmedLogLength.ref !== log.length
+                : confirmedLogLengthRef.current !== log.length
                 ? "Please wait for key log to be updated on the blockchain."
                 : `This key (rotation ${parsedData.rotation}) is revoked. Please scan the next key (rotation ${log.length}) to sign transactions.`}
             </Text>
             <Button
-              onClick={async () => {
-                await getKeyLog(privateKey);
-                setHasScanned(false); // Reset scan status
-                setIsScannerOpen(true);
-              }}
+              onClick={handleKeyScan}
               disabled={confirmedLogLengthRef.current === parsedData.rotation}
               color="teal"
               variant="outline"
@@ -1539,7 +1558,6 @@ const Wallet2 = () => {
                   })`}
             </Button>
 
-            {/* Transaction Form */}
             {parsedData.rotation === log.length && (
               <>
                 <Title order={3} mt="lg" mb="md">
@@ -1602,63 +1620,115 @@ const Wallet2 = () => {
               </>
             )}
 
-            {/* Transaction History Table */}
             {transactions.length > 0 && (
               <Card shadow="xs" padding="md" mt="lg" styles={styles.nestedCard}>
                 <Title order={3} mb="md">
-                  Transaction History
+                  Key Event Log
                 </Title>
-                <Table striped highlightOnHover styles={styles.table}>
-                  <thead>
-                    <tr>
-                      <th style={styles.tableHeader}>ID</th>
-                      <th style={styles.tableHeader}>To</th>
-                      <th style={styles.tableHeader}>Amount (YDA)</th>
-                      <th style={styles.tableHeader}>Date</th>
-                      <th style={styles.tableHeader}>Status</th>
-                      <th style={styles.tableHeader}>Type</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {transactions.map((txn) => (
-                      <tr key={txn.id}>
-                        <td>
-                          <a
-                            href={`${
-                              import.meta.env.VITE_API_URL
-                            }/explorer?term=${txn.id}`}
-                            target="_blank"
-                          >
-                            {txn.id.slice(0, 8)}...
-                          </a>
-                        </td>
-                        <td>{txn.to}</td>
-                        <td>{txn.amount}</td>
-                        <td>{txn.date}</td>
-                        <td>{txn.status}</td>
-                        <td>{txn.type}</td>
+                <div style={{ overflowX: "auto" }}>
+                  <Table striped highlightOnHover styles={styles.table}>
+                    <thead>
+                      <tr>
+                        <th style={styles.tableHeader}>Rotation</th>
+                        <th style={styles.tableHeader}>Public Key Hash</th>
+                        <th style={styles.tableHeader}>Prerotated Key Hash</th>
+                        <th style={styles.tableHeader}>
+                          Twice Prerotated Key Hash
+                        </th>
+                        <th style={styles.tableHeader}>Total Received (YDA)</th>
+                        <th style={styles.tableHeader}>Total Sent (YDA)</th>
+                        <th style={styles.tableHeader}>Status</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </Table>
-
+                    </thead>
+                    <tbody>
+                      {transactions.map((entry, index) => (
+                        <tr key={entry.public_key_hash || index}>
+                          <td>{index}</td>
+                          <td>{entry.public_key_hash}</td>
+                          <td>{entry.prerotated_key_hash || "N/A"}</td>
+                          <td>{entry.twice_prerotated_key_hash || "N/A"}</td>
+                          <td>{entry.totalReceived}</td>
+                          <td>{entry.totalSent}</td>
+                          <td>{entry.mempool ? "Pending" : "Confirmed"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </Table>
+                </div>
+                <Accordion variant="contained" mt="md">
+                  {transactions.map((entry, index) => (
+                    <Accordion.Item
+                      value={entry.public_key_hash || `entry-${index}`}
+                      key={entry.public_key_hash || index}
+                    >
+                      <Accordion.Control>
+                        <Text>
+                          Transactions for Rotation {index} (
+                          {entry.public_key_hash.slice(0, 8)}...)
+                        </Text>
+                      </Accordion.Control>
+                      <Accordion.Panel>
+                        {entry.transactions.length > 0 ? (
+                          <Table striped highlightOnHover styles={styles.table}>
+                            <thead>
+                              <tr>
+                                <th style={styles.tableHeader}>ID</th>
+                                <th style={styles.tableHeader}>To</th>
+                                <th style={styles.tableHeader}>Amount (YDA)</th>
+                                <th style={styles.tableHeader}>Date</th>
+                                <th style={styles.tableHeader}>Status</th>
+                                <th style={styles.tableHeader}>Type</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {entry.transactions.map((txn) => (
+                                <tr key={txn.id}>
+                                  <td>
+                                    <a
+                                      href={`${
+                                        import.meta.env.VITE_API_URL
+                                      }/explorer?term=${txn.id}`}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                    >
+                                      {txn.id.slice(0, 8)}...
+                                    </a>
+                                  </td>
+                                  <td>{txn.to}</td>
+                                  <td>{txn.amount}</td>
+                                  <td>{txn.date}</td>
+                                  <td>{txn.status}</td>
+                                  <td>{txn.type}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </Table>
+                        ) : (
+                          <Text>No transactions for this key.</Text>
+                        )}
+                      </Accordion.Panel>
+                    </Accordion.Item>
+                  ))}
+                </Accordion>
                 <Button
                   onClick={resetWalletState}
                   color="red"
                   variant="outline"
                   mt="xl"
                 >
-                  Erase Cached Wallet Data
+                  Erase Wallet Cache
                 </Button>
               </Card>
             )}
           </>
         )}
 
-        {/* QR Code Scanner Modal */}
         <Modal
           opened={isScannerOpen}
-          onClose={() => setIsScannerOpen(false)}
+          onClose={() => {
+            setIsScannerOpen(false);
+            setIsTransactionFlow(false);
+          }}
           title="Scan QR Code"
           size="lg"
           styles={{ modal: styles.modal, title: styles.title }}
@@ -1673,7 +1743,6 @@ const Wallet2 = () => {
           />
         </Modal>
 
-        {/* QR Code Display Modal */}
         <Modal
           opened={isQRModalOpen}
           onClose={() => setIsQRModalOpen(false)}
