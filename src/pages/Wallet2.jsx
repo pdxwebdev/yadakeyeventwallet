@@ -1546,16 +1546,14 @@ const Wallet2 = () => {
             </Text>
             <Button
               onClick={handleKeyScan}
-              disabled={confirmedLogLengthRef.current === parsedData.rotation}
+              disabled={confirmedLogLength === parsedData.rotation}
               color="teal"
               variant="outline"
               mt="md"
             >
-              {confirmedLogLengthRef.current === parsedData.rotation
+              {confirmedLogLength === parsedData.rotation
                 ? "Scan not required"
-                : `Scan Next Key (Rotation: ${
-                    log.length === 0 ? 0 : log.length + 1
-                  })`}
+                : `Scan Next Key (Rotation: ${confirmedLogLength})`}
             </Button>
 
             {parsedData.rotation === log.length && (
