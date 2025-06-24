@@ -344,16 +344,9 @@ const Wallet2 = () => {
         return { status: "pending_mempool" };
       }
 
-      // Use confirmedLogLength for expected rotation
-      const expectedRotation = confirmedLogLength;
-
       // Check if the current key is the active key (matches prerotated_key_hash of latest confirmed entry)
-      if (confirmedLogLength > 0) {
-        const latestLogEntry = keyEventLog.find(
-          (entry) =>
-            !entry.mempool &&
-            keyEventLog.indexOf(entry) === confirmedLogLength - 1
-        ); // Newest confirmed entry
+      if (keyEventLog.length > 0) {
+        const latestLogEntry = keyEventLog[keyEventLog.length - 1];
         if (latestLogEntry && latestLogEntry.prerotated_key_hash === address) {
           console.log(
             "DEBUG: Current key is active (matches prerotated_key_hash)"
@@ -389,7 +382,7 @@ const Wallet2 = () => {
       }
 
       // Key is neither active nor revoked, check if it’s the next key to initialize
-      if (parsedData.rotation === expectedRotation) {
+      if (parsedData.rotation === keyEventLog.length) {
         // Validate continuity for new key
         if (confirmedLogLength > 0) {
           const lastLogEntry = keyEventLog.find(
@@ -420,7 +413,7 @@ const Wallet2 = () => {
 
       console.log(
         "DEBUG: Rotation mismatch, expected:",
-        expectedRotation,
+        keyEventLog.length,
         "got:",
         parsedData.rotation
       );
@@ -1001,21 +994,25 @@ const Wallet2 = () => {
       if (!isValidKey) {
         throw new Error("Failed to fetch key event log");
       }
-
-      // Determine expected rotation
-      const expectedRotation = isTransactionFlow
-        ? confirmedLogLengthRef.current + 1 // Transaction flow: expect next rotation
-        : confirmedLogLengthRef.current; // Non-transaction flow: expect current rotation
-
-      if (newParsedData.rotation !== expectedRotation) {
-        throw new Error(
-          `Incorrect key rotation. Expected rotation ${expectedRotation}, got ${newParsedData.rotation}`
-        );
+      if (isTransactionFlow) {
+        if (newParsedData.rotation !== fetchedLog.length + 1) {
+          throw new Error(
+            `Incorrect key rotation. Expected rotation ${
+              fetchedLog.length + 1
+            }, got ${newParsedData.rotation}`
+          );
+        }
+      } else {
+        if (newParsedData.rotation !== fetchedLog.length) {
+          throw new Error(
+            `Incorrect key rotation. Expected rotation ${fetchedLog.length}, got ${newParsedData.rotation}`
+          );
+        }
       }
 
       // Validate continuity for non-initial keys
       if (newParsedData.rotation > 0) {
-        if (confirmedLogLengthRef.current === 0) {
+        if (fetchedLog.length === 0) {
           throw new Error(
             `No confirmed key event log entries found, but rotation ${newParsedData.rotation} requires a previous key`
           );
@@ -1031,23 +1028,17 @@ const Wallet2 = () => {
               parsedData.address1 === newParsedData.prevaddress1);
         } else {
           // Non-transaction flow: Validate against last confirmed log entry (rotation N-1)
-          const lastConfirmedEntry = fetchedLog.find(
-            (entry) =>
-              !entry.mempool &&
-              fetchedLog.indexOf(entry) === confirmedLogLengthRef.current - 1
-          );
-          if (!lastConfirmedEntry) {
+          const lastEntry = fetchedLog[fetchedLog.length - 1];
+          if (!lastEntry) {
             throw new Error(
               "No confirmed key event log entries found for continuity check"
             );
           }
           isValidContinuity =
-            lastConfirmedEntry.prerotated_key_hash === newPublicKeyHash &&
-            lastConfirmedEntry.twice_prerotated_key_hash ===
-              newParsedData.address2 &&
+            lastEntry.prerotated_key_hash === newPublicKeyHash &&
+            lastEntry.twice_prerotated_key_hash === newParsedData.address2 &&
             (!newParsedData.prevaddress1 ||
-              lastConfirmedEntry.public_key_hash ===
-                newParsedData.prevaddress1);
+              lastEntry.public_key_hash === newParsedData.prevaddress1);
         }
 
         if (!isValidContinuity) {
@@ -1201,9 +1192,12 @@ const Wallet2 = () => {
         const res = await axios.get(
           `${import.meta.env.VITE_API_URL}/get-graph-wallet?address=${getP2PKH(
             privateKey.publicKey
-          )}&amount_needed=${balance}`
+          )}&amount_needed=${balance}&method=best`
         );
-        const inputs = res.data.unspent_transactions.reduce(
+        const newUnspent = res.data.unspent_transactions.concat(
+          res.data.unspent_mempool_txns
+        );
+        const inputs = newUnspent.reduce(
           (accumulator, utxo) => {
             if (accumulator.total >= totalAmount) return accumulator;
             const utxoValue = utxo.outputs.reduce(
@@ -1426,7 +1420,7 @@ const Wallet2 = () => {
 
   return (
     <Container size="lg" py="xl">
-      <Notifications position="top-center" />
+      <Notifications position="top-center" autoClose={false} />
       <Card
         shadow="sm"
         padding="lg"
@@ -1540,22 +1534,16 @@ const Wallet2 = () => {
             <Text mb="md">
               {parsedData.rotation === log.length
                 ? `Wallet is ready. You can send transactions with this key (rotation ${parsedData.rotation}).`
-                : confirmedLogLengthRef.current !== log.length
-                ? "Please wait for key log to be updated on the blockchain."
                 : `This key (rotation ${parsedData.rotation}) is revoked. Please scan the next key (rotation ${log.length}) to sign transactions.`}
             </Text>
             <Button
               onClick={handleKeyScan}
-              disabled={confirmedLogLengthRef.current === parsedData.rotation}
+              disabled={log.length === parsedData.rotation}
               color="teal"
               variant="outline"
               mt="md"
             >
-              {confirmedLogLengthRef.current === parsedData.rotation
-                ? "Scan not required"
-                : `Scan Next Key (Rotation: ${
-                    log.length === 0 ? 0 : log.length + 1
-                  })`}
+              Scan Next Key (Rotation: {log.length})
             </Button>
 
             {parsedData.rotation === log.length && (
