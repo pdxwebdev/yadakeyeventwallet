@@ -1090,7 +1090,6 @@ const Wallet2 = () => {
       setPrivateKey(newPrivateKey);
       setWif(newParsedData.wif);
       setParsedData(newParsedData);
-      setIsInitialized(false);
 
       notifications.show({
         title: "Key Loaded",
@@ -1192,7 +1191,7 @@ const Wallet2 = () => {
         const res = await axios.get(
           `${import.meta.env.VITE_API_URL}/get-graph-wallet?address=${getP2PKH(
             privateKey.publicKey
-          )}&amount_needed=${balance}&method=best`
+          )}&amount_needed=${balance}`
         );
         const newUnspent = res.data.unspent_transactions.concat(
           res.data.unspent_mempool_txns
@@ -1271,21 +1270,6 @@ const Wallet2 = () => {
 
         setLoading(false);
         if (actualResponse.status === 200) {
-          setTransactions([
-            {
-              id: actualTxn.hash,
-              to: transactionOutputs
-                .filter((item) => item.to !== parsedData?.address1)
-                .map((item) => item.to)
-                .join(", "),
-              amount: totalAmount.toFixed(8),
-              date: new Date().toLocaleDateString(),
-              status: "Pending",
-              type: "Sent",
-            },
-            ...transactions,
-          ]);
-
           // Update wallet state
           localStorage.removeItem("walletPrivateKey");
           localStorage.removeItem("walletWif");
@@ -1297,7 +1281,6 @@ const Wallet2 = () => {
           setPrivateKey(newPrivateKey);
           setWif(newParsedData.wif);
           setParsedData(newParsedData);
-          setIsInitialized(false);
           setRecipients([{ address: "", amount: "" }]);
           setIsTransactionFlow(false);
 
@@ -1307,11 +1290,6 @@ const Wallet2 = () => {
               "Transaction and key rotation confirmation submitted successfully. Waiting for initialization of the new key.",
             color: "green",
           });
-
-          const initStatus = await checkInitializationStatus();
-          if (initStatus.status === "no_transaction") {
-            await initializeKeyEventLog();
-          }
         } else {
           throw new Error("Transaction or confirmation submission failed");
         }
@@ -1644,59 +1622,68 @@ const Wallet2 = () => {
                   </Table>
                 </div>
                 <Accordion variant="contained" mt="md">
-                  {transactions.map((entry, index) => (
-                    <Accordion.Item
-                      value={entry.public_key_hash || `entry-${index}`}
-                      key={entry.public_key_hash || index}
-                    >
-                      <Accordion.Control>
-                        <Text>
-                          Transactions for Rotation {index} (
-                          {entry.public_key_hash.slice(0, 8)}...)
-                        </Text>
-                      </Accordion.Control>
-                      <Accordion.Panel>
-                        {entry.transactions.length > 0 ? (
-                          <Table striped highlightOnHover styles={styles.table}>
-                            <thead>
-                              <tr>
-                                <th style={styles.tableHeader}>ID</th>
-                                <th style={styles.tableHeader}>To</th>
-                                <th style={styles.tableHeader}>Amount (YDA)</th>
-                                <th style={styles.tableHeader}>Date</th>
-                                <th style={styles.tableHeader}>Status</th>
-                                <th style={styles.tableHeader}>Type</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {entry.transactions.map((txn) => (
-                                <tr key={txn.id}>
-                                  <td>
-                                    <a
-                                      href={`${
-                                        import.meta.env.VITE_API_URL
-                                      }/explorer?term=${txn.id}`}
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                    >
-                                      {txn.id.slice(0, 8)}...
-                                    </a>
-                                  </td>
-                                  <td>{txn.to}</td>
-                                  <td>{txn.amount}</td>
-                                  <td>{txn.date}</td>
-                                  <td>{txn.status}</td>
-                                  <td>{txn.type}</td>
+                  {transactions.map((entry, index) => {
+                    console.log(entry);
+                    return (
+                      <Accordion.Item
+                        value={entry.public_key_hash || `entry-${index}`}
+                        key={entry.public_key_hash || index}
+                      >
+                        <Accordion.Control>
+                          <Text>
+                            Transactions for Rotation {index} (
+                            {entry.public_key_hash.slice(0, 8)}...)
+                          </Text>
+                        </Accordion.Control>
+                        <Accordion.Panel>
+                          {entry.transactions.length > 0 ? (
+                            <Table
+                              striped
+                              highlightOnHover
+                              styles={styles.table}
+                            >
+                              <thead>
+                                <tr>
+                                  <th style={styles.tableHeader}>ID</th>
+                                  <th style={styles.tableHeader}>To</th>
+                                  <th style={styles.tableHeader}>
+                                    Amount (YDA)
+                                  </th>
+                                  <th style={styles.tableHeader}>Date</th>
+                                  <th style={styles.tableHeader}>Status</th>
+                                  <th style={styles.tableHeader}>Type</th>
                                 </tr>
-                              ))}
-                            </tbody>
-                          </Table>
-                        ) : (
-                          <Text>No transactions for this key.</Text>
-                        )}
-                      </Accordion.Panel>
-                    </Accordion.Item>
-                  ))}
+                              </thead>
+                              <tbody>
+                                {entry.transactions.map((txn) => (
+                                  <tr key={txn.id}>
+                                    <td>
+                                      <a
+                                        href={`${
+                                          import.meta.env.VITE_API_URL
+                                        }/explorer?term=${txn.id}`}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                      >
+                                        {txn.id.slice(0, 8)}...
+                                      </a>
+                                    </td>
+                                    <td>{txn.to}</td>
+                                    <td>{txn.amount}</td>
+                                    <td>{txn.date}</td>
+                                    <td>{txn.status}</td>
+                                    <td>{txn.type}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </Table>
+                          ) : (
+                            <Text>No transactions for this key.</Text>
+                          )}
+                        </Accordion.Panel>
+                      </Accordion.Item>
+                    );
+                  })}
                 </Accordion>
                 <Button
                   onClick={resetWalletState}
