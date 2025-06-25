@@ -194,7 +194,6 @@ const Wallet2 = () => {
         }
       } catch (error) {
         console.error("Error restoring private key:", error);
-        resetWalletState();
       }
     }
   }, []);
@@ -487,7 +486,6 @@ const Wallet2 = () => {
         message: `Failed to initialize wallet: ${error.message}`,
         color: "red",
       });
-      resetWalletState();
     } finally {
       setIsSubmitting(false);
     }
@@ -556,7 +554,6 @@ const Wallet2 = () => {
                 : "The key does not maintain continuity with the key event log. Please scan a valid key.",
             color: "red",
           });
-          resetWalletState();
         } else if (initStatus.status === "error") {
           console.log("DEBUG: Error during polling, stopping");
           clearInterval(pollingRef.current);
@@ -569,7 +566,6 @@ const Wallet2 = () => {
               "An error occurred while checking wallet initialization. Please scan a new key.",
             color: "red",
           });
-          resetWalletState();
         } else if (initStatus.status === "active") {
           console.log("DEBUG: Key is active, stopping polling");
           clearInterval(pollingRef.current);
@@ -652,7 +648,6 @@ const Wallet2 = () => {
                 : "The key does not maintain continuity with the key event log. Please scan a valid key.",
             color: "red",
           });
-          resetWalletState();
         } else if (initStatus.status === "error") {
           console.log("DEBUG: Error checking status, resetting wallet state");
           notifications.show({
@@ -661,7 +656,6 @@ const Wallet2 = () => {
               "An error occurred while checking wallet status. Please scan the key again.",
             color: "red",
           });
-          resetWalletState();
         }
       };
       checkStatus();
