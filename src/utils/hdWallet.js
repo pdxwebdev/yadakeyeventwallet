@@ -28,6 +28,29 @@ export const generateMnemonic = () => {
   return bip39.generateMnemonic(); // Returns a 12-word mnemonic
 };
 
+export const validateBitcoinAddress = (address, network = bitcoin.networks.bitcoin) => {
+  try {
+    // Remove whitespace
+    address = address.trim();
+
+    // Basic length check
+    if (address.length < 26 || address.length > 62) {
+      return false;
+    }
+
+    // Use bitcoinjs-lib to validate the address
+    try {
+      bitcoin.address.toOutputScript(address, network);
+      return address;
+    } catch (e) {
+      return false;
+    }
+  } catch (e) {
+    console.error('Address validation error:', e);
+    return false;
+  }
+};
+
 export const getP2PKH = (publicKey) => {
   const { address } = bitcoin.payments.p2pkh({
     pubkey: publicKey,

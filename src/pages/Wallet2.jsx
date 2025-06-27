@@ -28,7 +28,12 @@ import {
   IconCopy,
   IconQrcode,
 } from "@tabler/icons-react";
-import { fromWIF, generateSHA256, getP2PKH } from "../utils/hdWallet";
+import {
+  fromWIF,
+  generateSHA256,
+  getP2PKH,
+  validateBitcoinAddress,
+} from "../utils/hdWallet";
 import { QRCodeSVG } from "qrcode.react"; // Corrected import
 import { useAppContext } from "../context/AppContext";
 
@@ -51,10 +56,10 @@ const Wallet2 = () => {
   const [isPolling, setIsPolling] = useState(false);
   const [submissionTime, setSubmissionTime] = useState(null);
   const [elapsedTime, setElapsedTime] = useState(0);
-  const [confirmedLogLength, setConfirmedLogLength] = useState(0); // New state
+
   const [hasScanned, setHasScanned] = useState(false);
   const [isTransactionFlow, setIsTransactionFlow] = useState(false);
-  const confirmedLogLengthRef = useRef(0); // New ref to track latest value
+
   const webcamRef = useRef(null);
   const pollingRef = useRef(null);
   const { loading, setLoading } = useAppContext();
@@ -138,10 +143,6 @@ const Wallet2 = () => {
       minutes !== 1 ? "s" : ""
     }, ${remainingSeconds} second${remainingSeconds !== 1 ? "s" : ""}`;
   };
-
-  useEffect(() => {
-    confirmedLogLengthRef.current = confirmedLogLength;
-  }, [confirmedLogLength]);
 
   // Update elapsed time every second during confirmation
   useEffect(() => {
@@ -252,8 +253,6 @@ const Wallet2 = () => {
     setIsPolling(false);
     setSubmissionTime(null);
     setLog([]);
-    setConfirmedLogLength(0);
-    confirmedLogLengthRef.current = 0;
     localStorage.removeItem("walletPrivateKey");
     localStorage.removeItem("walletWif");
     localStorage.removeItem("walletParsedData");
@@ -281,8 +280,6 @@ const Wallet2 = () => {
       setLog([...keyEventLog]);
       // Calculate confirmed log length (mempool: false or undefined)
       const confirmedLog = keyEventLog.filter((entry) => !entry.mempool);
-      setConfirmedLogLength(confirmedLog.length);
-      confirmedLogLengthRef.current = confirmedLog.length; // Update ref synchronously
       console.log(
         "DEBUG: getKeyLog - Confirmed log length set to:",
         confirmedLog.length
@@ -299,8 +296,7 @@ const Wallet2 = () => {
         message: "Failed to load key event log",
         color: "red",
       });
-      setConfirmedLogLength(0);
-      confirmedLogLengthRef.current = 0; // Reset ref on error
+
       return { isValidKey: false, log: [] };
     }
   };
@@ -322,7 +318,6 @@ const Wallet2 = () => {
       console.log("DEBUG: Current public key hash:", address);
       console.log("DEBUG: Parsed data:", JSON.stringify(parsedData, null, 2));
       console.log("DEBUG: isValidKey:", isValidKey);
-      console.log("DEBUG: Confirmed log length:", confirmedLogLength);
 
       if (!isValidKey) {
         console.log("DEBUG: getKeyLog failed");
@@ -346,7 +341,7 @@ const Wallet2 = () => {
       // Check if the current key is the active key (matches prerotated_key_hash of latest confirmed entry)
       if (keyEventLog.length > 0) {
         const latestLogEntry = keyEventLog[keyEventLog.length - 1];
-        if (latestLogEntry && latestLogEntry.prerotated_key_hash === address) {
+        if (latestLogEntry && latestLogEntry.public_key_hash === address) {
           console.log(
             "DEBUG: Current key is active (matches prerotated_key_hash)"
           );
@@ -383,12 +378,8 @@ const Wallet2 = () => {
       // Key is neither active nor revoked, check if it’s the next key to initialize
       if (parsedData.rotation === keyEventLog.length) {
         // Validate continuity for new key
-        if (confirmedLogLength > 0) {
-          const lastLogEntry = keyEventLog.find(
-            (entry) =>
-              !entry.mempool &&
-              keyEventLog.indexOf(entry) === confirmedLogLength - 1
-          ); // Newest confirmed entry
+        if (log.length > 0) {
+          const lastLogEntry = keyEventLog[keyEventLog.length - 1];
           const isValidContinuity =
             lastLogEntry.public_key_hash === parsedData.prevaddress1 &&
             lastLogEntry.prerotated_key_hash === address &&
@@ -517,7 +508,7 @@ const Wallet2 = () => {
           const currentRotation = parseInt(parsedData.rotation, 10);
           notifications.show({
             title: "Key Revoked",
-            message: `Key at rotation ${currentRotation} is revoked. Please scan the next key (rotation ${confirmedLogLength}) to sign transactions.`,
+            message: `Key at rotation ${currentRotation} is revoked. Please scan the next key (rotation ${log.length}) to sign transactions.`,
             color: "yellow",
           });
           // Do not clear localStorage here; keep parsedData for continuity
@@ -550,7 +541,7 @@ const Wallet2 = () => {
                 : "Invalid Key Continuity",
             message:
               initStatus.status === "invalid_rotation"
-                ? `Expected key rotation ${confirmedLogLength}, but current key is rotation ${parsedData.rotation}. Please scan the correct key.`
+                ? `Expected key rotation ${log.length}, but current key is rotation ${parsedData.rotation}. Please scan the correct key.`
                 : "The key does not maintain continuity with the key event log. Please scan a valid key.",
             color: "red",
           });
@@ -579,7 +570,7 @@ const Wallet2 = () => {
 
       return () => clearInterval(pollingRef.current);
     }
-  }, [isPolling, privateKey, parsedData, confirmedLogLength]); // Updated dependency
+  }, [isPolling, privateKey, parsedData, log]); // Updated dependency
 
   // Check initialization status only for uninitialized keys
   useEffect(() => {
@@ -618,7 +609,7 @@ const Wallet2 = () => {
           const currentRotation = parseInt(parsedData.rotation, 10);
           notifications.show({
             title: "Key Revoked",
-            message: `Key at rotation ${currentRotation} is revoked. Please scan the next key (rotation ${confirmedLogLength}) to sign transactions.`,
+            message: `Key at rotation ${currentRotation} is revoked. Please scan the next key (rotation ${log.length}) to sign transactions.`,
             color: "yellow",
           });
           // Do not clear localStorage here
@@ -644,7 +635,7 @@ const Wallet2 = () => {
                 : "Invalid Key Continuity",
             message:
               initStatus.status === "invalid_rotation"
-                ? `Expected key rotation ${confirmedLogLength}, but current key is rotation ${parsedData.rotation}. Please scan the correct key.`
+                ? `Expected key rotation ${log.length}, but current key is rotation ${parsedData.rotation}. Please scan the correct key.`
                 : "The key does not maintain continuity with the key event log. Please scan a valid key.",
             color: "red",
           });
@@ -660,7 +651,7 @@ const Wallet2 = () => {
       };
       checkStatus();
     }
-  }, [privateKey, isInitialized, isSubmitting, parsedData, confirmedLogLength]); // Updated dependency
+  }, [privateKey, isInitialized, isSubmitting, parsedData]); // Updated dependency
 
   const fetchTransactions = async () => {
     if (!privateKey || !parsedData) return;
@@ -983,7 +974,6 @@ const Wallet2 = () => {
       // Fetch key event log for the scanned key
       const { isValidKey, log: fetchedLog } = await getKeyLog(newPrivateKey);
       console.log("DEBUG: Fetched log:", JSON.stringify(fetchedLog, null, 2));
-      console.log("DEBUG: Confirmed log length:", confirmedLogLength);
 
       if (!isValidKey) {
         throw new Error("Failed to fetch key event log");
@@ -1130,7 +1120,12 @@ const Wallet2 = () => {
     }
 
     const invalidRecipient = recipients.find(
-      (r) => !r.address || !r.amount || isNaN(r.amount) || Number(r.amount) <= 0
+      (r) =>
+        !r.address ||
+        !r.amount ||
+        isNaN(r.amount) ||
+        Number(r.amount) <= 0 ||
+        !validateBitcoinAddress(r.address)
     );
     if (invalidRecipient) {
       notifications.show({
@@ -1209,7 +1204,7 @@ const Wallet2 = () => {
         }
 
         const transactionOutputs = recipients.map((r) => ({
-          to: r.address,
+          to: validateBitcoinAddress(r.address),
           value: Number(r.amount),
         }));
 
@@ -1392,7 +1387,7 @@ const Wallet2 = () => {
 
   return (
     <Container size="lg" py="xl">
-      <Notifications position="top-center" autoClose={false} />
+      <Notifications position="top-center" />
       <Card
         shadow="sm"
         padding="lg"
@@ -1413,7 +1408,7 @@ const Wallet2 = () => {
               variant="outline"
               mt="md"
             >
-              Scan Key (Rotation: {confirmedLogLength})
+              Scan Key (Rotation: {log.length})
             </Button>
           </>
         ) : isSubmitting ? (
@@ -1437,11 +1432,10 @@ const Wallet2 = () => {
           <Stack align="center" spacing="md">
             <Text>
               Current key (rotation {parsedData.rotation}) is not initialized.
-              Please scan the correct key (rotation {confirmedLogLength}) to
-              proceed.
+              Please scan the correct key (rotation {log.length}) to proceed.
             </Text>
             <Button onClick={handleKeyScan} color="teal" variant="outline">
-              Scan Key (Rotation: {confirmedLogLength})
+              Scan Key (Rotation: {log.length})
             </Button>
             <Button onClick={resetWalletState} color="red" variant="outline">
               Reset Wallet State
