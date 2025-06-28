@@ -20,7 +20,7 @@ import WifToHdConversion from "./pages/WifToHDConversion";
 import Bridge from "./components/Bridge";
 import AdminPanel from "./pages/AdminPanel";
 import Markets from "./components/Markets";
-import { LoadingOverlay } from "@mantine/core";
+import { LoadingOverlay, Text } from "@mantine/core";
 import { useAppContext } from "./context/AppContext";
 import Wallet2 from "./pages/Wallet2";
 import { Notifications } from "@mantine/notifications";
@@ -33,7 +33,11 @@ function App() {
       <LoadingOverlay
         visible={loading}
         zIndex={1000}
-        overlayProps={{ radius: "sm", blur: 2 }}
+        overlayProps={{
+          children: "Interacting with blockchain...",
+          radius: "sm",
+          blur: 2,
+        }}
       />
       <Router basename="/wallet">
         <nav style={{ marginBottom: "20px" }}>

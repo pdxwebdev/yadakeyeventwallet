@@ -882,7 +882,10 @@ const Wallet2 = () => {
   const fetchBalance = async () => {
     if (privateKey && isInitialized) {
       try {
-        const address = getP2PKH(privateKey.publicKey);
+        const address =
+          parsedData.rotation !== log.length
+            ? parsedData.address2
+            : parsedData.address1;
 
         setLoading(true);
         const response = await axios.get(
@@ -1424,6 +1427,16 @@ const Wallet2 = () => {
               10 to 20 minutes. Current rotation: {parsedData.rotation}
             </Text>
             <Text>{formatElapsedTime(elapsedTime)}</Text>
+            <Text>
+              In the meantime, send some YDA to your new wallet's address.
+            </Text>
+            <QRCodeSVG
+              value={parsedData.address2}
+              size={200}
+              bgColor={colorScheme === "dark" ? "#1A1B1E" : "#FFFFFF"}
+              fgColor={colorScheme === "dark" ? "#FFFFFF" : "#000000"}
+            />
+            <Text>{parsedData.address2}</Text>
             <Button onClick={resetWalletState} color="red" variant="outline">
               Reset Wallet State
             </Button>
@@ -1471,10 +1484,18 @@ const Wallet2 = () => {
 
                   <Flex direction="column">
                     <Text fw={500}>
-                      Address (Rotation: {parsedData.rotation})
+                      Address (Rotation:{" "}
+                      {parsedData.rotation !== log.length
+                        ? parsedData.rotation + 1
+                        : parsedData.rotation}
+                      )
                     </Text>
                     <Group spacing="xs" align="center">
-                      <Text>{parsedData.address1}</Text>
+                      <Text>
+                        {parsedData.rotation !== log.length
+                          ? parsedData.address2
+                          : parsedData.address1}
+                      </Text>
                       <ActionIcon
                         onClick={copyAddressToClipboard}
                         color="teal"
@@ -1484,7 +1505,7 @@ const Wallet2 = () => {
                         <IconCopy size={16} />
                       </ActionIcon>
                       <ActionIcon
-                        onClick={() => setIsQRModalOpen(true)}
+                        onClick={() => f(true)}
                         color="teal"
                         variant="outline"
                         title="Show QR Code"
@@ -1500,7 +1521,7 @@ const Wallet2 = () => {
             <Text mb="md">
               {parsedData.rotation === log.length
                 ? `Wallet is ready. You can send transactions with this key (rotation ${parsedData.rotation}).`
-                : `This key (rotation ${parsedData.rotation}) is revoked. Please scan the next key (rotation ${log.length}) to sign transactions.`}
+                : `Please scan the next key (rotation ${log.length}) to sign transactions.`}
             </Text>
             <Button
               onClick={handleKeyScan}
@@ -1686,25 +1707,31 @@ const Wallet2 = () => {
           </>
         )}
 
-        <Modal
-          opened={isScannerOpen}
-          onClose={() => {
-            setIsScannerOpen(false);
-            setIsTransactionFlow(false);
-          }}
-          title="Scan QR Code"
-          size="lg"
-          styles={{ modal: styles.modal, title: styles.title }}
-        >
-          <Webcam
-            audio={false}
-            ref={webcamRef}
-            screenshotFormat="image/jpeg"
-            width="100%"
-            videoConstraints={{ facingMode: "environment" }}
-            style={styles.webcam}
-          />
-        </Modal>
+        {parsedData && (
+          <Modal
+            opened={isScannerOpen}
+            onClose={() => {
+              setIsScannerOpen(false);
+              setIsTransactionFlow(false);
+            }}
+            title={`Scan QR Code for ration ${
+              parsedData.rotation !== log.length
+                ? parsedData.rotation + 1
+                : parsedData.rotation
+            }`}
+            size="lg"
+            styles={{ modal: styles.modal, title: styles.title }}
+          >
+            <Webcam
+              audio={false}
+              ref={webcamRef}
+              screenshotFormat="image/jpeg"
+              width="100%"
+              videoConstraints={{ facingMode: "environment" }}
+              style={styles.webcam}
+            />
+          </Modal>
+        )}
 
         <Modal
           opened={isQRModalOpen}
@@ -1714,12 +1741,15 @@ const Wallet2 = () => {
           styles={{ modal: styles.qrModal, title: styles.title }}
         >
           {parsedData?.address1 ? (
-            <QRCodeSVG
-              value={parsedData.address1}
-              size={200}
-              bgColor={colorScheme === "dark" ? "#1A1B1E" : "#FFFFFF"}
-              fgColor={colorScheme === "dark" ? "#FFFFFF" : "#000000"}
-            />
+            <>
+              <QRCodeSVG
+                value={parsedData.address2}
+                size={200}
+                bgColor={colorScheme === "dark" ? "#1A1B1E" : "#FFFFFF"}
+                fgColor={colorScheme === "dark" ? "#FFFFFF" : "#000000"}
+              />
+              parsedData.address2
+            </>
           ) : (
             <Text>No address available</Text>
           )}
