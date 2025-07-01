@@ -31,6 +31,7 @@ import "@mantine/core/styles.css";
 // import "@mantine/core/styles/Flex.css";
 // import "@mantine/core/styles/FloatingIndicator.css";
 import "@mantine/notifications/styles.css";
+import "@mantine/core/styles/Table.css";
 
 const root = ReactDOM.createRoot(document.getElementById("root"));
 root.render(

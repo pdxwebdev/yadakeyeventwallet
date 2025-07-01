@@ -16,7 +16,7 @@ import {
   NumberInput,
   Flex,
   Loader,
-  Accordion, // Add Accordion to imports
+  Pagination,
 } from "@mantine/core";
 import { Transaction } from "../utils/transaction";
 import Webcam from "react-webcam";
@@ -34,14 +34,18 @@ import {
   getP2PKH,
   validateBitcoinAddress,
 } from "../utils/hdWallet";
-import { QRCodeSVG } from "qrcode.react"; // Corrected import
+import { QRCodeSVG } from "qrcode.react";
 import { useAppContext } from "../context/AppContext";
+
+const ITEMS_PER_PAGE = 5;
 
 const Wallet2 = () => {
   const { colorScheme } = useMantineColorScheme();
-  const [transactions, setTransactions] = useState([]);
+  const [transactions, setTransactions] = useState([]); // Key events with transactions
+  const [combinedHistory, setCombinedHistory] = useState([]); // Combined key events and transactions
+  const [currentPage, setCurrentPage] = useState(1);
   const [isScannerOpen, setIsScannerOpen] = useState(false);
-  const [isQRModalOpen, setIsQRModalOpen] = useState(false); // State for QR code modal
+  const [isQRModalOpen, setIsQRModalOpen] = useState(false);
   const [parsedData, setParsedData] = useState(null);
   const [recipients, setRecipients] = useState([{ address: "", amount: "" }]);
   const [privateKey, setPrivateKey] = useState(null);
@@ -56,15 +60,13 @@ const Wallet2 = () => {
   const [isPolling, setIsPolling] = useState(false);
   const [submissionTime, setSubmissionTime] = useState(null);
   const [elapsedTime, setElapsedTime] = useState(0);
-
-  const [hasScanned, setHasScanned] = useState(false);
   const [isTransactionFlow, setIsTransactionFlow] = useState(false);
 
   const webcamRef = useRef(null);
   const pollingRef = useRef(null);
   const { loading, setLoading } = useAppContext();
 
-  // Styles
+  // Styles (unchanged)
   const styles = (theme) => ({
     card: {
       backgroundColor:
@@ -87,7 +89,7 @@ const Wallet2 = () => {
       backgroundColor:
         theme.colorScheme === "dark"
           ? theme.colors.dark[6]
-          : theme.colors.gray[1],
+          : conventions.gray[1],
       color: theme.colorScheme === "dark" ? theme.colors.dark[2] : theme.black,
     },
     tableHeader: {
@@ -135,7 +137,7 @@ const Wallet2 = () => {
     },
   });
 
-  // Format elapsed time
+  // Format elapsed time (unchanged)
   const formatElapsedTime = (seconds) => {
     const minutes = Math.floor(seconds / 60);
     const remainingSeconds = seconds % 60;
@@ -144,7 +146,7 @@ const Wallet2 = () => {
     }, ${remainingSeconds} second${remainingSeconds !== 1 ? "s" : ""}`;
   };
 
-  // Update elapsed time every second during confirmation
+  // Update elapsed time (unchanged)
   useEffect(() => {
     let timer;
     if (isWaitingForConfirmation && submissionTime) {
@@ -157,7 +159,7 @@ const Wallet2 = () => {
     return () => clearInterval(timer);
   }, [isWaitingForConfirmation, submissionTime]);
 
-  // Load state from localStorage on mount
+  // Load state from localStorage (unchanged)
   useEffect(() => {
     const storedPrivateKey = localStorage.getItem("walletPrivateKey");
     const storedWif = localStorage.getItem("walletWif");
@@ -187,19 +189,13 @@ const Wallet2 = () => {
             setSubmissionTime(parseInt(storedSubmissionTime, 10));
           }
         }
-        // Fetch key event log if wallet is initialized
-        if (storedIsInitialized === "true") {
-          getKeyLog(privateKeyObj).then(({ log }) => {
-            setLog([...log]);
-          });
-        }
       } catch (error) {
         console.error("Error restoring private key:", error);
       }
     }
   }, []);
 
-  // Save state to localStorage when it changes
+  // Save state to localStorage (unchanged)
   useEffect(() => {
     if (privateKey) {
       localStorage.setItem("walletPrivateKey", JSON.stringify(privateKey));
@@ -253,6 +249,8 @@ const Wallet2 = () => {
     setIsPolling(false);
     setSubmissionTime(null);
     setLog([]);
+    setTransactions([]);
+    setCombinedHistory([]);
     localStorage.removeItem("walletPrivateKey");
     localStorage.removeItem("walletWif");
     localStorage.removeItem("walletParsedData");
@@ -267,6 +265,39 @@ const Wallet2 = () => {
     });
   };
 
+  // Helper function to fetch transaction details and get the amount sent to prerotated_key_hash
+  const fetchKeyEventAmount = async (txId, prerotatedKeyHash) => {
+    try {
+      const response = await axios.get(
+        `${
+          import.meta.env.VITE_API_URL
+        }/transaction/${txId}?origin=${encodeURIComponent(
+          window.location.origin
+        )}`
+      );
+      if (response.status !== 200) {
+        console.warn(
+          `Failed to fetch transaction ${txId}: ${response.statusText}`
+        );
+        return "0";
+      }
+      const tx = response.data;
+      // Calculate the amount sent to the prerotated_key_hash
+      const amount = tx.outputs
+        .reduce((sum, output) => {
+          if (output.to === prerotatedKeyHash) {
+            return sum + (output.value || 0);
+          }
+          return sum;
+        }, 0)
+        .toFixed(8);
+      return amount;
+    } catch (error) {
+      console.error(`Error fetching transaction ${txId}:`, error);
+      return "0"; // Fallback to 0 if the fetch fails
+    }
+  };
+
   // Fetch key event log
   const getKeyLog = async (privateKey) => {
     const pk = Buffer.from(privateKey.publicKey).toString("hex");
@@ -277,59 +308,325 @@ const Wallet2 = () => {
         }/key-event-log?username_signature=asdf&public_key=${pk}`
       );
       const keyEventLog = res.data.key_event_log || [];
-      setLog([...keyEventLog]);
-      // Calculate confirmed log length (mempool: false or undefined)
-      const confirmedLog = keyEventLog.filter((entry) => !entry.mempool);
-      console.log(
-        "DEBUG: getKeyLog - Confirmed log length set to:",
-        confirmedLog.length
-      );
-      console.log(
-        "DEBUG: Key event log:",
-        JSON.stringify(keyEventLog, null, 2)
-      );
       return { isValidKey: true, log: keyEventLog };
     } catch (error) {
-      console.error("DEBUG: Error fetching key event log:", error);
+      console.error("Error fetching key event log:", error);
       notifications.show({
         title: "Error",
         message: "Failed to load key event log",
         color: "red",
       });
-
       return { isValidKey: false, log: [] };
     }
   };
 
-  // Check initialization status
+  // Validate key continuity
+  const validateKeyContinuity = (
+    newParsedData,
+    fetchedLog,
+    isTransactionFlow
+  ) => {
+    const newPublicKeyHash = newParsedData.address1;
+    if (newParsedData.rotation > 0) {
+      if (fetchedLog.length === 0) {
+        throw new Error(
+          `No confirmed key event log entries found, but rotation ${newParsedData.rotation} requires a previous key`
+        );
+      }
+      const lastEntry = fetchedLog[fetchedLog.length - 1];
+      if (!lastEntry) {
+        throw new Error(
+          "No confirmed key event log entries found for continuity check"
+        );
+      }
+      const isValidContinuity = isTransactionFlow
+        ? newParsedData.prevaddress1 === parsedData.address1 &&
+          newParsedData.address2 === parsedData.address3 &&
+          (!newParsedData.prevaddress1 ||
+            parsedData.address1 === newParsedData.prevaddress1)
+        : lastEntry.prerotated_key_hash === newPublicKeyHash &&
+          lastEntry.twice_prerotated_key_hash === newParsedData.address2 &&
+          (!newParsedData.prevaddress1 ||
+            lastEntry.public_key_hash === newParsedData.prevaddress1);
+      if (!isValidContinuity) {
+        throw new Error(
+          `The scanned key (rotation ${newParsedData.rotation}) does not maintain continuity with the previous key`
+        );
+      }
+    }
+    return true;
+  };
+
+  const fetchTransactionsForKey = async (
+    publicKey,
+    address,
+    rotation,
+    keyEventTxIds
+  ) => {
+    try {
+      const endpoints = [
+        {
+          key: "past_transactions",
+          status: "Confirmed on blockchain",
+          type: "Sent",
+          getUrl: (publicKey) =>
+            `${
+              import.meta.env.VITE_API_URL
+            }/get-past-sent-txns?page=1&public_key=${publicKey}&include_zero=1&origin=${encodeURIComponent(
+              window.location.origin
+            )}`,
+        },
+        {
+          key: "past_pending_transactions",
+          status: "Pending",
+          type: "Sent",
+          getUrl: (publicKey) =>
+            `${
+              import.meta.env.VITE_API_URL
+            }/get-past-pending-sent-txns?page=1&public_key=${publicKey}&include_zero=1&origin=${encodeURIComponent(
+              window.location.origin
+            )}`,
+        },
+        {
+          key: "past_transactions",
+          status: "Confirmed on blockchain",
+          type: "Received",
+          getUrl: (publicKey) =>
+            `${
+              import.meta.env.VITE_API_URL
+            }/get-past-received-txns?page=1&public_key=${publicKey}&include_zero=1&origin=${encodeURIComponent(
+              window.location.origin
+            )}`,
+        },
+        {
+          key: "past_pending_transactions",
+          status: "Pending",
+          type: "Received",
+          getUrl: (publicKey) =>
+            `${
+              import.meta.env.VITE_API_URL
+            }/get-past-pending-received-txns?page=1&public_key=${publicKey}&include_zero=1&origin=${encodeURIComponent(
+              window.location.origin
+            )}`,
+        },
+      ];
+
+      let transactionsForKey = [];
+      let totalReceivedForKey = 0;
+      let totalSentForKey = 0;
+
+      for (const endpoint of endpoints) {
+        const url = endpoint.getUrl(publicKey);
+        try {
+          const response = await fetch(url);
+          if (!response.ok) {
+            console.warn(`Failed to fetch ${url}: ${response.statusText}`);
+            continue;
+          }
+          const data = await response.json();
+          const txns = (data[endpoint.key] || [])
+            .filter(
+              (tx) => !keyEventTxIds.has(tx.id || tx.txid || tx.transaction_id)
+            )
+            .map((tx) => {
+              // Prepare outputs based on transaction type
+              let outputs;
+              if (endpoint.type === "Received") {
+                // For Received Transactions, only include the output to the key log address
+                const relevantOutput = tx.outputs.find(
+                  (output) => output.to === address
+                );
+                outputs = relevantOutput
+                  ? [
+                      {
+                        to: relevantOutput.to,
+                        value: relevantOutput.value.toFixed(8),
+                      },
+                    ]
+                  : [];
+              } else {
+                // For Sent Transactions, include all outputs
+                outputs = tx.outputs.map((output) => ({
+                  to: output.to,
+                  value: output.value.toFixed(8),
+                }));
+              }
+
+              // Calculate totals for received and sent
+              const receivedAmount = tx.outputs
+                .reduce((sum, output) => {
+                  return output.to === address ? sum + output.value : sum;
+                }, 0)
+                .toFixed(8);
+              const sentAmount = tx.outputs
+                .reduce((sum, output) => {
+                  return output.to !== address ? sum + output.value : sum;
+                }, 0)
+                .toFixed(8);
+
+              if (endpoint.type === "Received") {
+                totalReceivedForKey += parseFloat(receivedAmount);
+              } else if (endpoint.type === "Sent") {
+                totalSentForKey += parseFloat(sentAmount);
+              }
+
+              const txId = tx.id || tx.txid || tx.transaction_id || "Unknown";
+
+              return {
+                id: txId,
+                outputs, // Store filtered outputs for Received, all outputs for Sent
+                date: new Date(tx.time * 1000).toLocaleDateString(),
+                status: endpoint.status,
+                type:
+                  endpoint.type === "Sent"
+                    ? "Sent Transaction"
+                    : "Received Transaction",
+                address,
+                public_key: publicKey,
+                rotation,
+              };
+            });
+          transactionsForKey.push(...txns);
+        } catch (error) {
+          console.warn(`Error fetching ${url}:`, error);
+          continue;
+        }
+      }
+
+      return {
+        transactions: transactionsForKey,
+        totalReceived: totalReceivedForKey.toFixed(8),
+        totalSent: totalSentForKey.toFixed(8),
+      };
+    } catch (error) {
+      console.error(`Error fetching transactions for key ${publicKey}:`, error);
+      notifications.show({
+        title: "Error",
+        message: `Failed to load transactions for key ${publicKey.slice(
+          0,
+          8
+        )}...`,
+        color: "red",
+      });
+      return { transactions: [], totalReceived: "0", totalSent: "0" };
+    }
+  };
+
+  const buildTransactionHistory = async () => {
+    if (!privateKey || !isInitialized) return;
+
+    try {
+      const { log: keyEventLog } = await getKeyLog(privateKey);
+      setLog(keyEventLog);
+
+      // Collect key event transaction IDs to exclude from transaction history
+      const keyEventTxIds = new Set(keyEventLog.map((entry) => entry.id));
+
+      // Initialize key events with their transactions
+      const keyLogWithTransactions = await Promise.all(
+        keyEventLog.map(async (entry, index) => {
+          const { transactions, totalReceived, totalSent } =
+            await fetchTransactionsForKey(
+              entry.public_key,
+              entry.public_key_hash,
+              index,
+              keyEventTxIds
+            );
+
+          // Create a transaction entry for the key event itself
+          const keyEventTransaction = {
+            id: entry.id,
+            outputs: entry.outputs.map((output) => ({
+              to: output.to,
+              value: output.value.toFixed(8),
+            })), // Include all outputs for key events
+            date: new Date(entry.time * 1000).toLocaleDateString(),
+            status: entry.mempool ? "Pending" : "Confirmed on blockchain",
+            type:
+              entry.outputs.length !== 1 ||
+              entry.prerotated_key_hash !== entry.outputs[0].to
+                ? "Unconfirmed rotation"
+                : entry.prev_public_key_hash === ""
+                ? "Inception"
+                : "Confirming rotation",
+            address: entry.public_key_hash,
+            public_key: entry.public_key,
+            rotation: index,
+          };
+
+          return {
+            ...entry,
+            transactions: [keyEventTransaction, ...transactions],
+            totalReceived,
+            totalSent: (
+              parseFloat(totalSent) + parseFloat(entry.outputs[0].value)
+            ).toFixed(8),
+            type: "Key Event",
+            rotation: index,
+          };
+        })
+      );
+
+      setTransactions(keyLogWithTransactions);
+
+      // Build combined history
+      const combined = keyLogWithTransactions.flatMap((entry) =>
+        entry.transactions.map((txn) => ({
+          ...txn,
+          rotation: entry.rotation,
+          public_key_hash: entry.public_key_hash,
+        }))
+      );
+
+      // Sort by rotation and then by date (newest first for transactions)
+      combined.sort((a, b) => {
+        if (a.rotation !== b.rotation) {
+          return a.rotation - b.rotation;
+        }
+        if (a.type === "Sent Key Event" && b.type !== "Sent Key Event")
+          return -1;
+        if (a.type !== "Sent Key Event" && b.type === "Sent Key Event")
+          return 1;
+        return new Date(b.date) - new Date(a.date);
+      });
+
+      setCombinedHistory(combined);
+      setCurrentPage(1); // Reset to first page when history updates
+    } catch (error) {
+      console.error("Error building transaction history:", error);
+      notifications.show({
+        title: "Error",
+        message: "Failed to load wallet history",
+        color: "red",
+      });
+    }
+  };
+
+  // Fetch history on initialization or key change
+  useEffect(() => {
+    if (privateKey && isInitialized) {
+      buildTransactionHistory();
+    }
+  }, [privateKey, isInitialized]);
+
+  // Check initialization status (unchanged)
   const checkInitializationStatus = async () => {
     if (!privateKey || !parsedData) {
-      console.log("DEBUG: No private key or parsedData available");
       return { status: "no_private_key" };
     }
 
     try {
       const { isValidKey, log: keyEventLog } = await getKeyLog(privateKey);
       const address = getP2PKH(privateKey.publicKey);
-      console.log(
-        "DEBUG: Key event log:",
-        JSON.stringify(keyEventLog, null, 2)
-      );
-      console.log("DEBUG: Current public key hash:", address);
-      console.log("DEBUG: Parsed data:", JSON.stringify(parsedData, null, 2));
-      console.log("DEBUG: isValidKey:", isValidKey);
 
       if (!isValidKey) {
-        console.log("DEBUG: getKeyLog failed");
         return { status: "error" };
       }
 
-      // Check if the current key has a pending transaction in mempool
       const pendingEntry = keyEventLog.find(
         (entry) => entry.public_key_hash === address && entry.mempool === true
       );
       if (pendingEntry && keyEventLog.length === 1) {
-        console.log("DEBUG: Current key has a pending transaction in mempool");
         setIsWaitingForConfirmation(true);
         setIsPolling(true);
         if (!submissionTime) {
@@ -338,18 +635,13 @@ const Wallet2 = () => {
         return { status: "pending_mempool" };
       }
 
-      // Check if the current key is the active key (matches prerotated_key_hash of latest confirmed entry)
       if (keyEventLog.length > 0) {
         const latestLogEntry = keyEventLog[keyEventLog.length - 1];
         if (latestLogEntry && latestLogEntry.public_key_hash === address) {
-          console.log(
-            "DEBUG: Current key is active (matches prerotated_key_hash)"
-          );
           return { status: "active" };
         }
       }
 
-      // Check if the key is revoked (in confirmed log as public_key_hash)
       const isKeyInLog = keyEventLog.some(
         (entry) => !entry.mempool && entry.public_key_hash === address
       );
@@ -357,7 +649,6 @@ const Wallet2 = () => {
         const logEntry = keyEventLog.find(
           (entry) => !entry.mempool && entry.public_key_hash === address
         );
-        // Validate continuity for revoked key
         const isValidContinuity =
           (parsedData.rotation === 0 && !parsedData.prevaddress1) ||
           (parsedData.prevaddress1 &&
@@ -368,16 +659,12 @@ const Wallet2 = () => {
             logEntry.twice_prerotated_key_hash === parsedData.address3);
 
         if (!isValidContinuity) {
-          console.log("DEBUG: Continuity check failed for revoked key");
           return { status: "invalid_continuity" };
         }
-        console.log("DEBUG: Key found in confirmed log, key is revoked");
         return { status: "revoked" };
       }
 
-      // Key is neither active nor revoked, check if it’s the next key to initialize
       if (parsedData.rotation === keyEventLog.length) {
-        // Validate continuity for new key
         if (log.length > 0) {
           const lastLogEntry = keyEventLog[keyEventLog.length - 1];
           const isValidContinuity =
@@ -386,30 +673,17 @@ const Wallet2 = () => {
             lastLogEntry.twice_prerotated_key_hash === parsedData.address2;
 
           if (!isValidContinuity) {
-            console.log("DEBUG: Continuity check failed for new key");
             return { status: "invalid_continuity" };
           }
         } else if (parsedData.prevaddress1 && parsedData.rotation !== 0) {
-          console.log(
-            "DEBUG: No confirmed log entries but prevaddress1 provided"
-          );
           return { status: "invalid_continuity" };
         }
-        console.log(
-          "DEBUG: Key not in confirmed log, ready for initialization"
-        );
         return { status: "no_transaction" };
       }
 
-      console.log(
-        "DEBUG: Rotation mismatch, expected:",
-        keyEventLog.length,
-        "got:",
-        parsedData.rotation
-      );
       return { status: "invalid_rotation" };
     } catch (error) {
-      console.error("DEBUG: Error checking key event log:", error);
+      console.error("Error checking key event log:", error);
       notifications.show({
         title: "Error",
         message: "Failed to check wallet status",
@@ -419,7 +693,7 @@ const Wallet2 = () => {
     }
   };
 
-  // Initialize key event log with zero-value transaction
+  // Initialize key event log (unchanged)
   const initializeKeyEventLog = async () => {
     if (!privateKey || isSubmitting) return;
 
@@ -467,11 +741,7 @@ const Wallet2 = () => {
         throw new Error("Transaction submission failed");
       }
     } catch (error) {
-      console.error("Error initializing key event log:", {
-        message: error.message,
-        response: error.response ? error.response.data : null,
-        status: error.response ? error.response.status : null,
-      });
+      console.error("Error initializing key event log:", error);
       notifications.show({
         title: "Error",
         message: `Failed to initialize wallet: ${error.message}`,
@@ -482,38 +752,29 @@ const Wallet2 = () => {
     }
   };
 
-  // Polling effect for key event log
+  // Polling effect (unchanged)
   useEffect(() => {
     if (isPolling && privateKey && parsedData) {
       pollingRef.current = setInterval(async () => {
-        console.log("DEBUG: Polling for key event log");
         const initStatus = await checkInitializationStatus();
-        console.log("DEBUG: Polling status:", initStatus);
         if (initStatus.status === "pending_mempool") {
-          console.log(
-            "DEBUG: Transaction still in mempool, continuing polling"
-          );
           notifications.show({
             title: "Pending Transaction",
             message: "Waiting for transaction confirmation in mempool.",
             color: "yellow",
           });
         } else if (initStatus.status === "revoked") {
-          console.log("DEBUG: Key is revoked, prompting for next key");
           setIsInitialized(true);
           setIsPolling(false);
           setIsWaitingForConfirmation(false);
           setSubmissionTime(null);
           localStorage.setItem("walletIsInitialized", "true");
-          const currentRotation = parseInt(parsedData.rotation, 10);
           notifications.show({
             title: "Key Revoked",
-            message: `Key at rotation ${currentRotation} is revoked. Please scan the next key (rotation ${log.length}) to sign transactions.`,
+            message: `Key at rotation ${parsedData.rotation} is revoked. Please scan the next key (rotation ${log.length}) to sign transactions.`,
             color: "yellow",
           });
-          // Do not clear localStorage here; keep parsedData for continuity
         } else if (initStatus.status === "no_transaction") {
-          console.log("DEBUG: No transaction, resubmitting");
           notifications.show({
             title: "No Key Event Log Entry",
             message: "Resubmitting wallet initialization transaction.",
@@ -527,9 +788,6 @@ const Wallet2 = () => {
           initStatus.status === "invalid_rotation" ||
           initStatus.status === "invalid_continuity"
         ) {
-          console.log(
-            "DEBUG: Invalid rotation or continuity, stopping polling"
-          );
           clearInterval(pollingRef.current);
           setIsPolling(false);
           setIsWaitingForConfirmation(false);
@@ -546,7 +804,6 @@ const Wallet2 = () => {
             color: "red",
           });
         } else if (initStatus.status === "error") {
-          console.log("DEBUG: Error during polling, stopping");
           clearInterval(pollingRef.current);
           setIsPolling(false);
           setIsWaitingForConfirmation(false);
@@ -558,7 +815,6 @@ const Wallet2 = () => {
             color: "red",
           });
         } else if (initStatus.status === "active") {
-          console.log("DEBUG: Key is active, stopping polling");
           clearInterval(pollingRef.current);
           setIsPolling(false);
           setIsWaitingForConfirmation(false);
@@ -570,51 +826,37 @@ const Wallet2 = () => {
 
       return () => clearInterval(pollingRef.current);
     }
-  }, [isPolling, privateKey, parsedData, log]); // Updated dependency
+  }, [isPolling, privateKey, parsedData, log]);
 
-  // Check initialization status only for uninitialized keys
+  // Check initialization status (unchanged)
   useEffect(() => {
     if (privateKey && !isInitialized && !isSubmitting && parsedData) {
       const checkStatus = async () => {
-        console.log("DEBUG: Checking initialization status");
         const initStatus = await checkInitializationStatus();
-        console.log("DEBUG: Initial check status:", initStatus);
         if (initStatus.status === "pending_mempool") {
-          console.log("DEBUG: Transaction in mempool, setting pending state");
-          setIsWaitingForConfirmation(true);
-          setIsPolling(true);
-          if (!submissionTime) {
-            setSubmissionTime(Date.now());
-          }
           notifications.show({
             title: "Pending Transaction",
             message: "Waiting for transaction confirmation in mempool.",
             color: "yellow",
           });
         } else if (initStatus.status === "active") {
-          console.log("DEBUG: Key is active, setting initialized state");
           setIsInitialized(true);
           setIsPolling(false);
-          setIsWaitingForConfirmation(false);
           setSubmissionTime(null);
           localStorage.setItem("walletIsInitialized", "true");
         } else if (initStatus.status === "revoked") {
-          console.log("DEBUG: Key revoked, setting initialized state");
           clearInterval(pollingRef.current);
           setIsPolling(false);
           setIsWaitingForConfirmation(false);
           setIsInitialized(true);
           setSubmissionTime(null);
           localStorage.setItem("walletIsInitialized", "true");
-          const currentRotation = parseInt(parsedData.rotation, 10);
           notifications.show({
             title: "Key Revoked",
-            message: `Key at rotation ${currentRotation} is revoked. Please scan the next key (rotation ${log.length}) to sign transactions.`,
+            message: `Key at rotation ${parsedData.rotation} is revoked. Please scan the next key (rotation ${log.length}) to sign transactions.`,
             color: "yellow",
           });
-          // Do not clear localStorage here
         } else if (initStatus.status === "no_transaction") {
-          console.log("DEBUG: No transaction, initializing");
           notifications.show({
             title: "No Key Event Log Entry",
             message: "Submitting wallet initialization transaction.",
@@ -625,9 +867,6 @@ const Wallet2 = () => {
           initStatus.status === "invalid_rotation" ||
           initStatus.status === "invalid_continuity"
         ) {
-          console.log(
-            "DEBUG: Invalid rotation or continuity, resetting wallet state"
-          );
           notifications.show({
             title:
               initStatus.status === "invalid_rotation"
@@ -640,7 +879,6 @@ const Wallet2 = () => {
             color: "red",
           });
         } else if (initStatus.status === "error") {
-          console.log("DEBUG: Error checking status, resetting wallet state");
           notifications.show({
             title: "Error",
             message:
@@ -651,234 +889,9 @@ const Wallet2 = () => {
       };
       checkStatus();
     }
-  }, [privateKey, isInitialized, isSubmitting, parsedData]); // Updated dependency
+  }, [privateKey, isInitialized, isSubmitting, parsedData]);
 
-  const fetchTransactions = async () => {
-    if (!privateKey || !parsedData) return;
-
-    try {
-      // Step 1: Get the key event log
-      const { log: keyEventLog } = await getKeyLog(privateKey);
-      console.log("DEBUG: Key event log for fetchTransactions:", keyEventLog);
-
-      // Initialize key log entries with empty transactions arrays and totals
-      const keyLogWithTransactions = keyEventLog.map((entry) => ({
-        ...entry,
-        transactions: [],
-        totalReceived: 0,
-        totalSent: 0,
-      }));
-
-      // Step 2: Collect all public keys from the key event log
-      const publicKeys = keyEventLog
-        .map((entry) => entry.public_key)
-        .filter((pk) => pk); // Filter out undefined public keys
-
-      console.log("DEBUG: Public keys to fetch transactions:", publicKeys);
-
-      if (publicKeys.length === 0) {
-        console.log("DEBUG: No public keys available to fetch transactions");
-        setTransactions(keyLogWithTransactions);
-        return;
-      }
-
-      // Map public keys to their addresses (public_key_hash)
-      const publicKeyToAddress = new Map();
-      keyEventLog.forEach((entry) => {
-        if (entry.public_key) {
-          publicKeyToAddress.set(entry.public_key, entry.public_key_hash);
-        }
-      });
-
-      // Map prerotated and twice_prerotated key hashes to their rotation indices
-      const keyHashToRotation = new Map();
-      keyEventLog.forEach((entry, index) => {
-        keyHashToRotation.set(entry.public_key_hash, index);
-        if (entry.prerotated_key_hash) {
-          keyHashToRotation.set(entry.prerotated_key_hash, index + 1);
-        }
-        if (entry.twice_prerotated_key_hash) {
-          keyHashToRotation.set(entry.twice_prerotated_key_hash, index + 2);
-        }
-      });
-
-      console.log(
-        "DEBUG: Public key to address mapping:",
-        Object.fromEntries(publicKeyToAddress)
-      );
-      console.log(
-        "DEBUG: Key hash to rotation mapping:",
-        Object.fromEntries(keyHashToRotation)
-      );
-
-      const origin = window.location.origin;
-      const endpoints = [
-        {
-          key: "past_transactions",
-          status: "Confirmed",
-          type: "Sent",
-          getUrl: (publicKey) =>
-            `${
-              import.meta.env.VITE_API_URL
-            }/get-past-sent-txns?page=1&public_key=${publicKey}&origin=${encodeURIComponent(
-              origin
-            )}`,
-        },
-        {
-          key: "past_pending_transactions",
-          status: "Pending",
-          type: "Sent",
-          getUrl: (publicKey) =>
-            `${
-              import.meta.env.VITE_API_URL
-            }/get-past-pending-sent-txns?page=1&public_key=${publicKey}&origin=${encodeURIComponent(
-              origin
-            )}`,
-        },
-        {
-          key: "past_transactions",
-          status: "Confirmed",
-          type: "Received",
-          getUrl: (publicKey) =>
-            `${
-              import.meta.env.VITE_API_URL
-            }/get-past-received-txns?page=1&public_key=${publicKey}&origin=${encodeURIComponent(
-              origin
-            )}`,
-        },
-        {
-          key: "past_pending_transactions",
-          status: "Pending",
-          type: "Received",
-          getUrl: (publicKey) =>
-            `${
-              import.meta.env.VITE_API_URL
-            }/get-past-pending-received-txns?page=1&public_key=${publicKey}&origin=${encodeURIComponent(
-              origin
-            )}`,
-        },
-      ];
-
-      // Step 3: Fetch transactions for each public key
-      for (const publicKey of publicKeys) {
-        const address = publicKeyToAddress.get(publicKey);
-        if (!address) {
-          console.warn(`No address found for public key: ${publicKey}`);
-          continue;
-        }
-
-        // Find the current key log entry to access prerotated_key_hash and twice_prerotated_key_hash
-        const currentEntry = keyLogWithTransactions.find(
-          (entry) => entry.public_key === publicKey
-        );
-        const prerotatedKeyHash = currentEntry?.prerotated_key_hash;
-        const twicePrerotatedKeyHash = currentEntry?.twice_prerotated_key_hash;
-
-        const transactionsForKey = [];
-        let totalReceivedForKey = 0;
-        let totalSentForKey = 0;
-
-        for (const endpoint of endpoints) {
-          const url = endpoint.getUrl(publicKey);
-          try {
-            const response = await fetch(url);
-            if (!response.ok) {
-              console.warn(`Failed to fetch ${url}: ${response.statusText}`);
-              continue;
-            }
-            const data = await response.json();
-            const txns = (data[endpoint.key] || []).map((tx) => {
-              const amount = tx.outputs
-                .reduce((sum, output) => {
-                  if (endpoint.type === "Received") {
-                    return output.to === address ? sum + output.value : sum;
-                  } else {
-                    return output.to !== address ? sum + output.value : sum;
-                  }
-                }, 0)
-                .toFixed(8);
-              // Accumulate totals based on transaction type
-              if (endpoint.type === "Received") {
-                totalReceivedForKey += parseFloat(amount);
-              } else if (endpoint.type === "Sent") {
-                totalSentForKey += parseFloat(amount);
-              }
-              // Construct "to" field with actual addresses
-              const toAddresses = tx.outputs.map((item) => {
-                const outputAddress = item.to;
-                // Check if the output is to the next rotation(s)
-                if (outputAddress === prerotatedKeyHash) {
-                  return `Rotation ${keyHashToRotation.get(
-                    outputAddress
-                  )} (${outputAddress})`;
-                } else if (outputAddress === twicePrerotatedKeyHash) {
-                  return `Rotation ${keyHashToRotation.get(
-                    outputAddress
-                  )} (${outputAddress})`;
-                } else if (outputAddress === address) {
-                  return `Self (${outputAddress})`;
-                } else {
-                  return outputAddress;
-                }
-              });
-              const toField = toAddresses.join(", ") || address; // Fallback to own address if no outputs
-              return {
-                id: tx.id,
-                to: toField,
-                amount,
-                date: new Date(tx.time * 1000).toLocaleDateString(),
-                status: endpoint.status,
-                type: endpoint.type,
-                address: address,
-                public_key: publicKey,
-              };
-            });
-            transactionsForKey.push(...txns);
-          } catch (error) {
-            console.warn(`Error fetching ${url}:`, error);
-            continue;
-          }
-        }
-
-        // Assign transactions and totals to the corresponding key log entry
-        const entryIndex = keyLogWithTransactions.findIndex(
-          (entry) => entry.public_key === publicKey
-        );
-        if (entryIndex !== -1) {
-          keyLogWithTransactions[entryIndex].transactions = transactionsForKey;
-          keyLogWithTransactions[entryIndex].totalReceived =
-            totalReceivedForKey.toFixed(8);
-          keyLogWithTransactions[entryIndex].totalSent =
-            totalSentForKey.toFixed(8);
-        }
-      }
-
-      // Sort key log entries by rotation (index in original log)
-      keyLogWithTransactions.sort((a, b) => {
-        const aIndex = keyEventLog.indexOf(a);
-        const bIndex = keyEventLog.indexOf(b);
-        return aIndex - bIndex;
-      });
-
-      setTransactions(keyLogWithTransactions);
-      console.log("DEBUG: Key log with transactions:", keyLogWithTransactions);
-    } catch (error) {
-      console.error("Error fetching transactions:", error);
-      notifications.show({
-        title: "Error",
-        message: "Failed to load key event log and transactions",
-        color: "red",
-      });
-    }
-  };
-  // Fetch transactions
-  useEffect(() => {
-    if (!privateKey || !isInitialized) return;
-
-    fetchTransactions();
-  }, [privateKey, isInitialized]);
-
-  // Fetch balance
+  // Fetch balance (unchanged)
   const fetchBalance = async () => {
     if (privateKey && isInitialized) {
       try {
@@ -947,20 +960,11 @@ const Wallet2 = () => {
     });
   };
 
-  // Process scanned QR code
+  // Process scanned QR code (unchanged)
   const processScannedQR = async (qrData, isTransactionFlow = false) => {
     try {
-      // Parse QR code: wif|address2|address3|prevaddress1|rotation
       const [wifString, address2, address3, prevaddress1, rotation] =
         qrData.split("|");
-      console.log("DEBUG: Parsed QR code:", {
-        wifString: wifString.slice(0, 10) + "...",
-        address2,
-        address3,
-        prevaddress1,
-        rotation,
-      });
-
       const newPrivateKey = fromWIF(wifString);
       const address1 = getP2PKH(newPrivateKey.publicKey);
       const newParsedData = {
@@ -971,13 +975,8 @@ const Wallet2 = () => {
         prevaddress1,
         rotation: parseInt(rotation, 10),
       };
-      const newPublicKeyHash = address1;
-      console.log("DEBUG: New parsed data:", newParsedData);
 
-      // Fetch key event log for the scanned key
       const { isValidKey, log: fetchedLog } = await getKeyLog(newPrivateKey);
-      console.log("DEBUG: Fetched log:", JSON.stringify(fetchedLog, null, 2));
-
       if (!isValidKey) {
         throw new Error("Failed to fetch key event log");
       }
@@ -997,57 +996,22 @@ const Wallet2 = () => {
         }
       }
 
-      // Validate continuity for non-initial keys
-      if (newParsedData.rotation > 0) {
-        if (fetchedLog.length === 0) {
-          throw new Error(
-            `No confirmed key event log entries found, but rotation ${newParsedData.rotation} requires a previous key`
-          );
-        }
+      validateKeyContinuity(newParsedData, fetchedLog, isTransactionFlow);
 
-        let isValidContinuity = false;
-        if (isTransactionFlow) {
-          // Transaction flow: Validate against current parsedData (rotation N)
-          isValidContinuity =
-            newParsedData.prevaddress1 === parsedData.address1 &&
-            newParsedData.address2 === parsedData.address3 &&
-            (!newParsedData.prevaddress1 ||
-              parsedData.address1 === newParsedData.prevaddress1);
-        } else {
-          // Non-transaction flow: Validate against last confirmed log entry (rotation N-1)
-          const lastEntry = fetchedLog[fetchedLog.length - 1];
-          if (!lastEntry) {
-            throw new Error(
-              "No confirmed key event log entries found for continuity check"
-            );
-          }
-          isValidContinuity =
-            lastEntry.prerotated_key_hash === newPublicKeyHash &&
-            lastEntry.twice_prerotated_key_hash === newParsedData.address2 &&
-            (!newParsedData.prevaddress1 ||
-              lastEntry.public_key_hash === newParsedData.prevaddress1);
-        }
-
-        if (!isValidContinuity) {
-          throw new Error(
-            `The scanned key (rotation ${newParsedData.rotation}) does not maintain continuity with the previous key`
-          );
-        }
-      }
-
-      return { newPrivateKey, newParsedData, newPublicKeyHash };
+      return { newPrivateKey, newParsedData };
     } catch (error) {
-      console.error("DEBUG: QR code parsing error:", error);
+      console.error("QR code parsing error:", error);
       throw error;
     }
   };
-  // Handle key scan for initial wallet setup or key update
+
+  // Handle key scan (unchanged)
   const handleKeyScan = async () => {
     try {
       setIsScannerOpen(true);
       let qrData;
       let attempts = 0;
-      const maxAttempts = 100; // ~30 seconds at 300ms intervals
+      const maxAttempts = 100;
 
       while (attempts < maxAttempts) {
         try {
@@ -1080,7 +1044,7 @@ const Wallet2 = () => {
 
       notifications.show({
         title: "Key Loaded",
-        message: `Wallet key for rotation ${newParsedData.rotation} loaded successfully. You can now send transactions.`,
+        message: `Wallet key for rotation ${newParsedData.rotation} loaded successfully.`,
         color: "green",
       });
 
@@ -1100,18 +1064,17 @@ const Wallet2 = () => {
         });
       }
     } catch (error) {
-      console.error("DEBUG: Key scan error:", error);
       notifications.show({
         title: "Error",
         message:
           error.message || "Failed to process QR code. Please try again.",
         color: "red",
       });
-      setIsScannerOpen(true); // Reopen scanner for retry
+      setIsScannerOpen(true);
     }
   };
 
-  // Sign transaction with key rotation
+  // Sign transaction (unchanged)
   const signTransaction = async () => {
     if (!privateKey || recipients.length === 0) {
       notifications.show({
@@ -1145,7 +1108,6 @@ const Wallet2 = () => {
     );
 
     try {
-      // Prompt user to scan the next key
       notifications.show({
         title: "Key Rotation Required",
         message: `Please rotate your key to rotation ${
@@ -1158,7 +1120,7 @@ const Wallet2 = () => {
 
       let qrData;
       let attempts = 0;
-      const maxAttempts = 100; // ~30 seconds at 300ms intervals
+      const maxAttempts = 100;
 
       while (attempts < maxAttempts) {
         try {
@@ -1175,10 +1137,11 @@ const Wallet2 = () => {
       }
 
       setIsScannerOpen(false);
-      const { newPrivateKey, newParsedData, newPublicKeyHash } =
-        await processScannedQR(qrData, true);
+      const { newPrivateKey, newParsedData } = await processScannedQR(
+        qrData,
+        true
+      );
 
-      // Process transaction
       try {
         const res = await axios.get(
           `${import.meta.env.VITE_API_URL}/get-graph-wallet?address=${getP2PKH(
@@ -1246,7 +1209,7 @@ const Wallet2 = () => {
           outputs: newTransactionOutputs,
           relationship: "",
           relationship_hash: await generateSHA256(""),
-          public_key_hash: newPublicKeyHash,
+          public_key_hash: getP2PKH(newPrivateKey.publicKey),
           prev_public_key_hash: getP2PKH(privateKey.publicKey),
         });
         await zeroValueTxn.hashAndSign();
@@ -1262,7 +1225,6 @@ const Wallet2 = () => {
 
         setLoading(false);
         if (actualResponse.status === 200) {
-          // Update wallet state
           localStorage.removeItem("walletPrivateKey");
           localStorage.removeItem("walletWif");
           localStorage.removeItem("walletParsedData");
@@ -1279,50 +1241,49 @@ const Wallet2 = () => {
           notifications.show({
             title: "Success",
             message:
-              "Transaction and key rotation confirmation submitted successfully. Waiting for initialization of the new key.",
+              "Transaction and key rotation confirmation submitted successfully.",
             color: "green",
           });
         } else {
           throw new Error("Transaction or confirmation submission failed");
         }
       } catch (error) {
-        console.error("DEBUG: Transaction error:", error);
         throw new Error(`Failed to process transaction: ${error.message}`);
       }
     } catch (error) {
-      console.error("DEBUG: Transaction scan error:", error);
       notifications.show({
         title: "Error",
         message:
           error.message || "Failed to process QR code. Please try again.",
         color: "red",
       });
-      setIsScannerOpen(true); // Reopen scanner for retry
+      setIsScannerOpen(true);
     }
   };
 
+  // Webcam capture interval (unchanged)
   useEffect(() => {
     let interval;
-    if (isScannerOpen && !hasScanned) {
+    if (isScannerOpen) {
       interval = setInterval(capture, 300);
     }
     return () => clearInterval(interval);
-  }, [isScannerOpen, hasScanned]); // Add hasScanned to dependencies
+  }, [isScannerOpen]);
 
-  // Helper functions to manage recipients
+  // Recipient management (unchanged)
   const addRecipient = () => {
     setRecipients([...recipients, { address: "", amount: "" }]);
   };
 
-  const removeRecipient = (rotation) => {
+  const removeRecipient = (index) => {
     if (recipients.length > 1) {
-      setRecipients(recipients.filter((_, i) => i !== rotation));
+      setRecipients(recipients.filter((_, i) => i !== index));
     }
   };
 
-  const updateRecipient = (rotation, field, value) => {
+  const updateRecipient = (index, field, value) => {
     const updatedRecipients = [...recipients];
-    updatedRecipients[rotation][field] =
+    updatedRecipients[index][field] =
       field === "amount" ? value.toString() : value;
     setRecipients(updatedRecipients);
   };
@@ -1352,9 +1313,9 @@ const Wallet2 = () => {
         remainingBalance / recipientsToDistribute
       ).toFixed(8);
 
-      const updatedRecipients = recipients.map((recipient, rotation) => {
+      const updatedRecipients = recipients.map((recipient, index) => {
         if (
-          rotation === focusedRotation ||
+          index === focusedRotation ||
           !recipient.amount ||
           isNaN(parseFloat(recipient.amount))
         ) {
@@ -1388,6 +1349,13 @@ const Wallet2 = () => {
     }
   };
 
+  // Pagination
+  const totalItems = combinedHistory.length;
+  const totalPages = Math.ceil(totalItems / ITEMS_PER_PAGE);
+  const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
+  const endIndex = startIndex + ITEMS_PER_PAGE;
+  const paginatedHistory = combinedHistory.slice(startIndex, endIndex);
+
   return (
     <Container size="lg" py="xl">
       <Notifications position="top-center" />
@@ -1401,7 +1369,6 @@ const Wallet2 = () => {
         <Title order={2} mb="md">
           Wallet
         </Title>
-
         {!privateKey ? (
           <>
             <Text mb="md">Please scan a QR code to load your wallet.</Text>
@@ -1472,7 +1439,7 @@ const Wallet2 = () => {
                     <ActionIcon
                       onClick={() => {
                         fetchBalance();
-                        fetchTransactions();
+                        buildTransactionHistory();
                       }}
                       color="teal"
                       variant="outline"
@@ -1481,7 +1448,6 @@ const Wallet2 = () => {
                       <IconRefresh size={16} />
                     </ActionIcon>
                   </Group>
-
                   <Flex direction="column">
                     <Text fw={500}>
                       Address (Rotation:{" "}
@@ -1505,7 +1471,7 @@ const Wallet2 = () => {
                         <IconCopy size={16} />
                       </ActionIcon>
                       <ActionIcon
-                        onClick={() => f(true)}
+                        onClick={() => setIsQRModalOpen(true)}
                         color="teal"
                         variant="outline"
                         title="Show QR Code"
@@ -1538,14 +1504,14 @@ const Wallet2 = () => {
                 <Title order={3} mt="lg" mb="md">
                   Send Transaction
                 </Title>
-                {recipients.map((recipient, rotation) => (
-                  <Group key={rotation} mb="sm" align="flex-end">
+                {recipients.map((recipient, index) => (
+                  <Group key={index} mb="sm" align="flex-end">
                     <TextInput
                       label="Recipient Address"
                       placeholder="Enter address"
                       value={recipient.address}
                       onChange={(e) =>
-                        updateRecipient(rotation, "address", e.target.value)
+                        updateRecipient(index, "address", e.target.value)
                       }
                       styles={{ input: styles.input, label: styles.inputLabel }}
                       style={{ flex: 2 }}
@@ -1555,9 +1521,9 @@ const Wallet2 = () => {
                       placeholder="Enter amount"
                       value={recipient.amount}
                       onChange={(value) =>
-                        updateRecipient(rotation, "amount", value)
+                        updateRecipient(index, "amount", value)
                       }
-                      onFocus={() => setFocusedRotation(rotation)}
+                      onFocus={() => setFocusedRotation(index)}
                       decimalScale={8}
                       styles={{ input: styles.input, label: styles.inputLabel }}
                       style={{ flex: 1 }}
@@ -1567,7 +1533,7 @@ const Wallet2 = () => {
                     {recipients.length > 1 && (
                       <ActionIcon
                         color="red"
-                        onClick={() => removeRecipient(rotation)}
+                        onClick={() => removeRecipient(index)}
                         variant="outline"
                       >
                         <IconTrash size={16} />
@@ -1595,105 +1561,88 @@ const Wallet2 = () => {
               </>
             )}
 
-            {transactions.length > 0 && (
+            {combinedHistory.length > 0 && (
               <Card shadow="xs" padding="md" mt="lg" styles={styles.nestedCard}>
                 <Title order={3} mb="md">
-                  Key Event Log
+                  Wallet History
                 </Title>
                 <div style={{ overflowX: "auto" }}>
                   <Table striped highlightOnHover styles={styles.table}>
-                    <thead>
-                      <tr>
-                        <th style={styles.tableHeader}>Rotation</th>
-                        <th style={styles.tableHeader}>Public Key Hash</th>
-                        <th style={styles.tableHeader}>Prerotated Key Hash</th>
-                        <th style={styles.tableHeader}>
-                          Twice Prerotated Key Hash
-                        </th>
-                        <th style={styles.tableHeader}>Total Received (YDA)</th>
-                        <th style={styles.tableHeader}>Total Sent (YDA)</th>
-                        <th style={styles.tableHeader}>Status</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {transactions.map((entry, index) => (
-                        <tr key={entry.public_key_hash || index}>
-                          <td>{index}</td>
-                          <td>{entry.public_key_hash}</td>
-                          <td>{entry.prerotated_key_hash || "N/A"}</td>
-                          <td>{entry.twice_prerotated_key_hash || "N/A"}</td>
-                          <td>{entry.totalReceived}</td>
-                          <td>{entry.totalSent}</td>
-                          <td>{entry.mempool ? "Pending" : "Confirmed"}</td>
-                        </tr>
+                    <Table.Thead>
+                      <Table.Tr>
+                        <Table.Th style={styles.tableHeader}>Type</Table.Th>
+                        <Table.Th style={styles.tableHeader}>Rotation</Table.Th>
+                        <Table.Th style={styles.tableHeader}>
+                          Public Key Hash
+                        </Table.Th>
+                        <Table.Th style={styles.tableHeader}>
+                          To / Amount / Details
+                        </Table.Th>
+                        <Table.Th style={styles.tableHeader}>Status</Table.Th>
+                      </Table.Tr>
+                    </Table.Thead>
+                    <Table.Tbody>
+                      {paginatedHistory.map((item, index) => (
+                        <Table.Tr
+                          key={`${item.type}-${item.public_key_hash || index}-${
+                            item.id || index
+                          }`}
+                        >
+                          <Table.Td>{item.type}</Table.Td>
+                          <Table.Td>{item.rotation}</Table.Td>
+                          <Table.Td>{item.public_key_hash || "N/A"}</Table.Td>
+                          <Table.Td>
+                            <>
+                              <Text>
+                                <a
+                                  href={`${
+                                    import.meta.env.VITE_API_URL
+                                  }/explorer?term=${item.id}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                >
+                                  TxID: {item.id.slice(0, 8)}...
+                                </a>
+                              </Text>
+                              {item.outputs.length > 0 ? (
+                                item.outputs.map((output, idx) => (
+                                  <Text key={idx}>
+                                    To: {output.to} / Amount: {output.value} YDA
+                                  </Text>
+                                ))
+                              ) : (
+                                <Text>No outputs available</Text>
+                              )}
+                              <Text>Date: {item.date}</Text>
+                              <Text>Type: {item.type}</Text>
+                              {item.type === "Sent Key Event" && (
+                                <>
+                                  <Text>
+                                    Total Received: {item.totalReceived} YDA
+                                  </Text>
+                                  <Text>Total Sent: {item.totalSent} YDA</Text>
+                                </>
+                              )}
+                            </>
+                          </Table.Td>
+                          <Table.Td>
+                            {item.status ||
+                              (item.mempool
+                                ? "Pending"
+                                : "Confirmed on blockchain")}
+                          </Table.Td>
+                        </Table.Tr>
                       ))}
-                    </tbody>
+                    </Table.Tbody>
                   </Table>
                 </div>
-                <Accordion variant="contained" mt="md">
-                  {transactions.map((entry, index) => {
-                    console.log(entry);
-                    return (
-                      <Accordion.Item
-                        value={entry.public_key_hash || `entry-${index}`}
-                        key={entry.public_key_hash || index}
-                      >
-                        <Accordion.Control>
-                          <Text>
-                            Transactions for Rotation {index} (
-                            {entry.public_key_hash.slice(0, 8)}...)
-                          </Text>
-                        </Accordion.Control>
-                        <Accordion.Panel>
-                          {entry.transactions.length > 0 ? (
-                            <Table
-                              striped
-                              highlightOnHover
-                              styles={styles.table}
-                            >
-                              <thead>
-                                <tr>
-                                  <th style={styles.tableHeader}>ID</th>
-                                  <th style={styles.tableHeader}>To</th>
-                                  <th style={styles.tableHeader}>
-                                    Amount (YDA)
-                                  </th>
-                                  <th style={styles.tableHeader}>Date</th>
-                                  <th style={styles.tableHeader}>Status</th>
-                                  <th style={styles.tableHeader}>Type</th>
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {entry.transactions.map((txn) => (
-                                  <tr key={txn.id}>
-                                    <td>
-                                      <a
-                                        href={`${
-                                          import.meta.env.VITE_API_URL
-                                        }/explorer?term=${txn.id}`}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                      >
-                                        {txn.id.slice(0, 8)}...
-                                      </a>
-                                    </td>
-                                    <td>{txn.to}</td>
-                                    <td>{txn.amount}</td>
-                                    <td>{txn.date}</td>
-                                    <td>{txn.status}</td>
-                                    <td>{txn.type}</td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </Table>
-                          ) : (
-                            <Text>No transactions for this key.</Text>
-                          )}
-                        </Accordion.Panel>
-                      </Accordion.Item>
-                    );
-                  })}
-                </Accordion>
+                <Pagination
+                  total={totalPages}
+                  value={currentPage}
+                  onChange={setCurrentPage}
+                  mt="md"
+                  color="teal"
+                />
                 <Button
                   onClick={resetWalletState}
                   color="red"
@@ -1706,7 +1655,6 @@ const Wallet2 = () => {
             )}
           </>
         )}
-
         {parsedData && (
           <Modal
             opened={isScannerOpen}
@@ -1714,7 +1662,7 @@ const Wallet2 = () => {
               setIsScannerOpen(false);
               setIsTransactionFlow(false);
             }}
-            title={`Scan QR Code for ration ${
+            title={`Scan QR Code for rotation ${
               parsedData.rotation !== log.length
                 ? parsedData.rotation + 1
                 : parsedData.rotation
@@ -1732,7 +1680,6 @@ const Wallet2 = () => {
             />
           </Modal>
         )}
-
         <Modal
           opened={isQRModalOpen}
           onClose={() => setIsQRModalOpen(false)}
@@ -1748,7 +1695,7 @@ const Wallet2 = () => {
                 bgColor={colorScheme === "dark" ? "#1A1B1E" : "#FFFFFF"}
                 fgColor={colorScheme === "dark" ? "#FFFFFF" : "#000000"}
               />
-              parsedData.address2
+              <Text>{parsedData.address2}</Text>
             </>
           ) : (
             <Text>No address available</Text>
