@@ -1,48 +1,37 @@
 import { useState, useEffect, useRef } from "react";
 import axios from "axios";
 import {
-  Button,
-  Card,
-  Text,
-  Title,
-  Table,
-  Modal,
-  TextInput,
-  Group,
   Container,
+  Text,
   useMantineColorScheme,
-  ActionIcon,
-  Stack,
-  NumberInput,
-  Flex,
-  Loader,
-  Pagination,
+  Card,
+  Button,
 } from "@mantine/core";
+import { Notifications } from "@mantine/notifications";
 import { Transaction } from "../utils/transaction";
-import Webcam from "react-webcam";
 import jsQR from "jsqr";
-import { Notifications, notifications } from "@mantine/notifications";
-import {
-  IconTrash,
-  IconRefresh,
-  IconCopy,
-  IconQrcode,
-} from "@tabler/icons-react";
+import { notifications } from "@mantine/notifications";
 import {
   fromWIF,
   generateSHA256,
   getP2PKH,
   validateBitcoinAddress,
 } from "../utils/hdWallet";
-import { QRCodeSVG } from "qrcode.react";
 import { useAppContext } from "../context/AppContext";
+import WalletHeader from "../components/Wallet2/WalletHeader";
+import WalletBalance from "../components/Wallet2/WalletBalance";
+import TransactionForm from "../components/Wallet2/TransactionForm";
+import TransactionHistory from "../components/Wallet2/TransactionHistory";
+import QRScannerModal from "../components/Wallet2/QRScannerModal";
+import QRDisplayModal from "../components/Wallet2/QRDisplayModal";
+import WalletStateHandler from "../components/Wallet2/WalletStateHandler";
 
 const ITEMS_PER_PAGE = 5;
 
 const Wallet2 = () => {
   const { colorScheme } = useMantineColorScheme();
-  const [transactions, setTransactions] = useState([]); // Key events with transactions
-  const [combinedHistory, setCombinedHistory] = useState([]); // Combined key events and transactions
+  const [transactions, setTransactions] = useState([]);
+  const [combinedHistory, setCombinedHistory] = useState([]);
   const [currentPage, setCurrentPage] = useState(1);
   const [isScannerOpen, setIsScannerOpen] = useState(false);
   const [isQRModalOpen, setIsQRModalOpen] = useState(false);
@@ -54,11 +43,7 @@ const Wallet2 = () => {
   const [balance, setBalance] = useState(null);
   const [focusedRotation, setFocusedRotation] = useState(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isWaitingForConfirmation, setIsWaitingForConfirmation] =
-    useState(false);
   const [isInitialized, setIsInitialized] = useState(false);
-  const [isPolling, setIsPolling] = useState(false);
-  const [submissionTime, setSubmissionTime] = useState(null);
   const [elapsedTime, setElapsedTime] = useState(0);
   const [isTransactionFlow, setIsTransactionFlow] = useState(false);
 
@@ -89,7 +74,7 @@ const Wallet2 = () => {
       backgroundColor:
         theme.colorScheme === "dark"
           ? theme.colors.dark[6]
-          : conventions.gray[1],
+          : theme.colors.gray[1],
       color: theme.colorScheme === "dark" ? theme.colors.dark[2] : theme.black,
     },
     tableHeader: {
@@ -137,37 +122,11 @@ const Wallet2 = () => {
     },
   });
 
-  // Format elapsed time (unchanged)
-  const formatElapsedTime = (seconds) => {
-    const minutes = Math.floor(seconds / 60);
-    const remainingSeconds = seconds % 60;
-    return `Elapsed time: ${minutes} minute${
-      minutes !== 1 ? "s" : ""
-    }, ${remainingSeconds} second${remainingSeconds !== 1 ? "s" : ""}`;
-  };
-
-  // Update elapsed time (unchanged)
-  useEffect(() => {
-    let timer;
-    if (isWaitingForConfirmation && submissionTime) {
-      timer = setInterval(() => {
-        const now = Date.now();
-        const elapsedSeconds = Math.floor((now - submissionTime) / 1000);
-        setElapsedTime(elapsedSeconds);
-      }, 1000);
-    }
-    return () => clearInterval(timer);
-  }, [isWaitingForConfirmation, submissionTime]);
-
   // Load state from localStorage (unchanged)
   useEffect(() => {
     const storedPrivateKey = localStorage.getItem("walletPrivateKey");
     const storedWif = localStorage.getItem("walletWif");
     const storedParsedData = localStorage.getItem("walletParsedData");
-    const storedIsWaiting = localStorage.getItem(
-      "walletIsWaitingForConfirmation"
-    );
-    const storedSubmissionTime = localStorage.getItem("walletSubmissionTime");
     const storedIsInitialized = localStorage.getItem("walletIsInitialized");
 
     if (storedPrivateKey && storedWif && storedParsedData) {
@@ -182,13 +141,6 @@ const Wallet2 = () => {
         setWif(storedWif);
         setParsedData({ ...parsed, address1 });
         setIsInitialized(storedIsInitialized === "true");
-        if (storedIsWaiting === "true") {
-          setIsWaitingForConfirmation(true);
-          setIsPolling(true);
-          if (storedSubmissionTime) {
-            setSubmissionTime(parseInt(storedSubmissionTime, 10));
-          }
-        }
       } catch (error) {
         console.error("Error restoring private key:", error);
       }
@@ -222,21 +174,6 @@ const Wallet2 = () => {
   }, [parsedData]);
 
   useEffect(() => {
-    localStorage.setItem(
-      "walletIsWaitingForConfirmation",
-      isWaitingForConfirmation.toString()
-    );
-  }, [isWaitingForConfirmation]);
-
-  useEffect(() => {
-    if (submissionTime) {
-      localStorage.setItem("walletSubmissionTime", submissionTime.toString());
-    } else {
-      localStorage.removeItem("walletSubmissionTime");
-    }
-  }, [submissionTime]);
-
-  useEffect(() => {
     localStorage.setItem("walletIsInitialized", isInitialized.toString());
   }, [isInitialized]);
 
@@ -245,17 +182,12 @@ const Wallet2 = () => {
     setWif("");
     setParsedData(null);
     setIsInitialized(false);
-    setIsWaitingForConfirmation(false);
-    setIsPolling(false);
-    setSubmissionTime(null);
     setLog([]);
     setTransactions([]);
     setCombinedHistory([]);
     localStorage.removeItem("walletPrivateKey");
     localStorage.removeItem("walletWif");
     localStorage.removeItem("walletParsedData");
-    localStorage.removeItem("walletIsWaitingForConfirmation");
-    localStorage.removeItem("walletSubmissionTime");
     localStorage.removeItem("walletIsInitialized");
     notifications.show({
       title: "Wallet Reset",
@@ -265,7 +197,7 @@ const Wallet2 = () => {
     });
   };
 
-  // Helper function to fetch transaction details and get the amount sent to prerotated_key_hash
+  // Helper function to fetch transaction details (unchanged)
   const fetchKeyEventAmount = async (txId, prerotatedKeyHash) => {
     try {
       const response = await axios.get(
@@ -282,7 +214,6 @@ const Wallet2 = () => {
         return "0";
       }
       const tx = response.data;
-      // Calculate the amount sent to the prerotated_key_hash
       const amount = tx.outputs
         .reduce((sum, output) => {
           if (output.to === prerotatedKeyHash) {
@@ -294,11 +225,11 @@ const Wallet2 = () => {
       return amount;
     } catch (error) {
       console.error(`Error fetching transaction ${txId}:`, error);
-      return "0"; // Fallback to 0 if the fetch fails
+      return "0";
     }
   };
 
-  // Fetch key event log
+  // Fetch key event log (unchanged)
   const getKeyLog = async (privateKey) => {
     const pk = Buffer.from(privateKey.publicKey).toString("hex");
     try {
@@ -320,7 +251,7 @@ const Wallet2 = () => {
     }
   };
 
-  // Validate key continuity
+  // Validate key continuity (unchanged)
   const validateKeyContinuity = (
     newParsedData,
     fetchedLog,
@@ -340,7 +271,7 @@ const Wallet2 = () => {
         );
       }
       const isValidContinuity =
-        isTransactionFlow && isInitialized === true
+        isTransactionFlow && isInitialized
           ? newParsedData.prevaddress1 === parsedData.address1 &&
             newParsedData.address2 === parsedData.address3 &&
             (!newParsedData.prevaddress1 ||
@@ -358,6 +289,7 @@ const Wallet2 = () => {
     return true;
   };
 
+  // Fetch transactions for key (unchanged)
   const fetchTransactionsForKey = async (
     publicKey,
     address,
@@ -430,39 +362,24 @@ const Wallet2 = () => {
               (tx) => !keyEventTxIds.has(tx.id || tx.txid || tx.transaction_id)
             )
             .map((tx) => {
-              // Prepare outputs based on transaction type
-              let outputs;
-              if (endpoint.type === "Received") {
-                // For Received Transactions, only include the output to the key log address
-                const relevantOutput = tx.outputs.find(
-                  (output) => output.to === address
-                );
-                outputs = relevantOutput
-                  ? [
-                      {
-                        to: relevantOutput.to,
-                        value: relevantOutput.value.toFixed(8),
-                      },
-                    ]
-                  : [];
-              } else {
-                // For Sent Transactions, include all outputs
-                outputs = tx.outputs.map((output) => ({
-                  to: output.to,
-                  value: output.value.toFixed(8),
-                }));
-              }
+              let outputs = tx.outputs.map((output) => ({
+                to: output.to,
+                value: output.value.toFixed(8),
+              }));
 
-              // Calculate totals for received and sent
               const receivedAmount = tx.outputs
-                .reduce((sum, output) => {
-                  return output.to === address ? sum + output.value : sum;
-                }, 0)
+                .reduce(
+                  (sum, output) =>
+                    output.to === address ? sum + output.value : sum,
+                  0
+                )
                 .toFixed(8);
               const sentAmount = tx.outputs
-                .reduce((sum, output) => {
-                  return output.to !== address ? sum + output.value : sum;
-                }, 0)
+                .reduce(
+                  (sum, output) =>
+                    output.to !== address ? sum + output.value : sum,
+                  0
+                )
                 .toFixed(8);
 
               if (endpoint.type === "Received") {
@@ -475,7 +392,7 @@ const Wallet2 = () => {
 
               return {
                 id: txId,
-                outputs, // Store filtered outputs for Received, all outputs for Sent
+                outputs,
                 date: new Date(tx.time * 1000).toLocaleDateString(),
                 status: endpoint.status,
                 type:
@@ -513,6 +430,7 @@ const Wallet2 = () => {
     }
   };
 
+  // Build transaction history
   const buildTransactionHistory = async () => {
     if (!privateKey || !isInitialized) return;
 
@@ -520,10 +438,14 @@ const Wallet2 = () => {
       const { log: keyEventLog } = await getKeyLog(privateKey);
       setLog(keyEventLog);
 
-      // Collect key event transaction IDs to exclude from transaction history
       const keyEventTxIds = new Set(keyEventLog.map((entry) => entry.id));
+      const currentAddress = getP2PKH(privateKey.publicKey);
+      const currentPublicKey = Buffer.from(privateKey.publicKey).toString(
+        "hex"
+      );
+      const currentRotation = parsedData.rotation;
 
-      // Initialize key events with their transactions
+      // Fetch transactions for all keys in the key event log
       const keyLogWithTransactions = await Promise.all(
         keyEventLog.map(async (entry, index) => {
           const { transactions, totalReceived, totalSent } =
@@ -534,13 +456,12 @@ const Wallet2 = () => {
               keyEventTxIds
             );
 
-          // Create a transaction entry for the key event itself
           const keyEventTransaction = {
             id: entry.id,
             outputs: entry.outputs.map((output) => ({
               to: output.to,
               value: output.value.toFixed(8),
-            })), // Include all outputs for key events
+            })),
             date: new Date(entry.time * 1000).toLocaleDateString(),
             status: entry.mempool ? "Pending" : "Confirmed on blockchain",
             type:
@@ -568,31 +489,46 @@ const Wallet2 = () => {
         })
       );
 
-      setTransactions(keyLogWithTransactions);
-
-      // Build combined history
-      const combined = keyLogWithTransactions.flatMap((entry) =>
-        entry.transactions.map((txn) => ({
-          ...txn,
-          rotation: entry.rotation,
-          public_key_hash: entry.public_key_hash,
-        }))
+      // Fetch pending transactions for the current key
+      const currentKeyPending = await fetchTransactionsForKey(
+        currentPublicKey,
+        currentAddress,
+        currentRotation,
+        keyEventTxIds
       );
 
-      // Sort by rotation and then by date (newest first for transactions)
+      // Combine key event log transactions and current key pending transactions
+      setTransactions(keyLogWithTransactions);
+
+      const combined = [
+        ...keyLogWithTransactions.flatMap((entry) =>
+          entry.transactions.map((txn) => ({
+            ...txn,
+            rotation: entry.rotation,
+            public_key_hash: entry.public_key_hash,
+          }))
+        ),
+        ...currentKeyPending.transactions.map((txn) => ({
+          ...txn,
+          rotation: currentRotation,
+          public_key_hash: currentAddress,
+        })),
+      ];
+
+      // Sort transactions by rotation and date
       combined.sort((a, b) => {
         if (a.rotation !== b.rotation) {
           return a.rotation - b.rotation;
         }
-        if (a.type === "Sent Key Event" && b.type !== "Sent Key Event")
+        if (a.type.includes("Key Event") && !b.type.includes("Key Event"))
           return -1;
-        if (a.type !== "Sent Key Event" && b.type === "Sent Key Event")
+        if (!a.type.includes("Key Event") && b.type.includes("Key Event"))
           return 1;
         return new Date(b.date) - new Date(a.date);
       });
 
       setCombinedHistory(combined);
-      setCurrentPage(1); // Reset to first page when history updates
+      setCurrentPage(1);
     } catch (error) {
       console.error("Error building transaction history:", error);
       notifications.show({
@@ -603,7 +539,7 @@ const Wallet2 = () => {
     }
   };
 
-  // Fetch history on initialization or key change
+  // Fetch history on initialization or key change (unchanged)
   useEffect(() => {
     if (privateKey && isInitialized) {
       buildTransactionHistory();
@@ -622,18 +558,6 @@ const Wallet2 = () => {
 
       if (!isValidKey) {
         return { status: "error" };
-      }
-
-      const pendingEntry = keyEventLog.find(
-        (entry) => entry.public_key_hash === address && entry.mempool === true
-      );
-      if (pendingEntry && keyEventLog.length === 1) {
-        setIsWaitingForConfirmation(true);
-        setIsPolling(true);
-        if (!submissionTime) {
-          setSubmissionTime(Date.now());
-        }
-        return { status: "pending_mempool" };
       }
 
       if (keyEventLog.length > 0) {
@@ -724,9 +648,7 @@ const Wallet2 = () => {
           window.location.origin
         }&username_signature=1`,
         txn.toJson(),
-        {
-          headers: { "Content-Type": "application/json" },
-        }
+        { headers: { "Content-Type": "application/json" } }
       );
 
       setLoading(false);
@@ -736,9 +658,6 @@ const Wallet2 = () => {
           message: "Zero-value transaction submitted for wallet initialization",
           color: "green",
         });
-        setIsWaitingForConfirmation(true);
-        setIsPolling(true);
-        setSubmissionTime(Date.now());
       } else {
         throw new Error("Transaction submission failed");
       }
@@ -754,82 +673,6 @@ const Wallet2 = () => {
     }
   };
 
-  // Polling effect (unchanged)
-  useEffect(() => {
-    if (isPolling && privateKey && parsedData) {
-      pollingRef.current = setInterval(async () => {
-        const initStatus = await checkInitializationStatus();
-        if (initStatus.status === "pending_mempool") {
-          notifications.show({
-            title: "Pending Transaction",
-            message: "Waiting for transaction confirmation in mempool.",
-            color: "yellow",
-          });
-        } else if (initStatus.status === "revoked") {
-          setIsInitialized(true);
-          setIsPolling(false);
-          setIsWaitingForConfirmation(false);
-          setSubmissionTime(null);
-          localStorage.setItem("walletIsInitialized", "true");
-          notifications.show({
-            title: "Key Revoked",
-            message: `Key at rotation ${parsedData.rotation} is revoked. Please scan the next key (rotation ${log.length}) to sign transactions.`,
-            color: "yellow",
-          });
-        } else if (initStatus.status === "no_transaction") {
-          notifications.show({
-            title: "No Key Event Log Entry",
-            message: "Resubmitting wallet initialization transaction.",
-            color: "yellow",
-          });
-          setIsWaitingForConfirmation(false);
-          setIsPolling(false);
-          setSubmissionTime(null);
-          await initializeKeyEventLog();
-        } else if (
-          initStatus.status === "invalid_rotation" ||
-          initStatus.status === "invalid_continuity"
-        ) {
-          clearInterval(pollingRef.current);
-          setIsPolling(false);
-          setIsWaitingForConfirmation(false);
-          setSubmissionTime(null);
-          notifications.show({
-            title:
-              initStatus.status === "invalid_rotation"
-                ? "Invalid Key Rotation"
-                : "Invalid Key Continuity",
-            message:
-              initStatus.status === "invalid_rotation"
-                ? `Expected key rotation ${log.length}, but current key is rotation ${parsedData.rotation}. Please scan the correct key.`
-                : "The key does not maintain continuity with the key event log. Please scan a valid key.",
-            color: "red",
-          });
-        } else if (initStatus.status === "error") {
-          clearInterval(pollingRef.current);
-          setIsPolling(false);
-          setIsWaitingForConfirmation(false);
-          setSubmissionTime(null);
-          notifications.show({
-            title: "Error",
-            message:
-              "An error occurred while checking wallet initialization. Please scan a new key.",
-            color: "red",
-          });
-        } else if (initStatus.status === "active") {
-          clearInterval(pollingRef.current);
-          setIsPolling(false);
-          setIsWaitingForConfirmation(false);
-          setIsInitialized(true);
-          setSubmissionTime(null);
-          localStorage.setItem("walletIsInitialized", "true");
-        }
-      }, 15000);
-
-      return () => clearInterval(pollingRef.current);
-    }
-  }, [isPolling, privateKey, parsedData, log]);
-
   // Check initialization status (unchanged)
   useEffect(() => {
     if (privateKey && !isInitialized && !isSubmitting && parsedData) {
@@ -843,15 +686,10 @@ const Wallet2 = () => {
           });
         } else if (initStatus.status === "active") {
           setIsInitialized(true);
-          setIsPolling(false);
-          setSubmissionTime(null);
           localStorage.setItem("walletIsInitialized", "true");
         } else if (initStatus.status === "revoked") {
           clearInterval(pollingRef.current);
-          setIsPolling(false);
-          setIsWaitingForConfirmation(false);
           setIsInitialized(true);
-          setSubmissionTime(null);
           localStorage.setItem("walletIsInitialized", "true");
           notifications.show({
             title: "Key Revoked",
@@ -933,6 +771,7 @@ const Wallet2 = () => {
     fetchBalance();
   }, [privateKey, isInitialized]);
 
+  // Capture QR code (unchanged)
   const capture = () => {
     return new Promise((resolve, reject) => {
       const imageSrc = webcamRef.current?.getScreenshot();
@@ -982,18 +821,18 @@ const Wallet2 = () => {
       if (!isValidKey) {
         throw new Error("Failed to fetch key event log");
       }
-      if (isTransactionFlow && isInitialized === true) {
+      if (isTransactionFlow && isInitialized) {
         if (newParsedData.rotation !== fetchedLog.length + 1) {
           throw new Error(
-            `Incorrect key rotation. Expected rotation ${
-              fetchedLog.length + 1
-            }, got ${newParsedData.rotation}`
+            `Incorrect key rotation. Expected rotation ${log.length + 1}, got ${
+              newParsedData.rotation
+            }`
           );
         }
       } else {
         if (newParsedData.rotation !== fetchedLog.length) {
           throw new Error(
-            `Incorrect key rotation. Expected rotation ${fetchedLog.length}, got ${newParsedData.rotation}`
+            `Incorrect key rotation. Expected rotation ${log.length}, got ${newParsedData.rotation}`
           );
         }
       }
@@ -1032,12 +871,9 @@ const Wallet2 = () => {
       setIsScannerOpen(false);
       const { newPrivateKey, newParsedData } = await processScannedQR(qrData);
 
-      // Update wallet state
       localStorage.removeItem("walletPrivateKey");
       localStorage.removeItem("walletWif");
       localStorage.removeItem("walletParsedData");
-      localStorage.removeItem("walletIsWaitingForConfirmation");
-      localStorage.removeItem("walletSubmissionTime");
       localStorage.removeItem("walletIsInitialized");
 
       setPrivateKey(newPrivateKey);
@@ -1230,8 +1066,6 @@ const Wallet2 = () => {
           localStorage.removeItem("walletPrivateKey");
           localStorage.removeItem("walletWif");
           localStorage.removeItem("walletParsedData");
-          localStorage.removeItem("walletIsWaitingForConfirmation");
-          localStorage.removeItem("walletSubmissionTime");
           localStorage.removeItem("walletIsInitialized");
 
           setPrivateKey(newPrivateKey);
@@ -1259,18 +1093,9 @@ const Wallet2 = () => {
           error.message || "Failed to process QR code. Please try again.",
         color: "red",
       });
-      setIsScannerOpen(true);
+      setIsScannerOpen(false);
     }
   };
-
-  // Webcam capture interval (unchanged)
-  useEffect(() => {
-    let interval;
-    if (isScannerOpen) {
-      interval = setInterval(capture, 300);
-    }
-    return () => clearInterval(interval);
-  }, [isScannerOpen]);
 
   // Recipient management (unchanged)
   const addRecipient = () => {
@@ -1288,46 +1113,6 @@ const Wallet2 = () => {
     updatedRecipients[index][field] =
       field === "amount" ? value.toString() : value;
     setRecipients(updatedRecipients);
-  };
-
-  const handleBalanceClick = () => {
-    if (balance === null || balance <= 0) return;
-
-    if (recipients.length === 1) {
-      updateRecipient(0, "amount", balance.toString());
-    } else {
-      const populatedAmounts = recipients.reduce((sum, r, i) => {
-        const amount = parseFloat(r.amount);
-        return isNaN(amount) || i === focusedRotation ? sum : sum + amount;
-      }, 0);
-
-      const remainingBalance = balance - populatedAmounts;
-      if (remainingBalance <= 0) return;
-
-      const recipientsToDistribute = recipients.filter(
-        (r, i) =>
-          i === focusedRotation || !r.amount || isNaN(parseFloat(r.amount))
-      ).length;
-
-      if (recipientsToDistribute === 0) return;
-
-      const amountPerRecipient = (
-        remainingBalance / recipientsToDistribute
-      ).toFixed(8);
-
-      const updatedRecipients = recipients.map((recipient, index) => {
-        if (
-          index === focusedRotation ||
-          !recipient.amount ||
-          isNaN(parseFloat(recipient.amount))
-        ) {
-          return { ...recipient, amount: amountPerRecipient.toString() };
-        }
-        return recipient;
-      });
-
-      setRecipients(updatedRecipients);
-    }
   };
 
   const copyAddressToClipboard = () => {
@@ -1351,7 +1136,7 @@ const Wallet2 = () => {
     }
   };
 
-  // Pagination
+  // Pagination (unchanged)
   const totalItems = combinedHistory.length;
   const totalPages = Math.ceil(totalItems / ITEMS_PER_PAGE);
   const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
@@ -1368,102 +1153,33 @@ const Wallet2 = () => {
         withBorder
         styles={styles.card}
       >
-        <Title order={2} mb="md">
-          Wallet
-        </Title>
-        {!privateKey ? (
-          <>
-            <Text mb="md">Please scan a QR code to load your wallet.</Text>
-            <Button
-              onClick={handleKeyScan}
-              color="teal"
-              variant="outline"
-              mt="md"
-            >
-              Scan Key (Rotation: {log.length})
-            </Button>
-          </>
-        ) : isSubmitting ? (
-          <Stack align="center" spacing="md">
-            <Loader color="teal" />
-            <Text>Submitting wallet initialization...</Text>
-          </Stack>
-        ) : !isInitialized ? (
-          <Stack align="center" spacing="md">
-            <Text>
-              Current key (rotation {parsedData.rotation}) is not initialized.
-              Please scan the correct key (rotation {log.length}) to proceed.
-            </Text>
-            <Button onClick={handleKeyScan} color="teal" variant="outline">
-              Scan Key (Rotation: {log.length})
-            </Button>
-            <Button onClick={resetWalletState} color="red" variant="outline">
-              Reset Wallet State
-            </Button>
-          </Stack>
-        ) : (
+        <WalletHeader styles={styles} />
+        <WalletStateHandler
+          privateKey={privateKey}
+          isSubmitting={isSubmitting}
+          isInitialized={isInitialized}
+          parsedData={parsedData}
+          log={log}
+          onScanKey={handleKeyScan}
+          onReset={resetWalletState}
+          styles={styles}
+        />
+        {privateKey && isInitialized && (
           <>
             {balance !== null && (
-              <Card shadow="xs" padding="md" mb="md" styles={styles.nestedCard}>
-                <Flex direction="row" justify="space-between">
-                  <Group justify="space-between" align="center">
-                    <div
-                      onClick={handleBalanceClick}
-                      style={{ cursor: "pointer" }}
-                    >
-                      <Text fw={500} styles={styles.title}>
-                        Wallet Balance
-                      </Text>
-                      <Text>{balance} YDA</Text>
-                    </div>
-                    <ActionIcon
-                      onClick={() => {
-                        fetchBalance();
-                        buildTransactionHistory();
-                      }}
-                      color="teal"
-                      variant="outline"
-                      title="Refresh Balance"
-                    >
-                      <IconRefresh size={16} />
-                    </ActionIcon>
-                  </Group>
-                  <Flex direction="column">
-                    <Text fw={500}>
-                      Address (Rotation:{" "}
-                      {parsedData.rotation !== log.length
-                        ? parsedData.rotation + 1
-                        : parsedData.rotation}
-                      )
-                    </Text>
-                    <Group spacing="xs" align="center">
-                      <Text>
-                        {parsedData.rotation !== log.length
-                          ? parsedData.address2
-                          : parsedData.address1}
-                      </Text>
-                      <ActionIcon
-                        onClick={copyAddressToClipboard}
-                        color="teal"
-                        variant="outline"
-                        title="Copy Address"
-                      >
-                        <IconCopy size={16} />
-                      </ActionIcon>
-                      <ActionIcon
-                        onClick={() => setIsQRModalOpen(true)}
-                        color="teal"
-                        variant="outline"
-                        title="Show QR Code"
-                      >
-                        <IconQrcode size={16} />
-                      </ActionIcon>
-                    </Group>
-                  </Flex>
-                </Flex>
-              </Card>
+              <WalletBalance
+                balance={balance}
+                parsedData={parsedData}
+                log={log}
+                onRefresh={() => {
+                  fetchBalance();
+                  buildTransactionHistory();
+                }}
+                onCopyAddress={copyAddressToClipboard}
+                onShowQR={() => setIsQRModalOpen(true)}
+                styles={styles}
+              />
             )}
-
             <Text mb="md">
               {parsedData.rotation === log.length
                 ? `Wallet is ready. You can send transactions with this key (rotation ${parsedData.rotation}).`
@@ -1478,217 +1194,55 @@ const Wallet2 = () => {
             >
               Scan Next Key (Rotation: {log.length})
             </Button>
-
             {parsedData.rotation === log.length && (
-              <>
-                <Title order={3} mt="lg" mb="md">
-                  Send Transaction
-                </Title>
-                {recipients.map((recipient, index) => (
-                  <Group key={index} mb="sm" align="flex-end">
-                    <TextInput
-                      label="Recipient Address"
-                      placeholder="Enter address"
-                      value={recipient.address}
-                      onChange={(e) =>
-                        updateRecipient(index, "address", e.target.value)
-                      }
-                      styles={{ input: styles.input, label: styles.inputLabel }}
-                      style={{ flex: 2 }}
-                    />
-                    <NumberInput
-                      label="Amount (YDA)"
-                      placeholder="Enter amount"
-                      value={recipient.amount}
-                      onChange={(value) =>
-                        updateRecipient(index, "amount", value)
-                      }
-                      onFocus={() => setFocusedRotation(index)}
-                      decimalScale={8}
-                      styles={{ input: styles.input, label: styles.inputLabel }}
-                      style={{ flex: 1 }}
-                      min={0}
-                      step={0.00000001}
-                    />
-                    {recipients.length > 1 && (
-                      <ActionIcon
-                        color="red"
-                        onClick={() => removeRecipient(index)}
-                        variant="outline"
-                      >
-                        <IconTrash size={16} />
-                      </ActionIcon>
-                    )}
-                  </Group>
-                ))}
-                <Group mt="md">
-                  <Button
-                    onClick={addRecipient}
-                    color="teal"
-                    variant="outline"
-                    styles={styles.button}
-                  >
-                    Add Recipient
-                  </Button>
-                  <Button
-                    onClick={signTransaction}
-                    color="teal"
-                    styles={styles.button}
-                  >
-                    Send Transaction
-                  </Button>
-                </Group>
-              </>
+              <TransactionForm
+                recipients={recipients}
+                onAddRecipient={addRecipient}
+                onRemoveRecipient={removeRecipient}
+                onUpdateRecipient={updateRecipient}
+                onSendTransaction={signTransaction}
+                setFocusedRotation={setFocusedRotation}
+                styles={styles}
+              />
             )}
-
             {combinedHistory.length > 0 && (
-              <Card shadow="xs" padding="md" mt="lg" styles={styles.nestedCard}>
-                <Title order={3} mb="md">
-                  Wallet History
-                </Title>
-                <div style={{ overflowX: "auto" }}>
-                  <Table striped highlightOnHover styles={styles.table}>
-                    <Table.Thead>
-                      <Table.Tr>
-                        <Table.Th style={styles.tableHeader}>Type</Table.Th>
-                        <Table.Th style={styles.tableHeader}>Rotation</Table.Th>
-                        <Table.Th style={styles.tableHeader}>
-                          Public Key Hash
-                        </Table.Th>
-                        <Table.Th style={styles.tableHeader}>
-                          To / Amount / Details
-                        </Table.Th>
-                        <Table.Th style={styles.tableHeader}>Status</Table.Th>
-                      </Table.Tr>
-                    </Table.Thead>
-                    <Table.Tbody>
-                      {paginatedHistory.map((item, index) => (
-                        <Table.Tr
-                          key={`${item.type}-${item.public_key_hash || index}-${
-                            item.id || index
-                          }`}
-                        >
-                          <Table.Td>{item.type}</Table.Td>
-                          <Table.Td>{item.rotation}</Table.Td>
-                          <Table.Td>{item.public_key_hash || "N/A"}</Table.Td>
-                          <Table.Td>
-                            <>
-                              <Text>
-                                <a
-                                  href={`${
-                                    import.meta.env.VITE_API_URL
-                                  }/explorer?term=${item.id}`}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                >
-                                  TxID: {item.id.slice(0, 8)}...
-                                </a>
-                              </Text>
-                              {item.outputs.length > 0 ? (
-                                item.outputs.map((output, idx) => (
-                                  <Text key={idx}>
-                                    To: {output.to} / Amount: {output.value} YDA
-                                  </Text>
-                                ))
-                              ) : (
-                                <Text>No outputs available</Text>
-                              )}
-                              <Text>Date: {item.date}</Text>
-                              {item.type === "Sent Key Event" && (
-                                <>
-                                  <Text>
-                                    Total Received: {item.totalReceived} YDA
-                                  </Text>
-                                  <Text>Total Sent: {item.totalSent} YDA</Text>
-                                </>
-                              )}
-                            </>
-                          </Table.Td>
-                          <Table.Td>
-                            {item.status ||
-                              (item.mempool
-                                ? "Pending"
-                                : "Confirmed on blockchain")}
-                          </Table.Td>
-                        </Table.Tr>
-                      ))}
-                    </Table.Tbody>
-                  </Table>
-                </div>
-                <Pagination
-                  total={totalPages}
-                  value={currentPage}
-                  onChange={setCurrentPage}
-                  mt="md"
-                  color="teal"
-                />
-                <Button
-                  onClick={resetWalletState}
-                  color="red"
-                  variant="outline"
-                  mt="xl"
-                >
-                  Erase Wallet Cache
-                </Button>
-              </Card>
+              <TransactionHistory
+                combinedHistory={paginatedHistory}
+                currentPage={currentPage}
+                totalPages={totalPages}
+                onPageChange={setCurrentPage}
+                styles={styles}
+              />
             )}
           </>
         )}
 
-        <Modal
-          opened={isScannerOpen}
+        <Button
+          onClick={resetWalletState}
+          color="red"
+          variant="outline"
+          mt="xl"
+        >
+          Erase Wallet Cache
+        </Button>
+        <QRScannerModal
+          isOpen={isScannerOpen}
           onClose={() => {
             setIsScannerOpen(false);
             setIsTransactionFlow(false);
           }}
-          title={`Scan QR Code for rotation ${
-            parsedData
-              ? parsedData.rotation !== log.length
-                ? parsedData.rotation + 1
-                : parsedData.rotation
-              : 0
-          }`}
-          size="lg"
-          styles={{ modal: styles.modal, title: styles.title }}
-        >
-          <Webcam
-            audio={false}
-            ref={webcamRef}
-            screenshotFormat="image/jpeg"
-            width="100%"
-            videoConstraints={{ facingMode: "environment" }}
-            style={styles.webcam}
-          />
-        </Modal>
-        <Modal
-          opened={isQRModalOpen}
+          webcamRef={webcamRef}
+          parsedData={parsedData}
+          log={log}
+          styles={styles}
+        />
+        <QRDisplayModal
+          isOpen={isQRModalOpen}
           onClose={() => setIsQRModalOpen(false)}
-          title="Wallet Address QR Code"
-          size="sm"
-          styles={{ modal: styles.qrModal, title: styles.title }}
-        >
-          {parsedData?.address1 ? (
-            <>
-              <QRCodeSVG
-                value={
-                  parsedData.rotation !== log.length
-                    ? parsedData.address2
-                    : parsedData.address1
-                }
-                size={200}
-                bgColor={colorScheme === "dark" ? "#1A1B1E" : "#FFFFFF"}
-                fgColor={colorScheme === "dark" ? "#FFFFFF" : "#000000"}
-              />
-              <Text>
-                {parsedData.rotation !== log.length
-                  ? parsedData.address2
-                  : parsedData.address1}
-              </Text>
-            </>
-          ) : (
-            <Text>No address available</Text>
-          )}
-        </Modal>
+          parsedData={parsedData}
+          log={log}
+          styles={styles}
+        />
       </Card>
     </Container>
   );
