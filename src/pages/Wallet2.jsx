@@ -339,15 +339,16 @@ const Wallet2 = () => {
           "No confirmed key event log entries found for continuity check"
         );
       }
-      const isValidContinuity = isTransactionFlow
-        ? newParsedData.prevaddress1 === parsedData.address1 &&
-          newParsedData.address2 === parsedData.address3 &&
-          (!newParsedData.prevaddress1 ||
-            parsedData.address1 === newParsedData.prevaddress1)
-        : lastEntry.prerotated_key_hash === newPublicKeyHash &&
-          lastEntry.twice_prerotated_key_hash === newParsedData.address2 &&
-          (!newParsedData.prevaddress1 ||
-            lastEntry.public_key_hash === newParsedData.prevaddress1);
+      const isValidContinuity =
+        isTransactionFlow && isInitialized === true
+          ? newParsedData.prevaddress1 === parsedData.address1 &&
+            newParsedData.address2 === parsedData.address3 &&
+            (!newParsedData.prevaddress1 ||
+              parsedData.address1 === newParsedData.prevaddress1)
+          : lastEntry.prerotated_key_hash === newPublicKeyHash &&
+            lastEntry.twice_prerotated_key_hash === newParsedData.address2 &&
+            (!newParsedData.prevaddress1 ||
+              lastEntry.public_key_hash === newParsedData.prevaddress1);
       if (!isValidContinuity) {
         throw new Error(
           `The scanned key (rotation ${newParsedData.rotation}) does not maintain continuity with the previous key`
@@ -665,7 +666,7 @@ const Wallet2 = () => {
       }
 
       if (parsedData.rotation === keyEventLog.length) {
-        if (log.length > 0) {
+        if (keyEventLog.length > 0) {
           const lastLogEntry = keyEventLog[keyEventLog.length - 1];
           const isValidContinuity =
             lastLogEntry.public_key_hash === parsedData.prevaddress1 &&
@@ -677,11 +678,12 @@ const Wallet2 = () => {
           }
         } else if (parsedData.prevaddress1 && parsedData.rotation !== 0) {
           return { status: "invalid_continuity" };
+        } else {
+          return { status: "no_transaction" };
         }
-        return { status: "no_transaction" };
       }
 
-      return { status: "invalid_rotation" };
+      return { status: "active" };
     } catch (error) {
       console.error("Error checking key event log:", error);
       notifications.show({
@@ -980,7 +982,7 @@ const Wallet2 = () => {
       if (!isValidKey) {
         throw new Error("Failed to fetch key event log");
       }
-      if (isTransactionFlow) {
+      if (isTransactionFlow && isInitialized === true) {
         if (newParsedData.rotation !== fetchedLog.length + 1) {
           throw new Error(
             `Incorrect key rotation. Expected rotation ${
@@ -1386,28 +1388,6 @@ const Wallet2 = () => {
             <Loader color="teal" />
             <Text>Submitting wallet initialization...</Text>
           </Stack>
-        ) : isWaitingForConfirmation ? (
-          <Stack align="center" spacing="md">
-            <Loader color="teal" />
-            <Text>
-              Waiting for transaction confirmation in mempool, this should take
-              10 to 20 minutes. Current rotation: {parsedData.rotation}
-            </Text>
-            <Text>{formatElapsedTime(elapsedTime)}</Text>
-            <Text>
-              In the meantime, send some YDA to your new wallet's address.
-            </Text>
-            <QRCodeSVG
-              value={parsedData.address2}
-              size={200}
-              bgColor={colorScheme === "dark" ? "#1A1B1E" : "#FFFFFF"}
-              fgColor={colorScheme === "dark" ? "#FFFFFF" : "#000000"}
-            />
-            <Text>{parsedData.address2}</Text>
-            <Button onClick={resetWalletState} color="red" variant="outline">
-              Reset Wallet State
-            </Button>
-          </Stack>
         ) : !isInitialized ? (
           <Stack align="center" spacing="md">
             <Text>
@@ -1614,7 +1594,6 @@ const Wallet2 = () => {
                                 <Text>No outputs available</Text>
                               )}
                               <Text>Date: {item.date}</Text>
-                              <Text>Type: {item.type}</Text>
                               {item.type === "Sent Key Event" && (
                                 <>
                                   <Text>
@@ -1655,31 +1634,32 @@ const Wallet2 = () => {
             )}
           </>
         )}
-        {parsedData && (
-          <Modal
-            opened={isScannerOpen}
-            onClose={() => {
-              setIsScannerOpen(false);
-              setIsTransactionFlow(false);
-            }}
-            title={`Scan QR Code for rotation ${
-              parsedData.rotation !== log.length
+
+        <Modal
+          opened={isScannerOpen}
+          onClose={() => {
+            setIsScannerOpen(false);
+            setIsTransactionFlow(false);
+          }}
+          title={`Scan QR Code for rotation ${
+            parsedData
+              ? parsedData.rotation !== log.length
                 ? parsedData.rotation + 1
                 : parsedData.rotation
-            }`}
-            size="lg"
-            styles={{ modal: styles.modal, title: styles.title }}
-          >
-            <Webcam
-              audio={false}
-              ref={webcamRef}
-              screenshotFormat="image/jpeg"
-              width="100%"
-              videoConstraints={{ facingMode: "environment" }}
-              style={styles.webcam}
-            />
-          </Modal>
-        )}
+              : 0
+          }`}
+          size="lg"
+          styles={{ modal: styles.modal, title: styles.title }}
+        >
+          <Webcam
+            audio={false}
+            ref={webcamRef}
+            screenshotFormat="image/jpeg"
+            width="100%"
+            videoConstraints={{ facingMode: "environment" }}
+            style={styles.webcam}
+          />
+        </Modal>
         <Modal
           opened={isQRModalOpen}
           onClose={() => setIsQRModalOpen(false)}
@@ -1690,12 +1670,20 @@ const Wallet2 = () => {
           {parsedData?.address1 ? (
             <>
               <QRCodeSVG
-                value={parsedData.address2}
+                value={
+                  parsedData.rotation !== log.length
+                    ? parsedData.address2
+                    : parsedData.address1
+                }
                 size={200}
                 bgColor={colorScheme === "dark" ? "#1A1B1E" : "#FFFFFF"}
                 fgColor={colorScheme === "dark" ? "#FFFFFF" : "#000000"}
               />
-              <Text>{parsedData.address2}</Text>
+              <Text>
+                {parsedData.rotation !== log.length
+                  ? parsedData.address2
+                  : parsedData.address1}
+              </Text>
             </>
           ) : (
             <Text>No address available</Text>
