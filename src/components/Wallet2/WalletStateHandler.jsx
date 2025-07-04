@@ -13,7 +13,7 @@ const WalletStateHandler = ({
   if (!privateKey) {
     return (
       <>
-        <Text mb="md">Please scan a QR code to load your wallet.</Text>
+        <Text mb="md">Please scan a QR code from your hard wallet.</Text>
         <Button onClick={onScanKey} color="teal" variant="outline" mt="md">
           Scan Key (Rotation: {log.length})
         </Button>
