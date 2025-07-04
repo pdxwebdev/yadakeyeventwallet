@@ -48,7 +48,7 @@ const Wallet2 = () => {
   const [isTransactionFlow, setIsTransactionFlow] = useState(false);
 
   const webcamRef = useRef(null);
-  const pollingRef = useRef(null);
+
   const { loading, setLoading } = useAppContext();
 
   // Styles (unchanged)
@@ -688,7 +688,6 @@ const Wallet2 = () => {
           setIsInitialized(true);
           localStorage.setItem("walletIsInitialized", "true");
         } else if (initStatus.status === "revoked") {
-          clearInterval(pollingRef.current);
           setIsInitialized(true);
           localStorage.setItem("walletIsInitialized", "true");
           notifications.show({
@@ -735,10 +734,9 @@ const Wallet2 = () => {
   const fetchBalance = async () => {
     if (privateKey && isInitialized) {
       try {
-        const address =
-          parsedData.rotation !== log.length
-            ? parsedData.address2
-            : parsedData.address1;
+        const { log: keyEventLog } = await getKeyLog(privateKey);
+        if (keyEventLog.length <= 0) return;
+        const address = keyEventLog[keyEventLog.length - 1].prerotated_key_hash;
 
         setLoading(true);
         const response = await axios.get(
@@ -769,7 +767,7 @@ const Wallet2 = () => {
 
   useEffect(() => {
     fetchBalance();
-  }, [privateKey, isInitialized]);
+  }, [privateKey, isInitialized, log]);
 
   // Capture QR code (unchanged)
   const capture = () => {
@@ -821,24 +819,9 @@ const Wallet2 = () => {
       if (!isValidKey) {
         throw new Error("Failed to fetch key event log");
       }
-      if (isTransactionFlow && isInitialized) {
-        if (newParsedData.rotation !== fetchedLog.length + 1) {
-          throw new Error(
-            `Incorrect key rotation. Expected rotation ${log.length + 1}, got ${
-              newParsedData.rotation
-            }`
-          );
-        }
-      } else {
-        if (newParsedData.rotation !== fetchedLog.length) {
-          throw new Error(
-            `Incorrect key rotation. Expected rotation ${log.length}, got ${newParsedData.rotation}`
-          );
-        }
-      }
 
       validateKeyContinuity(newParsedData, fetchedLog, isTransactionFlow);
-
+      setLog(fetchedLog);
       return { newPrivateKey, newParsedData };
     } catch (error) {
       console.error("QR code parsing error:", error);
@@ -865,6 +848,7 @@ const Wallet2 = () => {
       }
 
       if (!qrData) {
+        setIsScannerOpen(false);
         throw new Error("No QR code scanned within time limit");
       }
 
@@ -908,7 +892,6 @@ const Wallet2 = () => {
           error.message || "Failed to process QR code. Please try again.",
         color: "red",
       });
-      setIsScannerOpen(true);
     }
   };
 
@@ -971,6 +954,7 @@ const Wallet2 = () => {
       }
 
       if (!qrData) {
+        setIsScannerOpen(false);
         throw new Error("No QR code scanned within time limit");
       }
 
@@ -1235,6 +1219,7 @@ const Wallet2 = () => {
           parsedData={parsedData}
           log={log}
           styles={styles}
+          isTransactionFlow={isTransactionFlow}
         />
         <QRDisplayModal
           isOpen={isQRModalOpen}

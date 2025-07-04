@@ -34,17 +34,11 @@ const WalletBalance = ({
       </Group>
       <Flex direction="column">
         <Text fw={500}>
-          Address (Rotation:{" "}
-          {parsedData.rotation !== log.length
-            ? parsedData.rotation + 1
-            : parsedData.rotation}
-          )
+          Address (Rotation: {log.length > 0 ? log.length : 0})
         </Text>
         <Group spacing="xs" align="center">
           <Text>
-            {parsedData.rotation !== log.length
-              ? parsedData.address2
-              : parsedData.address1}
+            {log.length > 0 ? log[log.length - 1].prerotated_key_hash : ""}
           </Text>
           <ActionIcon
             onClick={onCopyAddress}

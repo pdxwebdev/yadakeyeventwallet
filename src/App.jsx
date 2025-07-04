@@ -41,7 +41,7 @@ function App() {
       />
       <Router basename="/wallet">
         <nav style={{ marginBottom: "20px" }}>
-          <Link to="/" style={{ marginRight: "10px" }}>
+          {/* <Link to="/home" style={{ marginRight: "10px" }}>
             Home
           </Link>
           <Link to="/passwords" style={{ marginRight: "10px" }}>
@@ -49,11 +49,11 @@ function App() {
           </Link>
           <Link to="/wallet" style={{ marginRight: "10px" }}>
             Wallet
+          </Link> */}
+          <Link to="/" style={{ marginRight: "10px" }}>
+            Wallet
           </Link>
-          <Link to="/wallet2" style={{ marginRight: "10px" }}>
-            Wallet2
-          </Link>
-          <Link to="/sandbox" style={{ marginRight: "10px" }}>
+          {/* <Link to="/sandbox" style={{ marginRight: "10px" }}>
             Sandbox
           </Link>
           <Link to="/whitepaper" style={{ marginRight: "10px" }}>
@@ -61,13 +61,13 @@ function App() {
           </Link>
           <Link to="/bridge" style={{ marginRight: "10px" }}>
             Bridge
-          </Link>
+          </Link> */}
         </nav>
         <Routes>
-          <Route path="/" element={<Home />} />
+          <Route path="/home" element={<Home />} />
           <Route path="/sandbox" element={<Sandbox />} />
           <Route path="/wallet" element={<Wallet />} />
-          <Route path="/wallet2" element={<Wallet2 />} />
+          <Route path="/" element={<Wallet2 />} />
           <Route path="/wif-to-hd" element={<WifToHdConversion />} />
           <Route
             path="/whitepaper"
