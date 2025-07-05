@@ -13,7 +13,16 @@ const WalletStateHandler = ({
   if (!privateKey) {
     return (
       <>
-        <Text mb="md">Please scan a QR code from your hardware wallet.</Text>
+        <Text mb="md">
+          Please scan a QR code from your{" "}
+          <a
+            href="https://github.com/pdxwebdev/yada-wallet/blob/master/README.md"
+            target="_blank"
+          >
+            hardware wallet
+          </a>
+          .
+        </Text>
         <Button onClick={onScanKey} color="teal" variant="outline" mt="md">
           Scan Key (Rotation: {log.length})
         </Button>

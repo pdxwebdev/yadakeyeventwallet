@@ -1,6 +1,5 @@
 import { ActionIcon, Card, Flex, Group, Text } from "@mantine/core";
 import { IconCopy, IconQrcode, IconRefresh } from "@tabler/icons-react";
-import { notifications } from "@mantine/notifications";
 
 const WalletBalance = ({
   balance,
@@ -11,14 +10,18 @@ const WalletBalance = ({
   onShowQR,
   styles,
 }) => (
-  <Card shadow="xs" padding="md" mb="md" styles={styles.nestedCard}>
-    <Flex direction="row" justify="space-between">
-      <Group justify="space-between" align="center">
+  <Card shadow="xs" padding="md" mb="md" styles={styles?.nestedCard}>
+    <Flex
+      direction={{ base: "column", sm: "row" }}
+      justify="space-between"
+      gap="md"
+    >
+      <Group align="center">
         <div
           onClick={() => balance !== null && balance > 0 && onRefresh()}
           style={{ cursor: "pointer" }}
         >
-          <Text fw={500} styles={styles.title}>
+          <Text fw={500} styles={styles?.title}>
             Wallet Balance
           </Text>
           <Text>{balance} YDA</Text>
@@ -29,15 +32,16 @@ const WalletBalance = ({
           variant="outline"
           title="Refresh Balance"
         >
-          <IconRefresh size={16} />
+          <IconRefresh />
         </ActionIcon>
       </Group>
-      <Flex direction="column">
+
+      <Flex direction="column" mt={{ base: "md", sm: 0 }}>
         <Text fw={500}>
           Address (Rotation: {log.length > 0 ? log.length : 0})
         </Text>
-        <Group spacing="xs" align="center">
-          <Text>
+        <Group spacing="xs" align="center" wrap="wrap">
+          <Text style={{ wordBreak: "break-all" }}>
             {log.length > 0 ? log[log.length - 1].prerotated_key_hash : ""}
           </Text>
           <ActionIcon
