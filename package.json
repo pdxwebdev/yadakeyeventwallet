@@ -45,6 +45,7 @@
     "eccrypto-js": "^5.4.0",
     "ecpair": "^3.0.0-rc.0",
     "embla-carousel-react": "^7.1.0",
+    "esp-web-tools": "^10.1.1",
     "ethers": "^6.13.5",
     "jsqr": "^1.4.0",
     "qrcode.react": "^4.2.0",

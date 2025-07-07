@@ -1,4 +1,5 @@
-import { Button, Loader, Stack, Text } from "@mantine/core";
+import { Button, Loader, Stack, Text, Title } from "@mantine/core";
+import Flasher from "./Flasher";
 
 const WalletStateHandler = ({
   privateKey,
@@ -13,13 +14,25 @@ const WalletStateHandler = ({
   if (!privateKey) {
     return (
       <>
+        <Title order={3} mb="md" fw="bold">
+          Please scan a QR code from your hardware wallet.
+        </Title>
+        <Title order={4} mb="md" fw="bold">
+          Need to setup your wallet?
+        </Title>
+        <Text mb="md" fw="bold">
+          Option 1: Use web-flasher
+        </Text>
+        <Flasher />
+        <Text mt="md" fw="bold">
+          Option 2: Build from source
+        </Text>
         <Text mb="md">
-          Please scan a QR code from your{" "}
           <a
             href="https://github.com/pdxwebdev/yada-wallet/blob/master/README.md"
             target="_blank"
           >
-            hardware wallet
+            Follow this link for documentation
           </a>
           .
         </Text>
