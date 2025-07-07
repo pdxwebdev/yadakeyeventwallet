@@ -20,7 +20,7 @@ const WalletStateHandler = ({
         <Title order={4} mb="md" fw="bold">
           Need to setup your wallet?
         </Title>
-        <Text mb="md" fw="bold">
+        <Text mb="xs" fw="bold">
           Option 1: Use web-flasher
         </Text>
         <Flasher />
