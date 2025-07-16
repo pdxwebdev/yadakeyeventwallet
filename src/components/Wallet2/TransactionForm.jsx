@@ -5,6 +5,7 @@ import {
   NumberInput,
   TextInput,
   Title,
+  Text,
 } from "@mantine/core";
 import { IconTrash } from "@tabler/icons-react";
 
@@ -16,6 +17,7 @@ const TransactionForm = ({
   onSendTransaction,
   setFocusedRotation,
   styles,
+  feeEstimate,
 }) => (
   <>
     <Title order={3} mt="lg" mb="md">
@@ -54,6 +56,16 @@ const TransactionForm = ({
         )}
       </Group>
     ))}
+    {feeEstimate && (
+      <Text mt="sm" size="sm" style={styles.inputLabel}>
+        Network Fee Estimate:{" "}
+        {feeEstimate.status === "congested"
+          ? `Median Fee: ${feeEstimate.fee_estimate.median_fee.toFixed(8)} YDA`
+          : `No Fee Required (Minimum: ${feeEstimate.recommended_fee.toFixed(
+              8
+            )} YDA)`}
+      </Text>
+    )}
     <Group mt="md">
       <Button
         onClick={onAddRecipient}

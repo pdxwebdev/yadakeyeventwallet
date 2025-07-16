@@ -13,13 +13,13 @@ const QRDisplayModal = ({ isOpen, onClose, parsedData, log, styles }) => {
       size="sm"
       styles={{ modal: styles.qrModal, title: styles.title }}
     >
-      {parsedData?.address1 ? (
+      {parsedData?.publicKeyHash ? (
         <>
           <QRCodeSVG
             value={
               parsedData.rotation !== log.length
-                ? parsedData.address2
-                : parsedData.address1
+                ? parsedData.prerotatedKeyHash
+                : parsedData.publicKeyHash
             }
             size={200}
             bgColor={colorScheme === "dark" ? "#1A1B1E" : "#FFFFFF"}
@@ -27,8 +27,8 @@ const QRDisplayModal = ({ isOpen, onClose, parsedData, log, styles }) => {
           />
           <Text>
             {parsedData.rotation !== log.length
-              ? parsedData.address2
-              : parsedData.address1}
+              ? parsedData.prerotatedKeyHash
+              : parsedData.publicKeyHash}
           </Text>
         </>
       ) : (

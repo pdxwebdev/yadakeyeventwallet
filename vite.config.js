@@ -58,7 +58,7 @@ export default defineConfig({
         background: 'src/background.js',
       },
       output: {
-        entryFileNames: 'assets/[name].js',
+        entryFileNames: 'assets/[name]-[hash].js',
       },
     },
   },

@@ -24,6 +24,7 @@ import { LoadingOverlay, Text } from "@mantine/core";
 import { useAppContext } from "./context/AppContext";
 import Wallet2 from "./pages/Wallet2";
 import { Notifications } from "@mantine/notifications";
+import Bridge2 from "./pages/Bridge2";
 
 // Main App component with the router
 function App() {
@@ -58,10 +59,13 @@ function App() {
           </Link>
           <Link to="/whitepaper" style={{ marginRight: "10px" }}>
             Whitepaper
-          </Link>
-          <Link to="/bridge" style={{ marginRight: "10px" }}>
+          </Link> */}
+          {/* <Link to="/bridge" style={{ marginRight: "10px" }}>
             Bridge
           </Link> */}
+          <Link to="/bridge" style={{ marginRight: "10px" }}>
+            Bridge
+          </Link>
         </nav>
         <Routes>
           <Route path="/home" element={<Home />} />
@@ -81,7 +85,8 @@ function App() {
               />
             }
           />
-          <Route path="/bridge" element={<Bridge />} />
+          {/* <Route path="/bridge" element={<Bridge />} /> */}
+          <Route path="/bridge" element={<Bridge2 />} />
           <Route path="/markets" element={<Markets />} />
           <Route path="/admin" element={<AdminPanel />} />
         </Routes>

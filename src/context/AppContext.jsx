@@ -29,24 +29,38 @@ const localProvider = new ethers.JsonRpcProvider("http://127.0.0.1:8545/");
 const AppContext = createContext();
 
 export const AppProvider = ({ children }) => {
-  // Global state you want to share across your app:
+  // Existing state variables
   const [wallet, setWallet] = useState(null);
   const [balance, setBalance] = useState(0);
   const [transactions, setTransactions] = useState([]);
-  const [wif, setWif] = useState();
+  const [wif, setWif] = useState("");
   const [wifWallet, setWifWallet] = useState();
   const [wifBalance, setWifBalance] = useState();
-  const [log, setLog] = useState();
+  const [log, setLog] = useState([]);
   const [hasKel, setHasKel] = useState(null);
   const [mfa, setMfa] = useState();
   const [loading, setLoading] = useState();
-  const [signer, setSigner] = useState(null); // Current wallet signer
-  const [account, setAccount] = useState(""); // Current wallet address
-  const [isOperator, setIsOperator] = useState(false); // Flag for bridge operator
-  const [userKeyState, setUserKeyState] = useState({}); // { address: { log, keyState } }
+  const [signer, setSigner] = useState(null);
+  const [account, setAccount] = useState("");
+  const [isOperator, setIsOperator] = useState(false);
+  const [userKeyState, setUserKeyState] = useState({});
   const [selectedTestAccount, setSelectedTestAccount] = useState("");
   const [tokenPairs, setTokenPairs] = useState([]);
   const [error, setError] = useState("");
+
+  // New state variables
+  const [combinedHistory, setCombinedHistory] = useState([]);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [isScannerOpen, setIsScannerOpen] = useState(false);
+  const [isQRModalOpen, setIsQRModalOpen] = useState(false);
+  const [parsedData, setParsedData] = useState(null);
+  const [recipients, setRecipients] = useState([{ address: "", amount: "" }]);
+  const [privateKey, setPrivateKey] = useState(null);
+  const [focusedRotation, setFocusedRotation] = useState(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isInitialized, setIsInitialized] = useState(false);
+  const [isTransactionFlow, setIsTransactionFlow] = useState(false);
+  const [feeEstimate, setFeeEstimate] = useState(null);
 
   const getBalance = async () => {
     const res = await axios.get(
@@ -56,6 +70,7 @@ export const AppProvider = ({ children }) => {
     );
     setBalance(() => res.data.balance);
   };
+
   const getWifBalance = async () => {
     const res = await axios.get(
       `${import.meta.env.VITE_API_URL}/get-graph-wallet?address=${getP2PKH(
@@ -64,6 +79,7 @@ export const AppProvider = ({ children }) => {
     );
     setWifBalance(() => res.data);
   };
+
   const getKeyEventLog = async () => {
     const res = await axios.get(
       `${import.meta.env.VITE_API_URL}/key-event-log?public_key=${Buffer.from(
@@ -72,6 +88,7 @@ export const AppProvider = ({ children }) => {
     );
     setLog(() => res.data.key_event_log);
   };
+
   const hasKEL = async () => {
     const res = await axios.get(
       `${
@@ -94,11 +111,7 @@ export const AppProvider = ({ children }) => {
         localProvider
       );
 
-      // Known original tokens from your setup
-      const knownOriginalTokens = [
-        MOCK_ERC20_ADDRESS, // $MOCK
-        MOCK2_ERC20_ADDRESS, // $MOCK2
-      ];
+      const knownOriginalTokens = [MOCK_ERC20_ADDRESS, MOCK2_ERC20_ADDRESS];
 
       const pairs = await Promise.all(
         knownOriginalTokens.map(async (original) => {
@@ -136,13 +149,6 @@ export const AppProvider = ({ children }) => {
         setBalance,
         transactions,
         setTransactions,
-        getBalance,
-        getKeyEventLog,
-        log,
-        setLog,
-        hasKel,
-        setHasKel,
-        hasKEL,
         wif,
         setWif,
         wifWallet,
@@ -150,6 +156,11 @@ export const AppProvider = ({ children }) => {
         getWifBalance,
         wifBalance,
         setWifBalance,
+        log,
+        setLog,
+        hasKel,
+        setHasKel,
+        hasKEL,
         mfa,
         setMfa,
         loading,
@@ -169,6 +180,31 @@ export const AppProvider = ({ children }) => {
         fetchTokenPairs,
         error,
         setError,
+        // New state variables and setters
+        combinedHistory,
+        setCombinedHistory,
+        currentPage,
+        setCurrentPage,
+        isScannerOpen,
+        setIsScannerOpen,
+        isQRModalOpen,
+        setIsQRModalOpen,
+        parsedData,
+        setParsedData,
+        recipients,
+        setRecipients,
+        privateKey,
+        setPrivateKey,
+        focusedRotation,
+        setFocusedRotation,
+        isSubmitting,
+        setIsSubmitting,
+        isInitialized,
+        setIsInitialized,
+        isTransactionFlow,
+        setIsTransactionFlow,
+        feeEstimate,
+        setFeeEstimate,
       }}
     >
       {children}
@@ -176,7 +212,6 @@ export const AppProvider = ({ children }) => {
   );
 };
 
-// A custom hook to use the AppContext in other components
 export const useAppContext = () => {
   return useContext(AppContext);
 };

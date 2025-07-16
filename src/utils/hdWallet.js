@@ -178,7 +178,7 @@ export const deriveSecurePath = async (root, secondFactor) => {
   return currentNode;
 };
 
-function decompressPublicKey(compressedKey) {
+export function decompressPublicKey(compressedKey) {
   if (!(compressedKey instanceof Buffer) || compressedKey.length !== 33) {
     throw new Error("Invalid compressed public key");
   }
