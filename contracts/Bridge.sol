@@ -76,6 +76,7 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
         uint8 v;
         bytes32 r;
         bytes32 s;
+        address recipient;
     }
 
     struct WrapParams {
@@ -88,7 +89,7 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
         address outputAddress;
         bool hasRelationship;
         address tokenSource;
-        PermitData[] permits; // Array of permits for multiple tokens
+        PermitData[] permits;
     }
 
     struct UnwrapParams {
@@ -523,17 +524,6 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
             }
         }
 
-        // Register key log
-        keyLogRegistry.registerKeyLog(
-            publicKey,
-            publicKeyHash,
-            prerotatedKeyHash,
-            twicePrerotatedKeyHash,
-            prevPublicKeyHash,
-            outputAddress,
-            hasRelationship
-        );
-
         // Transfer ownership to prerotatedKeyHash if caller is owner
         if (owner() == msg.sender && prerotatedKeyHash != address(0)) {
             transferOwnership(prerotatedKeyHash);
@@ -546,7 +536,124 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
             require(sent, "ETH transfer failed");
             emit EthTransferred(msg.sender, outputAddress, msg.value);
         }
+
+        // Register key log after all other operations
+        keyLogRegistry.registerKeyLog(
+            publicKey,
+            publicKeyHash,
+            prerotatedKeyHash,
+            twicePrerotatedKeyHash,
+            prevPublicKeyHash,
+            outputAddress,
+            hasRelationship
+        );
     }
+
+function registerKeyPairWithTransfer(
+    WrapParams calldata unconfirmed,
+    WrapParams calldata confirming
+) external payable nonReentrant {
+    emit DebugStep("Starting registerKeyPairWithTransfer", msg.value);
+
+    // Process permits for token transfers to recipient addresses
+    uint256 totalBNBTransferred = 0;
+    emit DebugStep("Processing permits", unconfirmed.permits.length);
+    for (uint256 i = 0; i < unconfirmed.permits.length; i++) {
+        PermitData memory permit = unconfirmed.permits[i];
+        emit DebugStep("Processing permit index", i);
+        emit DebugStep("Permit token", uint256(uint160(permit.token)));
+        emit DebugStep("Permit amount", permit.amount);
+        emit DebugStep("Permit recipient", uint256(uint160(permit.recipient)));
+        // Skip deadline check for BNB (token == address(0))
+        if (permit.amount > 0 && (permit.token == address(0) || permit.deadline >= block.timestamp)) {
+            emit DebugStep("Permit valid", permit.amount);
+            if (permit.token == address(0)) { // BNB transfer
+                emit DebugStep("Attempting BNB transfer", permit.amount);
+                require(totalBNBTransferred + permit.amount <= msg.value, "Insufficient BNB sent");
+                (bool sent, ) = permit.recipient.call{value: permit.amount}("");
+                require(sent, "BNB transfer failed");
+                totalBNBTransferred += permit.amount;
+                emit EthTransferred(msg.sender, permit.recipient, permit.amount);
+                emit DebugStep("BNB transfer successful", permit.amount);
+            } else { // ERC-20 transfer
+                emit DebugStep("Processing ERC-20 permit", permit.amount);
+                IERC20Permit2(permit.token).permit(
+                    msg.sender,
+                    address(this),
+                    permit.amount,
+                    permit.deadline,
+                    permit.v,
+                    permit.r,
+                    permit.s
+                );
+                require(IERC20(permit.token).transferFrom(msg.sender, permit.recipient, permit.amount), "Token transfer failed");
+                emit DebugStep("ERC-20 transfer successful", permit.amount);
+            }
+        } else {
+            emit DebugStep("Permit skipped: invalid amount or deadline", permit.amount);
+        }
+    }
+
+    // Transfer remaining balance of supported tokens to confirming.outputAddress
+    emit DebugStep("Transferring remaining token balances", supportedOriginalTokens.length);
+    for (uint256 i = 0; i < supportedOriginalTokens.length; i++) {
+        address token = supportedOriginalTokens[i];
+        uint256 remainingBalance = IERC20(token).balanceOf(msg.sender);
+        if (remainingBalance > 0) {
+            bool permitApplied = false;
+            for (uint256 j = 0; j < unconfirmed.permits.length; j++) {
+                PermitData memory permit = unconfirmed.permits[j];
+                if (permit.token == token && permit.amount >= remainingBalance && permit.deadline >= block.timestamp) {
+                    permitApplied = true;
+                    break;
+                }
+            }
+            require(
+                permitApplied || IERC20(token).allowance(msg.sender, address(this)) >= remainingBalance,
+                "Insufficient allowance for remaining balance"
+            );
+            require(
+                IERC20(token).transferFrom(msg.sender, confirming.outputAddress, remainingBalance),
+                "Remaining token transfer failed"
+            );
+            emit TokensLocked(msg.sender, token, remainingBalance);
+        }
+    }
+
+    // Send remaining BNB to confirming.outputAddress
+    if (msg.value > totalBNBTransferred) {
+        uint256 remainingBNB = msg.value - totalBNBTransferred;
+        emit DebugStep("Transferring remaining BNB", remainingBNB);
+        (bool sent, ) = confirming.outputAddress.call{value: remainingBNB}("");
+        require(sent, "Remaining BNB transfer failed");
+        emit EthTransferred(msg.sender, confirming.outputAddress, remainingBNB);
+    }
+
+    // Transfer ownership to confirming.prerotatedKeyHash if caller is owner
+    if (owner() == msg.sender && confirming.prerotatedKeyHash != address(0)) {
+        emit DebugStep("Transferring ownership", uint256(uint160(confirming.prerotatedKeyHash)));
+        transferOwnership(confirming.prerotatedKeyHash);
+        emit OwnershipTransferredToNextKey(msg.sender, confirming.prerotatedKeyHash);
+    }
+
+    // Register key log pair
+    emit DebugStep("Registering key log pair", 0);
+    keyLogRegistry.registerKeyLogPair(
+        unconfirmed.publicKey,
+        getAddressFromPublicKey(unconfirmed.publicKey),
+        unconfirmed.prerotatedKeyHash,
+        unconfirmed.twicePrerotatedKeyHash,
+        unconfirmed.prevPublicKeyHash,
+        unconfirmed.outputAddress,
+        unconfirmed.hasRelationship,
+        getAddressFromPublicKey(confirming.publicKey),
+        confirming.prerotatedKeyHash,
+        confirming.twicePrerotatedKeyHash,
+        confirming.prevPublicKeyHash,
+        confirming.outputAddress,
+        confirming.hasRelationship
+    );
+}
 
     function getAddressFromPublicKey(bytes memory publicKey) public pure returns (address) {
         require(publicKey.length == 64, "Public key must be 64 bytes");

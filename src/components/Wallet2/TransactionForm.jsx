@@ -1,13 +1,6 @@
-import {
-  ActionIcon,
-  Button,
-  Group,
-  NumberInput,
-  TextInput,
-  Title,
-  Text,
-} from "@mantine/core";
-import { IconTrash } from "@tabler/icons-react";
+// src/components/Wallet2/TransactionForm.js
+import { Button, TextInput, Group, Text } from "@mantine/core";
+import { useAppContext } from "../../context/AppContext";
 
 const TransactionForm = ({
   recipients,
@@ -18,68 +11,59 @@ const TransactionForm = ({
   setFocusedRotation,
   styles,
   feeEstimate,
-}) => (
-  <>
-    <Title order={3} mt="lg" mb="md">
-      Send Transaction
-    </Title>
-    {recipients.map((recipient, index) => (
-      <Group key={index} mb="sm" align="flex-end">
-        <TextInput
-          label="Recipient Address"
-          placeholder="Enter address"
-          value={recipient.address}
-          onChange={(e) => onUpdateRecipient(index, "address", e.target.value)}
-          styles={{ input: styles.input, label: styles.inputLabel }}
-          style={{ flex: 2 }}
-        />
-        <NumberInput
-          label="Amount (YDA)"
-          placeholder="Enter amount"
-          value={recipient.amount}
-          onChange={(value) => onUpdateRecipient(index, "amount", value)}
-          onFocus={() => setFocusedRotation(index)}
-          decimalScale={8}
-          styles={{ input: styles.input, label: styles.inputLabel }}
-          style={{ flex: 1 }}
-          min={0}
-          step={0.00000001}
-        />
-        {recipients.length > 1 && (
-          <ActionIcon
-            color="red"
-            onClick={() => onRemoveRecipient(index)}
-            variant="outline"
-          >
-            <IconTrash size={16} />
-          </ActionIcon>
-        )}
-      </Group>
-    ))}
-    {feeEstimate && (
-      <Text mt="sm" size="sm" style={styles.inputLabel}>
-        Network Fee Estimate:{" "}
-        {feeEstimate.status === "congested"
-          ? `Median Fee: ${feeEstimate.fee_estimate.median_fee.toFixed(8)} YDA`
-          : `No Fee Required (Minimum: ${feeEstimate.recommended_fee.toFixed(
-              8
-            )} YDA)`}
-      </Text>
-    )}
-    <Group mt="md">
-      <Button
-        onClick={onAddRecipient}
-        color="teal"
-        variant="outline"
-        styles={styles.button}
-      >
-        Add Recipient
-      </Button>
-      <Button onClick={onSendTransaction} color="teal" styles={styles.button}>
+}) => {
+  const { selectedToken, supportedTokens } = useAppContext();
+
+  return (
+    <div style={styles.form}>
+      <Text size="lg" weight={500} mb="md">
         Send Transaction
-      </Button>
-    </Group>
-  </>
-);
+      </Text>
+      {recipients.map((recipient, index) => (
+        <Group key={index} mb="sm">
+          <TextInput
+            placeholder="Recipient Address"
+            value={recipient.address}
+            onChange={(e) =>
+              onUpdateRecipient(index, "address", e.target.value)
+            }
+            style={{ flex: 1 }}
+          />
+          <TextInput
+            placeholder="Amount"
+            value={recipient.amount}
+            onChange={(e) => onUpdateRecipient(index, "amount", e.target.value)}
+            style={{ width: 150 }}
+          />
+          {recipients.length > 1 && (
+            <Button
+              color="red"
+              variant="outline"
+              onClick={() => onRemoveRecipient(index)}
+            >
+              Remove
+            </Button>
+          )}
+        </Group>
+      ))}
+      <Group>
+        <Button onClick={onAddRecipient} variant="outline">
+          Add Recipient
+        </Button>
+        <Button onClick={onSendTransaction} color="teal">
+          Send{" "}
+          {selectedToken
+            ? supportedTokens.find((t) => t.address === selectedToken)?.symbol
+            : "Token"}
+        </Button>
+      </Group>
+      {feeEstimate && (
+        <Text mt="sm" size="sm">
+          Estimated Fee: {feeEstimate.recommended_fee} BNB
+        </Text>
+      )}
+    </div>
+  );
+};
 
 export default TransactionForm;

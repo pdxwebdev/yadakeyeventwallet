@@ -1,101 +1,74 @@
 import pkg from "hardhat";
 import fs from 'fs';
-import * as bip39 from "bip39";
-import * as bip32 from "bip32";
+import bs58 from 'bs58';
 import * as shajs from "sha.js";
 import * as tinysecp256k1 from "tiny-secp256k1";
 const { ethers, upgrades } = pkg;
 
+// Function to read and parse WIF key from a file
+const readWIFKeyFromFile = (filePath) => {
+  try {
+    // const wif = fs.readFileSync(filePath, 'utf8').trim();
+    // if (!wif) {
+    //   throw new Error("WIF key file is empty");
+    // }
+    const wif = 'L44MBqEgnbSKVJz6BVC7ke7G7MaKEV4zhfXZNoAMX4vBSYNLgc5Q'
+    // Decode WIF key (Base58)
+    const decoded = bs58.decode(wif);
+    if (decoded.length !== 34 && decoded.length !== 38) {
+      throw new Error("Invalid WIF key length");
+    }
 
-export const HARDHAT_MNEMONIC =
-  "test test test test test test test test test test test junk";
-
-const deriveIndex = async (factor, level) => {
-  const hash = await generateSHA256(factor + level);
-  return parseInt(hash.toString("hex"), 16) % 2147483647; // Modulo 2^31
+    // Extract private key (remove version byte and checksum)
+    const privateKey = decoded.subarray(1, 33); // First 32 bytes after version byte
+    return ethers.hexlify(privateKey); // Convert to hex for ethers
+  } catch (error) {
+    throw new Error(`Failed to read or parse WIF key: ${error.message}`);
+  }
 };
 
-
-function decompressPublicKey(compressedKey) {
-  if (!(compressedKey instanceof Buffer) || compressedKey.length !== 33) {
-    throw new Error("Invalid compressed public key");
-  }
-
-  // Check prefix (0x02 or 0x03 for compressed keys)
-  const prefix = compressedKey[0];
-  if (prefix !== 0x02 && prefix !== 0x03) {
-    throw new Error("Invalid compressed public key prefix");
-  }
-
-  // Extract x-coordinate (32 bytes after prefix)
-  const x = compressedKey.subarray(1, 33);
-
-  // Decompress to get y-coordinate using tiny-secp256k1
-  const point = tinysecp256k1.pointFromScalar(x, prefix === 0x03 ? true : false);
-  if (!point) {
-    throw new Error("Failed to decompress public key");
-  }
-
-  // Convert point to uncompressed format (0x04 prefix + x + y)
-  const uncompressed = Buffer.alloc(65);
-  uncompressed[0] = 0x04; // Uncompressed prefix
-  uncompressed.set(point.slice(0, 32), 1); // x-coordinate
-  uncompressed.set(point.slice(32, 64), 33); // y-coordinate
-
-  return uncompressed;
-}
-
-// Generate a secure derivation path
-const deriveSecurePath = async (root, secondFactor) => {
-  let currentNode = root;
-
-  // Fixed 4-level path
-  for (let level = 0; level < 4; level++) {
-    const index = await deriveIndex(secondFactor, level);
-    currentNode = currentNode.deriveHardened(index);
-  }
-  currentNode.uncompressedPublicKey = decompressPublicKey(Buffer.from(currentNode.publicKey))
-  return currentNode;
-};
-
+// Generate a secure derivation path (optional, if still needed for other purposes)
 const generateSHA256 = async (input) => {
   return new shajs.sha256().update(input).digest("hex");
 };
 
-// Function to create an HD wallet from mnemonic
-export const createHDWallet = (mnemonic) => {
-  if (!bip39.validateMnemonic(mnemonic)) {
-    throw new Error("Invalid mnemonic");
-  }
-
-  const seed = bip39.mnemonicToSeedSync(mnemonic);
-  const root = bip32.BIP32Factory(tinysecp256k1).fromSeed(seed);
-  return root.deriveHardened(0);
+// Function to create a wallet from WIF
+const createWalletFromWIF = (wifFilePath) => {
+  const privateKey = readWIFKeyFromFile(wifFilePath);
+  return new ethers.Wallet(privateKey, ethers.provider);
 };
 
 async function main() {
-  // const [deployer] = await ethers.getSigners();
-  const wallet = createHDWallet(HARDHAT_MNEMONIC);
-  const derivedKey = await deriveSecurePath(wallet, 'defaultPassword0');
-  const deployer = new ethers.Wallet(ethers.hexlify(derivedKey.privateKey), ethers.provider);
+  // Path to the WIF key file
+  const wifFilePath = "./privateKey.wif"; // Adjust to your file path
+
+  // Create wallet from WIF
+  const deployer = createWalletFromWIF(wifFilePath);
   console.log("Deploying with:", deployer.address);
 
-    // Fund the derived account
+  // Fund the derived account
   const [hardhatAccount] = await ethers.getSigners(); // Get a funded Hardhat account
   const tx = await hardhatAccount.sendTransaction({
     to: deployer.address,
     value: ethers.parseEther("1000.0"), // Send 1 ETH to the derived account
   });
   await tx.wait();
+  console.log(`Funded ${deployer.address} with 1 ETH`);
 
-  const derivedKey2 = await deriveSecurePath(wallet, 'defaultPassword1');
-  const testAccount2 = new ethers.Wallet(ethers.hexlify(derivedKey2.privateKey), ethers.provider);
+  // Second wallet (if needed, provide another WIF file or reuse logic)
+  const testAccount2 = createWalletFromWIF("./privateKey2.wif"); // Adjust to another WIF file
   const tx2 = await hardhatAccount.sendTransaction({
     to: testAccount2.address,
     value: ethers.parseEther("1000.0"), // Send 1 ETH to the derived account
   });
   await tx2.wait();
-  console.log(`Funded ${deployer.address} with 1 ETH`);
+
+  // Fund another address
+  const tx3 = await hardhatAccount.sendTransaction({
+    to: '0x6302D4F75c297FC0cf3742b5f38543Ce2d70Ed9b',
+    value: ethers.parseEther("1000.0"), // Send 1 ETH
+  });
+  await tx3.wait();
 
   const deploymentsFile = "./deployments.json";
   let deployments = fs.existsSync(deploymentsFile)
@@ -165,7 +138,7 @@ async function main() {
   }
   const tokenPairWrapperAddress = deployments.tokenPairWrapper;
 
-  // Update output
+  // Output for React
   console.log(`export const TOKEN_PAIR_WRAPPER_ADDRESS = "${tokenPairWrapperAddress}";`);
 
   // Deploy WrappedToken ($WYDA)
@@ -200,20 +173,48 @@ async function main() {
   let yadaERC20;
   if (deployments.yadaERC20) {
     yadaERC20 = await MockERC20.attach(deployments.yadaERC20);
-    console.log("Using existing Yada Cross-chain ($YDA):", deployments.yadaERC20);
+    console.log("Using existing Yada Cross-chain ($WYDA):", deployments.yadaERC20);
+    // Check if deployer has tokens; if not, transfer from original minter
+    const wydaBalance = await yadaERC20.balanceOf(deployer.address);
+    if (wydaBalance < ethers.parseEther("1000")) {
+      const [hardhatAccount] = await ethers.getSigners();
+      const hardhatWydaBalance = await yadaERC20.balanceOf(hardhatAccount.address);
+      if (hardhatWydaBalance >= ethers.parseEther("1000")) {
+        await yadaERC20.connect(hardhatAccount).transfer(deployer.address, ethers.parseEther("1000"));
+        console.log(`Transferred 1000 WYDA from ${hardhatAccount.address} to ${deployer.address}`);
+      } else {
+        throw new Error(`No sufficient WYDA balance in ${hardhatAccount.address}`);
+      }
+    }
   } else {
-    yadaERC20 = await MockERC20.deploy("Yada cross-chain", "YDA", ethers.parseEther("1000"));
+    yadaERC20 = await MockERC20.connect(deployer).deploy("Yada cross-chain", "WYDA", ethers.parseEther("1000"));
     await yadaERC20.waitForDeployment();
     deployments.yadaERC20 = await yadaERC20.getAddress();
-    console.log("Yada Cross-chain ($YDA):", deployments.yadaERC20);
+    console.log("Yada Cross-chain ($WYDA):", deployments.yadaERC20);
   }
   const yadaERC20Address = deployments.yadaERC20;
+
+  // Verify WYDA balance
+  const wydaBalance = await yadaERC20.balanceOf(deployer.address);
+  console.log(`WYDA balance of ${deployer.address}: ${ethers.formatEther(wydaBalance)} WYDA`);
 
   // Deploy Mock PEPE
   let mockPepe;
   if (deployments.pepeERC20_2) {
     mockPepe = await MockERC20.attach(deployments.pepeERC20_2);
     console.log("Using existing Mock PEPE:", deployments.pepeERC20_2);
+    // Check if deployer has tokens; if not, transfer from original minter
+    const pepeBalance = await mockPepe.balanceOf(deployer.address);
+    if (pepeBalance < ethers.parseEther("1000")) {
+      const [hardhatAccount] = await ethers.getSigners();
+      const hardhatPepeBalance = await mockPepe.balanceOf(hardhatAccount.address);
+      if (hardhatPepeBalance >= ethers.parseEther("1000")) {
+        await mockPepe.connect(hardhatAccount).transfer(deployer.address, ethers.parseEther("1000"));
+        console.log(`Transferred 1000 PEPE from ${hardhatAccount.address} to ${deployer.address}`);
+      } else {
+        throw new Error(`No sufficient PEPE balance in ${hardhatAccount.address}`);
+      }
+    }
   } else {
     mockPepe = await MockERC20.connect(deployer).deploy("Pepe", "PEPE", ethers.parseEther("1000"));
     await mockPepe.waitForDeployment();
@@ -221,9 +222,6 @@ async function main() {
     console.log("Mock PEPE:", deployments.pepeERC20_2);
   }
   const mockPepeAddress = deployments.pepeERC20_2;
-  // Transfer 100 PEPE tokens to User 1 if balance is sufficient
-  const transferAmount = ethers.parseEther("100"); // 100 PEPE tokens
-  await mockPepe.connect(deployer).transfer(testAccount2.address, transferAmount);
 
   // Deploy Mock Price Feed
   const PriceFeedAggregatorV3 = await ethers.getContractFactory("PriceFeedAggregatorV3");
@@ -274,6 +272,7 @@ async function main() {
   console.log(`export const Y_WRAPPED_TOKEN_ADDRESS = "${wrappedTokenYMOCKAddress}"; // $YPEPE`);
   console.log(`export const MOCK_ERC20_ADDRESS = "${yadaERC20Address}"; // $YDA`);
   console.log(`export const MOCK2_ERC20_ADDRESS = "${mockPepeAddress}"; // $PEPE`);
+
   // After deploying the Bridge
   const bridge2 = await ethers.getContractAt("Bridge", deployments.bridge, deployer);
   console.log("Bridge proxy address:", deployments.bridge);

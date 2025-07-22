@@ -1,23 +1,9 @@
-import { useState, useEffect, useRef, useMemo, useCallback } from "react";
-import axios from "axios";
-import {
-  Container,
-  Text,
-  useMantineColorScheme,
-  Card,
-  Button,
-} from "@mantine/core";
-import { Notifications } from "@mantine/notifications";
-import { Transaction } from "../utils/transaction";
-import jsQR from "jsqr";
-import { notifications } from "@mantine/notifications";
-import {
-  fromWIF,
-  generateSHA256,
-  getP2PKH,
-  validateBitcoinAddress,
-} from "../utils/hdWallet";
+// src/pages/Wallet2.js
+import { useState, useEffect, useRef, useMemo } from "react";
+import { AppShell, Container, Card, Button, Text } from "@mantine/core";
+import { notifications, Notifications } from "@mantine/notifications";
 import { useAppContext } from "../context/AppContext";
+import { walletManagerFactory } from "../blockchains/WalletManagerFactory";
 import WalletHeader from "../components/Wallet2/WalletHeader";
 import WalletBalance from "../components/Wallet2/WalletBalance";
 import TransactionForm from "../components/Wallet2/TransactionForm";
@@ -25,13 +11,17 @@ import TransactionHistory from "../components/Wallet2/TransactionHistory";
 import QRScannerModal from "../components/Wallet2/QRScannerModal";
 import QRDisplayModal from "../components/Wallet2/QRDisplayModal";
 import WalletStateHandler from "../components/Wallet2/WalletStateHandler";
-import WalletManager from "../blockchains/YadaBSC";
+import BlockchainNav from "../components/Wallet2/BlockchainNav";
 import { styles } from "../shared/styles";
+import { fromWIF, getP2PKH } from "../utils/hdWallet";
+import TokenSelector from "../components/Wallet2/TokenSelector";
+import { capture } from "../shared/capture";
 
 const ITEMS_PER_PAGE = 5;
 
 const Wallet2 = () => {
   const {
+    selectedBlockchain,
     transactions,
     setTransactions,
     log,
@@ -63,30 +53,36 @@ const Wallet2 = () => {
     feeEstimate,
     setFeeEstimate,
     balance,
+    setBalance,
+    selectedToken, // New
   } = useAppContext();
-  const webcamRef = useRef(null);
 
+  const webcamRef = useRef(null);
   const appContext = useAppContext();
+
+  // Instantiate WalletManager based on selected blockchain
   const walletManager = useMemo(
-    () => new WalletManager(appContext),
-    [appContext]
+    () => walletManagerFactory(selectedBlockchain, appContext, webcamRef),
+    [selectedBlockchain, appContext, webcamRef]
   );
 
-  // Load state from localStorage (unchanged)
+  // Load state from localStorage
   useEffect(() => {
-    const storedPrivateKey = localStorage.getItem("walletPrivateKey");
-    const storedWif = localStorage.getItem("walletWif");
-    const storedParsedData = localStorage.getItem("walletParsedData");
-    const storedIsInitialized = localStorage.getItem("walletIsInitialized");
+    const storedPrivateKey = localStorage.getItem(
+      `walletPrivateKey_${selectedBlockchain}`
+    );
+    const storedWif = localStorage.getItem(`walletWif_${selectedBlockchain}`);
+    const storedParsedData = localStorage.getItem(
+      `walletParsedData_${selectedBlockchain}`
+    );
+    const storedIsInitialized = localStorage.getItem(
+      `walletIsInitialized_${selectedBlockchain}`
+    );
 
     if (storedPrivateKey && storedWif && storedParsedData) {
       try {
         const privateKeyObj = fromWIF(storedWif);
         const parsed = JSON.parse(storedParsedData);
-        const publicKeyHash = getP2PKH(privateKeyObj.publicKey);
-        if (parsed.publicKeyHash && parsed.publicKeyHash !== publicKeyHash) {
-          throw new Error("Invalid restored key: address mismatch");
-        }
         setPrivateKey(privateKeyObj);
         setWif(storedWif);
         setParsedData({ ...parsed });
@@ -95,37 +91,46 @@ const Wallet2 = () => {
         console.error("Error restoring private key:", error);
       }
     }
-  }, []);
+  }, [selectedBlockchain]);
 
-  // Save state to localStorage (unchanged)
+  // Save state to localStorage
   useEffect(() => {
     if (privateKey) {
-      localStorage.setItem("walletPrivateKey", JSON.stringify(privateKey));
+      localStorage.setItem(
+        `walletPrivateKey_${selectedBlockchain}`,
+        JSON.stringify(privateKey)
+      );
     } else {
-      localStorage.removeItem("walletPrivateKey");
+      localStorage.removeItem(`walletPrivateKey_${selectedBlockchain}`);
     }
-  }, [privateKey]);
+  }, [privateKey, selectedBlockchain]);
 
   useEffect(() => {
     if (wif) {
-      localStorage.setItem("walletWif", wif);
+      localStorage.setItem(`walletWif_${selectedBlockchain}`, wif);
     } else {
-      localStorage.removeItem("walletWif");
+      localStorage.removeItem(`walletWif_${selectedBlockchain}`);
     }
-  }, [wif]);
+  }, [wif, selectedBlockchain]);
 
   useEffect(() => {
     if (parsedData) {
-      const { publicKeyHash, ...dataToStore } = parsedData;
-      localStorage.setItem("walletParsedData", JSON.stringify(dataToStore));
+      const { ...dataToStore } = parsedData;
+      localStorage.setItem(
+        `walletParsedData_${selectedBlockchain}`,
+        JSON.stringify(dataToStore)
+      );
     } else {
-      localStorage.removeItem("walletParsedData");
+      localStorage.removeItem(`walletParsedData_${selectedBlockchain}`);
     }
-  }, [parsedData]);
+  }, [parsedData, selectedBlockchain]);
 
   useEffect(() => {
-    localStorage.setItem("walletIsInitialized", isInitialized.toString());
-  }, [isInitialized]);
+    localStorage.setItem(
+      `walletIsInitialized_${selectedBlockchain}`,
+      isInitialized.toString()
+    );
+  }, [isInitialized, selectedBlockchain]);
 
   const resetWalletState = () => {
     setPrivateKey(null);
@@ -135,10 +140,10 @@ const Wallet2 = () => {
     setLog([]);
     setTransactions([]);
     setCombinedHistory([]);
-    localStorage.removeItem("walletPrivateKey");
-    localStorage.removeItem("walletWif");
-    localStorage.removeItem("walletParsedData");
-    localStorage.removeItem("walletIsInitialized");
+    localStorage.removeItem(`walletPrivateKey_${selectedBlockchain}`);
+    localStorage.removeItem(`walletWif_${selectedBlockchain}`);
+    localStorage.removeItem(`walletParsedData_${selectedBlockchain}`);
+    localStorage.removeItem(`walletIsInitialized_${selectedBlockchain}`);
     notifications.show({
       title: "Wallet Reset",
       message:
@@ -147,37 +152,19 @@ const Wallet2 = () => {
     });
   };
 
-  const fetchFeeEstimate = async () => {
-    try {
-      const response = await axios.get(
-        `${import.meta.env.VITE_API_URL}/fee-estimate`
-      );
-      setFeeEstimate(response.data);
-    } catch (error) {
-      console.error("Error fetching fee estimate:", error);
-      notifications.show({
-        title: "Error",
-        message: "Failed to load fee estimate",
-        color: "red",
-      });
-    }
-  };
-
   useEffect(() => {
-    if (privateKey && isInitialized) {
+    if (privateKey && isInitialized && selectedToken) {
       walletManager.buildTransactionHistory();
-      fetchFeeEstimate();
+      walletManager.fetchFeeEstimate();
     }
-  }, [privateKey, isInitialized]);
+  }, [privateKey, isInitialized, selectedToken]);
 
-  // Fetch history on initialization or key change (unchanged)
   useEffect(() => {
     if (privateKey && isInitialized) {
       walletManager.buildTransactionHistory();
     }
   }, [privateKey, isInitialized]);
 
-  // Check initialization status (unchanged)
   useEffect(() => {
     if (privateKey && !isInitialized && !isSubmitting && parsedData) {
       walletManager.checkStatus();
@@ -188,37 +175,6 @@ const Wallet2 = () => {
     walletManager.fetchBalance();
   }, [privateKey, isInitialized, log]);
 
-  // Capture QR code (unchanged)
-  const capture = () => {
-    return new Promise((resolve, reject) => {
-      const imageSrc = webcamRef.current?.getScreenshot();
-      if (!imageSrc) {
-        reject(new Error("Failed to capture image from webcam"));
-        return;
-      }
-
-      const img = new Image();
-      img.src = imageSrc;
-      img.onload = () => {
-        const canvas = document.createElement("canvas");
-        canvas.width = img.width;
-        canvas.height = img.height;
-        const ctx = canvas.getContext("2d");
-        ctx.drawImage(img, 0, 0, img.width, img.height);
-        const imageData = ctx.getImageData(0, 0, img.width, img.height);
-        const code = jsQR(imageData.data, imageData.width, imageData.height);
-
-        if (code) {
-          resolve(code.data);
-        } else {
-          reject(new Error("No QR code found"));
-        }
-      };
-      img.onerror = () => reject(new Error("Failed to load captured image"));
-    });
-  };
-
-  // Handle key scan (unchanged)
   const handleKeyScan = async () => {
     try {
       setIsScannerOpen(true);
@@ -228,7 +184,7 @@ const Wallet2 = () => {
 
       while (attempts < maxAttempts) {
         try {
-          qrData = await capture();
+          qrData = await capture(webcamRef);
           break;
         } catch (error) {
           attempts++;
@@ -243,12 +199,12 @@ const Wallet2 = () => {
 
       setIsScannerOpen(false);
       const { newPrivateKey, newParsedData } =
-        await walletManager.processScannedQR(qrData, setLog);
+        await walletManager.processScannedQR(qrData);
 
-      localStorage.removeItem("walletPrivateKey");
-      localStorage.removeItem("walletWif");
-      localStorage.removeItem("walletParsedData");
-      localStorage.removeItem("walletIsInitialized");
+      localStorage.removeItem(`walletPrivateKey_${selectedBlockchain}`);
+      localStorage.removeItem(`walletWif_${selectedBlockchain}`);
+      localStorage.removeItem(`walletParsedData_${selectedBlockchain}`);
+      localStorage.removeItem(`walletIsInitialized_${selectedBlockchain}`);
 
       setPrivateKey(newPrivateKey);
       setWif(newParsedData.wif);
@@ -285,7 +241,6 @@ const Wallet2 = () => {
     }
   };
 
-  // Recipient management (unchanged)
   const addRecipient = () => {
     setRecipients([...recipients, { address: "", amount: "" }]);
   };
@@ -299,7 +254,7 @@ const Wallet2 = () => {
   const updateRecipient = (index, field, value) => {
     const updatedRecipients = [...recipients];
     updatedRecipients[index][field] =
-      field === "amount" ? value.toString() : value;
+      field === "amount" ? value.toString() : value.trim();
     setRecipients(updatedRecipients);
   };
 
@@ -323,14 +278,19 @@ const Wallet2 = () => {
         });
     }
   };
-  const handleSignTransaction = useCallback(() => {
-    const go = async () => {
-      await walletManager.signTransaction();
-    };
-    go();
-  }, [walletManager]);
 
-  // Pagination (unchanged)
+  const handleSignTransaction = async () => {
+    try {
+      await walletManager.signTransaction();
+    } catch (error) {
+      notifications.show({
+        title: "Error",
+        message: error.message || "Failed to sign transaction",
+        color: "red",
+      });
+    }
+  };
+
   const totalItems = combinedHistory.length;
   const totalPages = Math.ceil(totalItems / ITEMS_PER_PAGE);
   const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
@@ -338,109 +298,127 @@ const Wallet2 = () => {
   const paginatedHistory = combinedHistory.slice(startIndex, endIndex);
 
   return (
-    <Container size="lg" py="xl">
-      <Notifications position="top-center" />
-      <Card
-        shadow="sm"
-        padding="lg"
-        radius="md"
-        withBorder
-        styles={styles.card}
-      >
-        <WalletHeader styles={styles} />
-        <WalletStateHandler
-          privateKey={privateKey}
-          isSubmitting={isSubmitting}
-          isInitialized={isInitialized}
-          parsedData={parsedData}
-          log={log}
-          onScanKey={handleKeyScan}
-          onReset={resetWalletState}
-          styles={styles}
-        />
-        {privateKey && isInitialized && (
-          <>
-            {balance !== null && (
-              <WalletBalance
-                balance={balance}
-                parsedData={parsedData}
-                log={log}
-                onRefresh={() => {
-                  walletManager.fetchBalance();
-                  walletManager.buildTransactionHistory();
-                }}
-                onCopyAddress={copyAddressToClipboard}
-                onShowQR={() => setIsQRModalOpen(true)}
-                styles={styles}
-              />
+    <AppShell
+      navbar={{
+        width: 300,
+        breakpoint: "sm",
+        collapsed: { mobile: !isScannerOpen && !isQRModalOpen },
+      }}
+      padding="md"
+    >
+      <AppShell.Navbar p="md">
+        <BlockchainNav />
+      </AppShell.Navbar>
+      <AppShell.Main>
+        <Container size="lg" py="xl">
+          <Notifications position="top-center" />
+          <Card
+            shadow="sm"
+            padding="lg"
+            radius="md"
+            withBorder
+            styles={styles.card}
+          >
+            <WalletHeader styles={styles} />
+            <TokenSelector /> {/* Add TokenSelector component */}
+            {selectedToken && ( // Only render wallet details if a token is selected
+              <>
+                <WalletStateHandler
+                  privateKey={privateKey}
+                  isSubmitting={isSubmitting}
+                  isInitialized={isInitialized}
+                  parsedData={parsedData}
+                  log={log}
+                  onScanKey={handleKeyScan}
+                  onReset={resetWalletState}
+                  styles={styles}
+                />
+                {privateKey && isInitialized && (
+                  <>
+                    {balance !== null && (
+                      <WalletBalance
+                        balance={balance}
+                        parsedData={parsedData}
+                        log={log}
+                        onRefresh={() => {
+                          walletManager.fetchBalance();
+                          walletManager.buildTransactionHistory();
+                        }}
+                        onCopyAddress={copyAddressToClipboard}
+                        onShowQR={() => setIsQRModalOpen(true)}
+                        styles={styles}
+                      />
+                    )}
+                    <Text mb="md">
+                      {parsedData.rotation === log.length
+                        ? `Wallet is ready. You can send transactions with this key (rotation ${parsedData.rotation}).`
+                        : `Please scan the next key (rotation ${log.length}) to sign transactions.`}
+                    </Text>
+                    <Button
+                      onClick={handleKeyScan}
+                      disabled={log.length === parsedData.rotation}
+                      color="teal"
+                      variant="outline"
+                      mt="md"
+                    >
+                      Scan Next Key (Rotation: {log.length})
+                    </Button>
+                    {parsedData.rotation === log.length && (
+                      <TransactionForm
+                        recipients={recipients}
+                        onAddRecipient={addRecipient}
+                        onRemoveRecipient={removeRecipient}
+                        onUpdateRecipient={updateRecipient}
+                        onSendTransaction={handleSignTransaction}
+                        setFocusedRotation={setFocusedRotation}
+                        styles={styles}
+                        feeEstimate={feeEstimate}
+                      />
+                    )}
+                    {combinedHistory.length > 0 && (
+                      <TransactionHistory
+                        combinedHistory={paginatedHistory}
+                        currentPage={currentPage}
+                        totalPages={totalPages}
+                        onPageChange={setCurrentPage}
+                        styles={styles}
+                      />
+                    )}
+                  </>
+                )}
+              </>
             )}
-            <Text mb="md">
-              {parsedData.rotation === log.length
-                ? `Wallet is ready. You can send transactions with this key (rotation ${parsedData.rotation}).`
-                : `Please scan the next key (rotation ${log.length}) to sign transactions.`}
-            </Text>
             <Button
-              onClick={handleKeyScan}
-              disabled={log.length === parsedData.rotation}
-              color="teal"
+              onClick={resetWalletState}
+              color="red"
               variant="outline"
-              mt="md"
+              mt="xl"
             >
-              Scan Next Key (Rotation: {log.length})
+              Erase Wallet Cache
             </Button>
-            {parsedData.rotation === log.length && (
-              <TransactionForm
-                recipients={recipients}
-                onAddRecipient={addRecipient}
-                onRemoveRecipient={removeRecipient}
-                onUpdateRecipient={updateRecipient}
-                onSendTransaction={handleSignTransaction}
-                setFocusedRotation={setFocusedRotation}
-                styles={styles}
-                feeEstimate={feeEstimate}
-              />
-            )}
-            {combinedHistory.length > 0 && (
-              <TransactionHistory
-                combinedHistory={paginatedHistory}
-                currentPage={currentPage}
-                totalPages={totalPages}
-                onPageChange={setCurrentPage}
-                styles={styles}
-              />
-            )}
-          </>
-        )}
-
-        <Button
-          onClick={resetWalletState}
-          color="red"
-          variant="outline"
-          mt="xl"
-        >
-          Erase Wallet Cache
-        </Button>
-        <QRScannerModal
-          isOpen={isScannerOpen}
-          onClose={() => {
-            setIsScannerOpen(false);
-            setIsTransactionFlow(false);
-          }}
-          webcamRef={webcamRef}
-          parsedData={parsedData}
-          log={log}
-          styles={styles}
-          isTransactionFlow={isTransactionFlow}
-        />
-        <QRDisplayModal
-          isOpen={isQRModalOpen}
-          onClose={() => setIsQRModalOpen(false)}
-          parsedData={parsedData}
-          log={log}
-          styles={styles}
-        />
-      </Card>
-    </Container>
+            <QRScannerModal
+              isOpen={isScannerOpen}
+              onClose={() => {
+                setIsScannerOpen(false);
+                setIsTransactionFlow(false);
+              }}
+              webcamRef={webcamRef}
+              parsedData={parsedData}
+              log={log}
+              styles={styles}
+              isTransactionFlow={isTransactionFlow}
+            />
+            <QRDisplayModal
+              isOpen={isQRModalOpen}
+              onClose={() => setIsQRModalOpen(false)}
+              parsedData={parsedData}
+              log={log}
+              styles={styles}
+            />
+          </Card>
+        </Container>
+      </AppShell.Main>
+    </AppShell>
   );
 };
 

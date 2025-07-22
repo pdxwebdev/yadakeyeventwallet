@@ -7,10 +7,13 @@ import {
   getP2PKH,
   validateBitcoinAddress,
 } from "../utils/hdWallet";
+import { Transaction } from "../utils/transaction";
+import { capture } from "../shared/capture";
 
 class YadaCoin {
-  constructor(appContext) {
+  constructor(appContext, webcamRef) {
     this.appContext = appContext;
+    this.webcamRef = webcamRef
   }
 
   async buildTransactionHistory() {
@@ -243,6 +246,22 @@ class YadaCoin {
       });
     }
   }
+
+  async fetchFeeEstimate() {
+    try {
+      const response = await axios.get(
+        `${import.meta.env.VITE_API_URL}/fee-estimate`
+      );
+      setFeeEstimate(response.data);
+    } catch (error) {
+      console.error("Error fetching fee estimate:", error);
+      notifications.show({
+        title: "Error",
+        message: "Failed to load fee estimate",
+        color: "red",
+      });
+    }
+  };
 
   async fetchBalance() {
     const { privateKey, isInitialized, setLoading, setBalance } = this.appContext;
@@ -576,7 +595,7 @@ class YadaCoin {
 
       while (attempts < maxAttempts) {
         try {
-          qrData = await capture();
+          qrData = await capture(this.webcamRef);
           break;
         } catch (error) {
           attempts++;
@@ -727,6 +746,8 @@ class YadaCoin {
           "No confirmed key event log entries found for continuity check"
         );
       }
+
+      
       const isValidContinuity =
         isTransactionFlow && isInitialized
           ? newParsedData.prevPublicKeyHash === parsedData.publicKeyHash &&
