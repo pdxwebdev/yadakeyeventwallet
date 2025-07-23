@@ -49,7 +49,11 @@ const WalletBalance = ({
             Address (Rotation: {log.length > 0 ? log.length : 0})
           </Text>
           <Group spacing="xs" align="center" wrap="wrap">
-            <Text>{parsedData.prerotatedKeyHash}</Text>
+            <Text>
+              {parsedData.rotation != log.length
+                ? parsedData.prerotatedKeyHash
+                : parsedData.publicKeyHash}
+            </Text>
             <ActionIcon
               onClick={onCopyAddress}
               color="teal"

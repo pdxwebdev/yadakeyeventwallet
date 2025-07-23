@@ -28,15 +28,15 @@ class YadaBSC {
   }
 
   // Helper to generate EIP-2612 permit
-  async generatePermit(tokenAddress, signer, amount) {
+  async generatePermit(tokenAddress, signer, amount, nonce) {
     // Skip permit generation for BNB (native currency)
     if (tokenAddress.toLowerCase() === "0x0000000000000000000000000000000000000000") {
       console.warn(`Permits not applicable for BNB (${tokenAddress}). Skipping permit generation.`);
       return null;
     }
   
-    const isWrapped = this.appContext.tokenPairs
-      .map((pair) => pair.wrapped.toLowerCase())
+    const isWrapped = this.appContext.supportedTokens
+      .map((token) => token.address.toLowerCase())
       .includes(tokenAddress.toLowerCase());
     const abi = isWrapped ? WRAPPED_TOKEN_ABI : ERC20_ABI;
     const token = new ethers.Contract(tokenAddress, abi, signer);
@@ -70,13 +70,12 @@ class YadaBSC {
         ],
       };
       const owner = await signer.getAddress();
-      const permitNonce = await token.nonces(owner);
       const permitDeadline = Math.floor(Date.now() / 1000) + 60 * 60;
       const message = {
         owner,
         spender: BRIDGE_ADDRESS,
         value: amount.toString(),
-        nonce: permitNonce.toString(),
+        nonce: nonce.toString(),
         deadline: permitDeadline,
       };
       const signature = await signer.signTypedData(domain, types, message);
@@ -687,7 +686,6 @@ async fetchTransactionsForKey(publicKeyHash, rotation, fromBlock, toBlock, selec
   }
 
   // Initializes key event log
-// Initializes key event log
 async initializeKeyEventLog() {
   const { privateKey, setLoading, parsedData } = this.appContext;
   if (!privateKey) return;
@@ -723,10 +721,15 @@ async initializeKeyEventLog() {
           return null;
         }
         try {
-          const tokenContract = new ethers.Contract(tokenAddress, ERC20_ABI, signer);
+          const isWrapped = this.appContext.supportedTokens
+            .map((token) => token.address.toLowerCase())
+            .includes(tokenAddress.toLowerCase());
+          const abi = isWrapped ? WRAPPED_TOKEN_ABI : ERC20_ABI;
+          const tokenContract = new ethers.Contract(tokenAddress, abi, signer);
           const balance = await tokenContract.balanceOf(signer.address);
+          const nonce = await tokenContract.nonces(signer.address);
           if (balance > 0n) {
-            const permit = await this.generatePermit(tokenAddress, signer, balance);
+            const permit = await this.generatePermit(tokenAddress, signer, balance, nonce);
             if (permit) {
               return {
                 token: tokenAddress,
@@ -810,60 +813,386 @@ async initializeKeyEventLog() {
 }
 
 
-  
-async getUserTokensAndPermits(signer, bridge, recipients) {
-  const permits = [];
-  const supportedTokens = await bridge.getSupportedTokens();
-  const deadline = Math.floor(Date.now() / 1000) + 60 * 60; // 1 hour from now
+async signTransaction() {
+  const {
+    privateKey,
+    recipients,
+    parsedData,
+    setIsTransactionFlow,
+    setIsScannerOpen,
+    setParsedData,
+    setRecipients,
+    setLoading,
+    selectedToken,
+    supportedTokens,
+    log,
+    setLog
+  } = this.appContext;
 
-  // Validate recipients
-  if (!Array.isArray(recipients) || recipients.length === 0) {
-    console.warn("No valid recipients provided for permits");
-    return permits;
+  // Validate ethers
+  if (!ethers) {
+    throw new Error('ethers is not defined. Ensure ethers@6.13.5 is imported correctly in YadaBSC.js');
   }
 
-  for (const recipient of recipients) {
-    if (!ethers.isAddress(recipient.address)) {
-      console.warn(`Invalid recipient address: ${recipient.address}`);
-      continue;
-    }
-    if (!recipient.amount || isNaN(recipient.amount) || Number(recipient.amount) <= 0) {
-      console.warn(`Invalid amount for recipient ${recipient.address}: ${recipient.amount}`);
-      continue;
-    }
+  if (!privateKey || recipients.length === 0) {
+    throw new Error('Please connect wallet and provide at least one recipient');
+  }
 
-    for (const tokenAddress of supportedTokens) {
+  const signer = new ethers.Wallet(ethers.hexlify(privateKey.privateKey), localProvider);
+  const address = await signer.getAddress();
+  const token = supportedTokens.find((t) => t.address === selectedToken);
+  if (!token) {
+    throw new Error('Selected token not supported');
+  }
+  const tokenAddress = token.address;
+  const tokenDecimals = token.decimals || 18;
+  const isBNB = tokenAddress.toLowerCase() === '0x0000000000000000000000000000000000000000';
+
+  try {
+    setLoading(true);
+    notifications.show({
+      title: 'Key Rotation Required',
+      message: `Please scan the QR code for the next key (rotation ${log.length + 1}) to proceed.`,
+      color: 'yellow',
+    });
+    setIsTransactionFlow(true);
+    setIsScannerOpen(true);
+
+    let qrData;
+    let attempts = 0;
+    const maxAttempts = 100;
+    while (attempts < maxAttempts) {
       try {
-        const tokenContract = new ethers.Contract(tokenAddress, IERC20_ABI, signer);
-        const balance = await tokenContract.balanceOf(signer.address);
-        const amount = ethers.parseUnits(recipient.amount.toString(), await tokenContract.decimals());
-        
-        if (balance >= amount && amount > 0n) {
-          const permit = await this.generatePermit(tokenAddress, signer, amount);
-          if (permit) {
-            permits.push({
-              token: tokenAddress,
-              amount: amount,
-              deadline: permit.deadline,
-              v: permit.v,
-              r: permit.r,
-              s: permit.s,
-              recipient: recipient.address, // Set recipient to the recipient's address
-            });
-          } else {
-            console.warn(`Skipping permit for token ${tokenAddress} (permit not supported)`);
-          }
-        } else {
-          console.warn(`Insufficient balance for token ${tokenAddress} for recipient ${recipient.address}`);
-        }
+        qrData = await capture(this.webcamRef);
+        break;
       } catch (error) {
-        console.warn(`Error processing token ${tokenAddress} for recipient ${recipient.address}:`, error);
+        attempts++;
+        await new Promise((resolve) => setTimeout(resolve, 300));
       }
     }
-  }
+    if (!qrData) {
+      throw new Error('No QR code scanned within time limit');
+    }
 
-  console.log("Generated permits:", permits); // Debug log
-  return permits;
+    setIsScannerOpen(false);
+    const { newPrivateKey, newParsedData } = await this.processScannedQR(qrData, true);
+    const newSigner = new ethers.Wallet(ethers.hexlify(newPrivateKey.privateKey), localProvider);
+    const newAddress = await newSigner.getAddress();
+
+
+    const bridge = new ethers.Contract(BRIDGE_ADDRESS, BRIDGE_ABI, signer);
+
+    const nonce = await localProvider.getTransactionCount(address, 'latest');
+    const bridgeNonce = await bridge.nonces(address);
+
+    // Calculate total recipient value for the selected token
+    const totalRecipientValue = recipients.reduce((sum, r) => {
+      return sum + ethers.parseUnits(r.amount, tokenDecimals);
+    }, BigInt(0));
+
+    // Calculate remaining token balance (for ERC-20 tokens)
+    let remainingTokenBalance = BigInt(0);
+    if (!isBNB) {
+      const tokenContract = new ethers.Contract(tokenAddress, ERC20_ABI, signer);
+      remainingTokenBalance = await tokenContract.balanceOf(signer.address);
+      remainingTokenBalance = remainingTokenBalance > totalRecipientValue ? remainingTokenBalance - totalRecipientValue : BigInt(0);
+    }
+
+    // Calculate total amount for unconfirmed transaction
+    let unconfirmedAmount = totalRecipientValue;
+    if (!isBNB && remainingTokenBalance > 0) {
+      unconfirmedAmount += remainingTokenBalance;
+    }
+
+    // Calculate BNB amounts
+    const bnbBalance = await localProvider.getBalance(signer.address);
+    const feeData = await localProvider.getFeeData();
+    const gasPrice = feeData.gasPrice; // Cap at 1 gwei
+
+    // Calculate total BNB for recipients
+    let totalBNBToRecipients = BigInt(0);
+    if (isBNB) {
+      totalBNBToRecipients = totalRecipientValue;
+    }
+
+    // Calculate adjusted amounts for permits (subtract recipient amounts before signing)
+    const tokenBalances = new Map();
+    const tokenNonces = new Map();
+    await Promise.all(
+      supportedTokens.map(async (token) => {
+        const tAddress = token.address;
+        if (tAddress.toLowerCase() === '0x0000000000000000000000000000000000000000') {
+          return;
+        }
+        const isWrapped = this.appContext.supportedTokens
+          .map((token) => token.address.toLowerCase())
+          .includes(tAddress.toLowerCase());
+        const abi = isWrapped ? WRAPPED_TOKEN_ABI : ERC20_ABI;
+        const tokenContract = new ethers.Contract(tAddress, abi, signer);
+        const balance = await tokenContract.balanceOf(signer.address);
+        if (balance > 0n) {
+          tokenBalances.set(tAddress, balance);
+          try {
+            const nonce = await tokenContract.nonces(signer.address);
+            tokenNonces.set(tAddress, nonce);
+          } catch (error) {
+            console.warn(`Error querying nonce for token ${tAddress}:`, error);
+          }
+        }
+      })
+    );
+
+    // Calculate recipient amounts per token
+    const recipientTokenAmounts = new Map();
+    recipients.forEach((recipient) => {
+      if (tokenAddress.toLowerCase() === selectedToken.toLowerCase()) {
+        const amount = ethers.parseUnits(recipient.amount, tokenDecimals);
+        recipientTokenAmounts.set(tokenAddress, (recipientTokenAmounts.get(tokenAddress) || BigInt(0)) + amount);
+      }
+    });
+
+    // Adjust permit amounts before generating signatures
+    const adjustedPermitAmounts = new Map();
+    tokenBalances.forEach((balance, tAddress) => {
+      const recipientAmount = recipientTokenAmounts.get(tAddress) || BigInt(0);
+      const adjustedAmount = balance > recipientAmount ? balance - recipientAmount : BigInt(0);
+      adjustedPermitAmounts.set(tAddress, adjustedAmount);
+    });
+
+    // Generate permits for supported tokens (excluding BNB)
+    const permits = await Promise.all(
+      supportedTokens.map(async (token) => {
+        const tAddress = token.address;
+        if (tAddress.toLowerCase() === '0x0000000000000000000000000000000000000000') {
+          return null;
+        }
+        const adjustedAmount = adjustedPermitAmounts.get(tAddress) || BigInt(0);
+        if (adjustedAmount > 0n) {
+          try {
+            const nonce = tokenNonces.get(tAddress) || BigInt(0);
+            const permit = await this.generatePermit(tAddress, signer, adjustedAmount, nonce);
+            if (permit) {
+              tokenNonces.set(tAddress, nonce + BigInt(1));
+              return {
+                token: tAddress,
+                amount: adjustedAmount,
+                deadline: permit.deadline,
+                v: permit.v,
+                r: permit.r,
+                s: permit.s,
+                recipient: newParsedData.prerotatedKeyHash,
+              };
+            }
+          } catch (error) {
+            console.warn(`Error generating permit for token ${tAddress}:`, error);
+          }
+        }
+        return null;
+      })
+    ).then(results => results.filter(permit => permit !== null));
+
+    // Generate permits for recipient transfers
+    let recipientPermits = [];
+    if (isBNB) {
+      recipientPermits = recipients.map(recipient => {
+        const amount = ethers.parseUnits(recipient.amount, tokenDecimals);
+        return {
+          token: ethers.ZeroAddress,
+          amount,
+          deadline: 0,
+          v: 0,
+          r: ethers.ZeroHash,
+          s: ethers.ZeroHash,
+          recipient: recipient.address,
+        };
+      });
+    } else {
+      recipientPermits = await Promise.all(
+        recipients.map(async (recipient) => {
+          const amount = ethers.parseUnits(recipient.amount, tokenDecimals);
+          try {
+            const nonce = tokenNonces.get(tokenAddress) || BigInt(0);
+            const permit = await this.generatePermit(tokenAddress, signer, amount, nonce);
+            if (permit) {
+              tokenNonces.set(tokenAddress, nonce + BigInt(1));
+              return {
+                token: tokenAddress,
+                amount,
+                deadline: permit.deadline,
+                v: permit.v,
+                r: permit.r,
+                s: permit.s,
+                recipient: recipient.address,
+              };
+            }
+            return null;
+          } catch (error) {
+            console.warn(`Error generating permit for recipient ${recipient.address}:`, error);
+            return null;
+          }
+        })
+      ).then(results => results.filter(permit => permit !== null));
+    }
+
+    // Combine all permits
+    permits.push(...recipientPermits);
+
+    // Generate signatures
+    const unconfirmedMessage = ethers.solidityPacked(
+      ['address', 'uint256', 'address', 'uint256'],
+      [tokenAddress, unconfirmedAmount.toString(), parsedData.prerotatedKeyHash, bridgeNonce.toString()]
+    );
+    const unconfirmedMessageHash = ethers.keccak256(unconfirmedMessage);
+    const unconfirmedSignature = await signer.signMessage(ethers.getBytes(unconfirmedMessageHash));
+
+    const confirmingMessage = ethers.solidityPacked(
+      ['address', 'uint256', 'address', 'uint256'],
+      [tokenAddress, '0', newParsedData.prerotatedKeyHash, (bridgeNonce + 1n).toString()]
+    );
+    const confirmingMessageHash = ethers.keccak256(confirmingMessage);
+    const confirmingSignature = await newSigner.signMessage(ethers.getBytes(confirmingMessageHash));
+
+    const currentPublicKey = decompressPublicKey(Buffer.from(privateKey.publicKey)).slice(1);
+    const nextPublicKey = decompressPublicKey(Buffer.from(newPrivateKey.publicKey)).slice(1);
+
+    // Verify public key and signature
+    console.log('nextPublicKey:', Buffer.from(nextPublicKey).toString('hex'));
+    console.log('nextPublicKey Length:', nextPublicKey.length);
+    const computedConfirmingAddress = ethers.computeAddress(`0x04${Buffer.from(nextPublicKey).toString('hex')}`);
+    if (computedConfirmingAddress.toLowerCase() !== newAddress.toLowerCase()) {
+      throw new Error(`Public key mismatch: computed ${computedConfirmingAddress}, expected ${newAddress}`);
+    }
+    const confirmingRecovered = ethers.verifyMessage(ethers.getBytes(confirmingMessageHash), confirmingSignature);
+    if (confirmingRecovered.toLowerCase() !== newAddress.toLowerCase()) {
+      throw new Error(`Signature mismatch: recovered ${confirmingRecovered}, expected ${newAddress}`);
+    }
+
+    // Define txParams
+    const txParams = [
+      {
+        amount: unconfirmedAmount,
+        signature: unconfirmedSignature,
+        publicKey: Buffer.from(currentPublicKey),
+        prerotatedKeyHash: parsedData.prerotatedKeyHash,
+        twicePrerotatedKeyHash: parsedData.twicePrerotatedKeyHash,
+        prevPublicKeyHash: parsedData.prevPublicKeyHash,
+        outputAddress: parsedData.prerotatedKeyHash,
+        hasRelationship: true,
+        tokenSource: address,
+        permits: permits,
+      },
+      {
+        amount: BigInt(0),
+        signature: confirmingSignature,
+        publicKey: Buffer.from(nextPublicKey),
+        prerotatedKeyHash: newParsedData.prerotatedKeyHash,
+        twicePrerotatedKeyHash: newParsedData.twicePrerotatedKeyHash,
+        prevPublicKeyHash: newParsedData.prevPublicKeyHash,
+        outputAddress: newParsedData.prerotatedKeyHash,
+        hasRelationship: false,
+        tokenSource: newAddress,
+        permits: [],
+      },
+    ];
+
+    // Log permits for debugging
+    console.log('Permits:', permits);
+
+    // Estimate gas
+    let gasEstimate;
+    try {
+      gasEstimate = await bridge.registerKeyPairWithTransfer.estimateGas(...txParams, { value: bnbBalance - gasPrice });
+      console.log('Gas Estimate:', gasEstimate.toString());
+    } catch (error) {
+      console.error('Gas Estimation Error:', error);
+      throw new Error(`Gas estimation failed: ${error.message}`);
+    }
+
+    // Calculate gas cost and limit
+    const gasCost = gasEstimate * gasPrice;
+
+    // Calculate remaining BNB for logging, but don't include in msg.value
+    const remainingBNB = bnbBalance > totalBNBToRecipients + gasCost ? bnbBalance - totalBNBToRecipients - gasCost : BigInt(0);
+    const remainingBNBBalance = remainingBNB;
+
+    // Log for debugging
+    console.log({
+      senderAddress: address,
+      newAddress: newAddress,
+      bnbBalance: ethers.formatEther(bnbBalance),
+      totalBNBToRecipients: ethers.formatEther(totalBNBToRecipients),
+      remainingBNBBalance: ethers.formatEther(remainingBNBBalance),
+      gasCost: ethers.formatEther(gasCost),
+      gasPrice: ethers.formatUnits(gasPrice, 'gwei'),
+      totalRecipientValue: ethers.formatUnits(totalRecipientValue, tokenDecimals),
+      remainingTokenBalance: isBNB ? 'N/A' : ethers.formatUnits(remainingTokenBalance, tokenDecimals),
+      unconfirmedAmount: ethers.formatUnits(unconfirmedAmount, tokenDecimals),
+      permits,
+      recipientAddresses: recipients.map(r => r.address),
+      recipientAmounts: recipients.map(r => r.amount),
+      unconfirmedOutputAddress: parsedData.prerotatedKeyHash,
+      confirmingOutputAddress: newParsedData.prerotatedKeyHash,
+      bridgeNonce: bridgeNonce.toString(),
+    });
+
+    // Submit transaction with only totalBNBToRecipients as value
+    const tx = await bridge.registerKeyPairWithTransfer(...txParams, {
+      nonce,
+      value: remainingBNBBalance, 
+      gasPrice,
+    });
+    const receipt = await tx.wait();
+
+    // Log transaction receipt
+    console.log({
+      transactionHash: receipt.transactionHash,
+      status: receipt.status,
+      to: receipt.to,
+      from: receipt.from,
+      gasUsed: receipt.gasUsed.toString(),
+      EthTransferredEvents: receipt.logs
+        .filter(log => log.address === BRIDGE_ADDRESS)
+        .map(log => {
+          try {
+            const parsed = bridge.interface.parseLog(log);
+            return parsed.name === 'EthTransferred' ? {
+              from: parsed.args.from,
+              to: parsed.args.to,
+              amount: ethers.formatEther(parsed.args.amount),
+            } : null;
+          } catch (e) {
+            return null;
+          }
+        })
+        .filter(event => event),
+    });
+
+    // Update key log
+    const keyLogRegistry = new ethers.Contract(KEYLOG_REGISTRY_ADDRESS, KEYLOG_REGISTRY_ABI, newSigner);
+    const updatedLog = await keyLogRegistry.buildFromPublicKey(
+      decompressPublicKey(Buffer.from(newPrivateKey.publicKey)).slice(1)
+    );
+    setLog(updatedLog);
+    setParsedData(newParsedData);
+    setRecipients([{ address: '', amount: '' }]);
+    setIsTransactionFlow(false);
+
+    notifications.show({
+      title: 'Success',
+      message: 'Transaction and key rotation submitted successfully.',
+      color: 'green',
+    });
+  } catch (error) {
+    console.error('Transaction error:', error);
+    notifications.show({
+      title: 'Error',
+      message: error.message || 'Failed to process transaction.',
+      color: 'red',
+    });
+    setIsScannerOpen(false);
+  } finally {
+    setLoading(false);
+  }
 }
 
   // Processes QR code in YadaCoin format: wifString|prerotatedKeyHash|twicePrerotatedKeyHash|prevPublicKeyHash|rotation
@@ -908,7 +1237,7 @@ async getUserTokensAndPermits(signer, bridge, recipients) {
       const keyLogRegistry = new ethers.Contract(
         KEYLOG_REGISTRY_ADDRESS,
         KEYLOG_REGISTRY_ABI,
-        signer
+        signer2
       );
       const log = await keyLogRegistry.buildFromPublicKey(
         decompressPublicKey(Buffer.from(privateKey ? privateKey.publicKey : newWallet.publicKey)).slice(1)
@@ -928,275 +1257,6 @@ async getUserTokensAndPermits(signer, bridge, recipients) {
       throw error;
     }
   }
-
-  // Signs and submits a token transfer with key rotation
-async signTransaction() {
-  const {
-    privateKey,
-    recipients,
-    parsedData,
-    setIsTransactionFlow,
-    setIsScannerOpen,
-    setParsedData,
-    setRecipients,
-    setLoading,
-    selectedToken,
-    supportedTokens,
-    log,
-    setLog
-  } = this.appContext;
-
-  if (!privateKey || recipients.length === 0) {
-    throw new Error("Please connect wallet and provide at least one recipient");
-  }
-
-  const signer = new ethers.Wallet(ethers.hexlify(privateKey.privateKey), localProvider);
-  const address = await signer.getAddress();
-
-  // Validate recipients
-  const invalidRecipient = recipients.find(
-    (r) => !r.address || !r.amount || isNaN(r.amount) || Number(r.amount) <= 0 || !ethers.isAddress(r.address)
-  );
-  if (invalidRecipient) {
-    throw new Error(`Invalid recipient: ${JSON.stringify(invalidRecipient)}`);
-  }
-
-  const bridge = new ethers.Contract(BRIDGE_ADDRESS, BRIDGE_ABI, signer);
-  const token = supportedTokens.find((token) => token.address === selectedToken);
-  if (!token) {
-    throw new Error("Selected token not supported");
-  }
-  const tokenAddress = token.address;
-  const isBNB = tokenAddress.toLowerCase() === "0x0000000000000000000000000000000000000000";
-  const tokenDecimals = 18;
-
-  try {
-    setLoading(true);
-    notifications.show({
-      title: "Key Rotation Required",
-      message: `Please scan the QR code for the next key (rotation ${log.length + 1}) to proceed.`,
-      color: "yellow",
-    });
-    setIsTransactionFlow(true);
-    setIsScannerOpen(true);
-
-    let qrData;
-    let attempts = 0;
-    const maxAttempts = 100;
-    while (attempts < maxAttempts) {
-      try {
-        qrData = await capture(this.webcamRef);
-        break;
-      } catch (error) {
-        attempts++;
-        await new Promise((resolve) => setTimeout(resolve, 300));
-      }
-    }
-    if (!qrData) {
-      throw new Error("No QR code scanned within time limit");
-    }
-
-    setIsScannerOpen(false);
-    const { newParsedData } = await this.processScannedQR(qrData, true);
-
-    const nonce = await localProvider.getTransactionCount(address, "latest");
-    const bridgeNonce = await bridge.nonces(address);
-
-    // Calculate total BNB amount and prepare permits
-    let recipientPermits = [];
-    let totalBNBAmount = BigInt(0);
-    if (isBNB) {
-      totalBNBAmount = recipients.reduce(
-        (sum, r) => {
-          if (!r.amount || isNaN(r.amount) || Number(r.amount) <= 0) {
-            throw new Error(`Invalid amount for recipient ${r.address}: ${r.amount}`);
-          }
-          return sum + ethers.parseUnits(r.amount.toString(), tokenDecimals);
-        },
-        BigInt(0)
-      );
-      recipientPermits = recipients.map(r => ({
-        token: tokenAddress,
-        amount: ethers.parseUnits(r.amount.toString(), tokenDecimals),
-        deadline: 0,
-        v: 0,
-        r: ethers.ZeroHash,
-        s: ethers.ZeroHash,
-        recipient: r.address,
-      }));
-    } else {
-      // Handle ERC-20 tokens (unchanged)
-      recipientPermits = await Promise.all(
-        recipients.map(async (recipient) => {
-          const amount = ethers.parseUnits(recipient.amount.toString(), tokenDecimals);
-          const permit = await this.generatePermit(tokenAddress, signer, amount);
-          if (!permit) {
-            throw new Error(`Failed to generate permit for ${recipient.address}`);
-          }
-          return { ...permit, recipient: recipient.address };
-        })
-      );
-    }
-
-    // Generate signatures
-    const signatureAmount = isBNB ? totalBNBAmount : BigInt(0);
-    const unconfirmedMessage = ethers.solidityPacked(
-      ["address", "uint256", "address", "uint256"],
-      [tokenAddress, signatureAmount.toString(), parsedData.prerotatedKeyHash, bridgeNonce.toString()]
-    );
-    const unconfirmedMessageHash = ethers.keccak256(unconfirmedMessage);
-    const unconfirmedSignature = await signer.signMessage(ethers.getBytes(unconfirmedMessageHash));
-
-    const confirmingMessage = ethers.solidityPacked(
-      ["address", "uint256", "address", "uint256"],
-      [tokenAddress, "0", newParsedData.prerotatedKeyHash, (bridgeNonce + 1n).toString()]
-    );
-    const confirmingMessageHash = ethers.keccak256(confirmingMessage);
-    const confirmingSignature = await signer.signMessage(ethers.getBytes(confirmingMessageHash));
-
-    const currentPublicKey = decompressPublicKey(Buffer.from(privateKey.publicKey)).slice(1);
-    const nextPublicKey = decompressPublicKey(Buffer.from(newParsedData.publicKey)).slice(1);
-
-    // Define txParams
-    const txParams = [
-      {
-        amount: BigInt(0),
-        signature: unconfirmedSignature,
-        publicKey: Buffer.from(currentPublicKey),
-        prerotatedKeyHash: parsedData.prerotatedKeyHash,
-        twicePrerotatedKeyHash: parsedData.twicePrerotatedKeyHash,
-        prevPublicKeyHash: parsedData.prevPublicKeyHash,
-        outputAddress: parsedData.prerotatedKeyHash,
-        hasRelationship: true,
-        tokenSource: address,
-        permits: recipientPermits,
-      },
-      {
-        amount: BigInt(0),
-        signature: confirmingSignature,
-        publicKey: Buffer.from(nextPublicKey),
-        prerotatedKeyHash: newParsedData.prerotatedKeyHash,
-        twicePrerotatedKeyHash: newParsedData.twicePrerotatedKeyHash,
-        prevPublicKeyHash: newParsedData.prevPublicKeyHash,
-        outputAddress: newParsedData.prerotatedKeyHash,
-        hasRelationship: false,
-        tokenSource: address,
-        permits: [],
-      },
-    ];
-
-    // Calculate gas cost
-    const ethBalance = await localProvider.getBalance(address);
-    const feeData = await localProvider.getFeeData();
-    const gasPrice = feeData.gasPrice > ethers.parseUnits("5", "gwei") ? ethers.parseUnits("5", "gwei") : feeData.gasPrice;
-    const gasEstimate = await bridge.registerKeyPairWithTransfer.estimateGas(...txParams, { value: totalBNBAmount });
-    const gasCost = gasEstimate * gasPrice;
-    const gasLimit = (gasEstimate * 110n) / 100n;
-    const gasBuffer = ethers.parseEther("0.002");
-
-    // Calculate total value
-    const remainingBNBBalance = isBNB && ethBalance > totalBNBAmount + gasBuffer
-      ? ethBalance - totalBNBAmount - gasBuffer
-      : BigInt(0);
-    const totalValue = isBNB ? totalBNBAmount + remainingBNBBalance : BigInt(0);
-
-    // Validate balance
-    if (ethBalance < gasCost + totalValue) {
-      throw new Error(
-        `Insufficient BNB balance: ${ethers.formatEther(ethBalance)} BNB. Required: ${ethers.formatEther(gasCost + totalValue)} BNB`
-      );
-    }
-
-    // Log for debugging
-    console.log({
-      senderAddress: address,
-      totalBNBAmount: ethers.formatEther(totalBNBAmount),
-      remainingBNBBalance: ethers.formatEther(remainingBNBBalance),
-      totalValue: ethers.formatEther(totalValue),
-      ethBalance: ethers.formatEther(ethBalance),
-      gasCost: ethers.formatEther(gasCost),
-      gasLimit: gasLimit.toString(),
-      permits: recipientPermits,
-      recipientAddresses: recipients.map(r => r.address),
-      recipientAmounts: recipients.map(r => r.amount),
-      unconfirmedOutputAddress: parsedData.prerotatedKeyHash,
-      confirmingOutputAddress: newParsedData.prerotatedKeyHash,
-      bridgeNonce: bridgeNonce.toString(),
-    });
-
-    // Submit transaction
-    const tx = await bridge.registerKeyPairWithTransfer(...txParams, {
-      nonce,
-      value: totalValue,
-      gasLimit,
-      gasPrice,
-    });
-    const receipt = await tx.wait();
-
-    // Log transaction receipt
-    console.log({
-      transactionHash: receipt.transactionHash,
-      status: receipt.status,
-      to: receipt.to,
-      from: receipt.from,
-      gasUsed: receipt.gasUsed.toString(),
-      EthTransferredEvents: receipt.logs
-        .filter(log => log.address === BRIDGE_ADDRESS)
-        .map(log => {
-          try {
-            const parsed = bridge.interface.parseLog(log);
-            return parsed.name === "EthTransferred" ? {
-              from: parsed.args.from,
-              to: parsed.args.to,
-              amount: ethers.formatEther(parsed.args.amount),
-            } : null;
-          } catch (e) {
-            return null;
-          }
-        })
-        .filter(event => event),
-      DebugStepEvents: receipt.logs
-        .filter(log => log.address === BRIDGE_ADDRESS)
-        .map(log => {
-          try {
-            const parsed = bridge.interface.parseLog(log);
-            return parsed.name === "DebugStep" ? {
-              step: parsed.args.step,
-              value: parsed.args.value.toString(),
-            } : null;
-          } catch (e) {
-            return null;
-          }
-        })
-        .filter(event => event),
-    });
-
-    // Update key log
-    const keyLogRegistry = new ethers.Contract(KEYLOG_REGISTRY_ADDRESS, KEYLOG_REGISTRY_ABI, signer);
-    const publicKey = Buffer.from(signer.signingKey.publicKey.slice(2), 'hex').slice(1);
-    const updatedLog = await keyLogRegistry.buildFromPublicKey(publicKey);
-    setLog(updatedLog);
-    setParsedData(newParsedData);
-    setRecipients([{ address: "", amount: "" }]);
-    setIsTransactionFlow(false);
-
-    notifications.show({
-      title: "Success",
-      message: "Transaction and key rotation submitted successfully.",
-      color: "green",
-    });
-  } catch (error) {
-    console.error("Transaction error:", error);
-    notifications.show({
-      title: "Error",
-      message: error.message || "Failed to process transaction.",
-      color: "red",
-    });
-    setIsScannerOpen(false);
-  } finally {
-    setLoading(false);
-  }
-}
 
   // Validates key continuity
   validateKeyContinuity(newParsedData, fetchedLog, isTransactionFlow) {
