@@ -32,7 +32,6 @@ export const BLOCKCHAINS = [
     name: 'Binance Smart Chain (BSC)',
     chainId: 31337, // BSC mainnet
     bridgeAddress: BRIDGE_ADDRESS, // Replace with actual BSC bridge address
-    keyLogRegistryAddress: '0xYourBSCKeyLogRegistryAddressHere',
     providerUrl: 'http://localhost:8545', // BSC RPC URL
   },
   // {

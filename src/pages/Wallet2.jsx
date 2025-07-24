@@ -16,6 +16,7 @@ import { styles } from "../shared/styles";
 import { fromWIF, getP2PKH } from "../utils/hdWallet";
 import TokenSelector from "../components/Wallet2/TokenSelector";
 import { capture } from "../shared/capture";
+import { BLOCKCHAINS } from "../shared/constants";
 
 const ITEMS_PER_PAGE = 5;
 
@@ -83,19 +84,39 @@ const Wallet2 = () => {
       try {
         const privateKeyObj = fromWIF(storedWif);
         const parsed = JSON.parse(storedParsedData);
-        setPrivateKey(privateKeyObj);
-        setWif(storedWif);
-        setParsedData({ ...parsed });
-        setIsInitialized(storedIsInitialized === "true");
+        // Only set state if parsedData matches the current blockchain
+        if (parsed.blockchain === selectedBlockchain) {
+          setPrivateKey(privateKeyObj);
+          setWif(storedWif);
+          setParsedData({ ...parsed });
+          setIsInitialized(storedIsInitialized === "true");
+        } else {
+          // Clear in-memory state for mismatch but preserve localStorage
+          setPrivateKey(null);
+          setWif("");
+          setParsedData(null);
+          setIsInitialized(false);
+        }
       } catch (error) {
         console.error("Error restoring private key:", error);
+        // Clear in-memory state on error but preserve localStorage
+        setPrivateKey(null);
+        setWif("");
+        setParsedData(null);
+        setIsInitialized(false);
       }
+    } else {
+      // No data for this blockchain, initialize empty state
+      setPrivateKey(null);
+      setWif("");
+      setParsedData(null);
+      setIsInitialized(false);
     }
   }, [selectedBlockchain]);
 
   // Save state to localStorage
   useEffect(() => {
-    if (privateKey) {
+    if (privateKey && parsedData?.blockchain === selectedBlockchain) {
       localStorage.setItem(
         `walletPrivateKey_${selectedBlockchain}`,
         JSON.stringify(privateKey)
@@ -103,18 +124,18 @@ const Wallet2 = () => {
     } else {
       localStorage.removeItem(`walletPrivateKey_${selectedBlockchain}`);
     }
-  }, [privateKey, selectedBlockchain]);
+  }, [privateKey, parsedData, selectedBlockchain]);
 
   useEffect(() => {
-    if (wif) {
+    if (wif && parsedData?.blockchain === selectedBlockchain) {
       localStorage.setItem(`walletWif_${selectedBlockchain}`, wif);
     } else {
       localStorage.removeItem(`walletWif_${selectedBlockchain}`);
     }
-  }, [wif, selectedBlockchain]);
+  }, [wif, parsedData, selectedBlockchain]);
 
   useEffect(() => {
-    if (parsedData) {
+    if (parsedData && parsedData.blockchain === selectedBlockchain) {
       const { ...dataToStore } = parsedData;
       localStorage.setItem(
         `walletParsedData_${selectedBlockchain}`,
@@ -126,11 +147,15 @@ const Wallet2 = () => {
   }, [parsedData, selectedBlockchain]);
 
   useEffect(() => {
-    localStorage.setItem(
-      `walletIsInitialized_${selectedBlockchain}`,
-      isInitialized.toString()
-    );
-  }, [isInitialized, selectedBlockchain]);
+    if (parsedData?.blockchain === selectedBlockchain) {
+      localStorage.setItem(
+        `walletIsInitialized_${selectedBlockchain}`,
+        isInitialized.toString()
+      );
+    } else {
+      localStorage.removeItem(`walletIsInitialized_${selectedBlockchain}`);
+    }
+  }, [isInitialized, parsedData, selectedBlockchain]);
 
   const resetWalletState = () => {
     setPrivateKey(null);
@@ -140,6 +165,9 @@ const Wallet2 = () => {
     setLog([]);
     setTransactions([]);
     setCombinedHistory([]);
+    setBalance(null);
+    setRecipients([{ address: "", amount: "" }]);
+    setFeeEstimate(null);
     localStorage.removeItem(`walletPrivateKey_${selectedBlockchain}`);
     localStorage.removeItem(`walletWif_${selectedBlockchain}`);
     localStorage.removeItem(`walletParsedData_${selectedBlockchain}`);
@@ -296,7 +324,9 @@ const Wallet2 = () => {
   const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
   const endIndex = startIndex + ITEMS_PER_PAGE;
   const paginatedHistory = combinedHistory.slice(startIndex, endIndex);
-
+  const selectedBlockchainObject = BLOCKCHAINS.find((item) => {
+    return item.id === selectedBlockchain;
+  });
   return (
     <AppShell
       navbar={{
@@ -320,7 +350,7 @@ const Wallet2 = () => {
             styles={styles.card}
           >
             <WalletHeader styles={styles} />
-            <TokenSelector /> {/* Add TokenSelector component */}
+            {selectedBlockchainObject.bridgeAddress && <TokenSelector />}
             {selectedToken && ( // Only render wallet details if a token is selected
               <>
                 <WalletStateHandler

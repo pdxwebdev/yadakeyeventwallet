@@ -248,6 +248,7 @@ class YadaCoin {
   }
 
   async fetchFeeEstimate() {
+    const { setFeeEstimate } = this.appContext;
     try {
       const response = await axios.get(
         `${import.meta.env.VITE_API_URL}/fee-estimate`
@@ -264,7 +265,8 @@ class YadaCoin {
   };
 
   async fetchBalance() {
-    const { privateKey, isInitialized, setLoading, setBalance } = this.appContext;
+    const { privateKey, isInitialized, setLoading, setBalance, setSymbol } = this.appContext;
+    setSymbol('yda')
 
     if (privateKey && isInitialized) {
       try {
@@ -523,6 +525,7 @@ class YadaCoin {
         twicePrerotatedKeyHash,
         prevPublicKeyHash,
         rotation: parseInt(rotation, 10),
+        blockchain: 'yda',
       };
 
       const { isValidKey, log: fetchedLog } = await this.getKeyLog(newPrivateKey);

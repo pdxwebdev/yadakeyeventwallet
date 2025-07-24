@@ -15,6 +15,7 @@ import WrappedTokenArtifact from "../utils/abis/WrappedToken.json";
 import { getKeyState } from "../shared/keystate";
 import axios from "axios";
 import { capture } from "../shared/capture";
+import { useMemo } from "react";
 
 const BRIDGE_ABI = BridgeArtifact.abi;
 const KEYLOG_REGISTRY_ABI = KeyLogRegistryArtifact.abi;
@@ -633,7 +634,7 @@ async fetchTransactionsForKey(publicKeyHash, rotation, fromBlock, toBlock, selec
 
   // Fetches token balances
   async fetchBalance() {
-    const { privateKey, selectedToken, setLoading, setBalance } = this.appContext;
+    const { privateKey, selectedToken, setLoading, setBalance, setSymbol, supportedTokens } = this.appContext;
     if (!privateKey || !selectedToken) return;
 
     const signer = new ethers.Wallet(ethers.hexlify(privateKey.privateKey), localProvider);
@@ -643,12 +644,18 @@ async fetchTransactionsForKey(publicKeyHash, rotation, fromBlock, toBlock, selec
       let totalBalance = BigInt(0);
 
       if (selectedToken === ethers.ZeroAddress) {
+
+        setSymbol('bnb');
         // Fetch native coin (BNB) balance
         const nativeBalance = await localProvider.getBalance(address);
         totalBalance += nativeBalance;
       } else {
         // Fetch ERC20 token balance
         const bridge = new ethers.Contract(BRIDGE_ADDRESS, BRIDGE_ABI, signer);
+
+        const token = supportedTokens.find(item => item.address === selectedToken)
+        setSymbol(token.symbol);
+
         const tokenContract = new ethers.Contract(selectedToken, ERC20_ABI, signer);
         const balance = await tokenContract.balanceOf(address);
         totalBalance += balance;
@@ -1231,6 +1238,7 @@ async signTransaction() {
         prevPublicKeyHash: prevPublicKeyHash || ethers.ZeroAddress,
         rotation: parseInt(rotation, 10),
         wif: wifString,
+        blockchain: 'bsc',
       };
 
       // Fetch key log from KeyLogRegistry

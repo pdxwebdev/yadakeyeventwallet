@@ -11,10 +11,7 @@ const WalletBalance = ({
   onShowQR,
   styles,
 }) => {
-  const { selectedToken, supportedTokens } = useAppContext();
-  const token = supportedTokens.find((item) => {
-    return item.address === selectedToken;
-  });
+  const { symbol } = useAppContext();
   return (
     <Card shadow="xs" padding="md" mb="md" styles={styles?.nestedCard}>
       <Flex
@@ -31,7 +28,7 @@ const WalletBalance = ({
               Wallet Balance
             </Text>
             <Text>
-              {balance} {token.symbol}
+              {balance} {symbol.toUpperCase()}
             </Text>
           </div>
           <ActionIcon

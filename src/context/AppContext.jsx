@@ -29,6 +29,7 @@ export const AppProvider = ({ children }) => {
   const [selectedOriginal, setSelectedOriginal] = useState("");
   const [supportedTokens, setSupportedTokens] = useState([]); // New: List of supported tokens
   const [selectedToken, setSelectedToken] = useState(null); // New: Selected token
+  const [symbol, setSymbol] = useState(""); // New: Selected token
 
   return (
     <AppContext.Provider
@@ -79,6 +80,8 @@ export const AppProvider = ({ children }) => {
         setTokenPairs,
         selectedOriginal,
         setSelectedOriginal,
+        symbol,
+        setSymbol,
       }}
     >
       {children}
