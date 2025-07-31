@@ -17,6 +17,7 @@ import { fromWIF, getP2PKH } from "../utils/hdWallet";
 import TokenSelector from "../components/Wallet2/TokenSelector";
 import { capture } from "../shared/capture";
 import { BLOCKCHAINS } from "../shared/constants";
+import axios from "axios";
 
 const ITEMS_PER_PAGE = 5;
 
@@ -56,6 +57,9 @@ const Wallet2 = () => {
     balance,
     setBalance,
     selectedToken, // New
+    contractAddresses,
+    setContractAddresses,
+    supportedTokens,
   } = useAppContext();
 
   const webcamRef = useRef(null);
@@ -350,74 +354,70 @@ const Wallet2 = () => {
             styles={styles.card}
           >
             <WalletHeader styles={styles} />
-            {selectedBlockchainObject.bridgeAddress && <TokenSelector />}
-            {selectedToken && ( // Only render wallet details if a token is selected
-              <>
-                <WalletStateHandler
-                  privateKey={privateKey}
-                  isSubmitting={isSubmitting}
-                  isInitialized={isInitialized}
-                  parsedData={parsedData}
-                  log={log}
-                  onScanKey={handleKeyScan}
-                  onReset={resetWalletState}
-                  styles={styles}
-                />
-                {privateKey && isInitialized && (
-                  <>
-                    {balance !== null && (
-                      <WalletBalance
-                        balance={balance}
-                        parsedData={parsedData}
-                        log={log}
-                        onRefresh={() => {
-                          walletManager.fetchBalance();
-                          walletManager.buildTransactionHistory();
-                        }}
-                        onCopyAddress={copyAddressToClipboard}
-                        onShowQR={() => setIsQRModalOpen(true)}
-                        styles={styles}
-                      />
-                    )}
-                    <Text mb="md">
-                      {parsedData.rotation === log.length
-                        ? `Wallet is ready. You can send transactions with this key (rotation ${parsedData.rotation}).`
-                        : `Please scan the next key (rotation ${log.length}) to sign transactions.`}
-                    </Text>
-                    <Button
-                      onClick={handleKeyScan}
-                      disabled={log.length === parsedData.rotation}
-                      color="teal"
-                      variant="outline"
-                      mt="md"
-                    >
-                      Scan Next Key (Rotation: {log.length})
-                    </Button>
-                    {parsedData.rotation === log.length && (
-                      <TransactionForm
-                        recipients={recipients}
-                        onAddRecipient={addRecipient}
-                        onRemoveRecipient={removeRecipient}
-                        onUpdateRecipient={updateRecipient}
-                        onSendTransaction={handleSignTransaction}
-                        setFocusedRotation={setFocusedRotation}
-                        styles={styles}
-                        feeEstimate={feeEstimate}
-                      />
-                    )}
-                    {combinedHistory.length > 0 && (
-                      <TransactionHistory
-                        combinedHistory={paginatedHistory}
-                        currentPage={currentPage}
-                        totalPages={totalPages}
-                        onPageChange={setCurrentPage}
-                        styles={styles}
-                      />
-                    )}
-                  </>
-                )}
-              </>
-            )}
+            {selectedBlockchainObject.isBridge && <TokenSelector />}
+            <>
+              <WalletStateHandler
+                privateKey={privateKey}
+                isSubmitting={isSubmitting}
+                isInitialized={isInitialized}
+                parsedData={parsedData}
+                log={log}
+                onScanKey={handleKeyScan}
+                onReset={resetWalletState}
+                styles={styles}
+              />
+              {privateKey && (
+                <>
+                  <WalletBalance
+                    balance={balance}
+                    parsedData={parsedData}
+                    log={log}
+                    onRefresh={() => {
+                      walletManager.fetchBalance();
+                      walletManager.buildTransactionHistory();
+                    }}
+                    onCopyAddress={copyAddressToClipboard}
+                    onShowQR={() => setIsQRModalOpen(true)}
+                    styles={styles}
+                  />
+                  <Text mb="md">
+                    {parsedData.rotation === log.length
+                      ? `Wallet is ready. You can send transactions with this key (rotation ${parsedData.rotation}).`
+                      : `Please scan the next key (rotation ${log.length}) to sign transactions.`}
+                  </Text>
+                  <Button
+                    onClick={handleKeyScan}
+                    disabled={log.length === parsedData.rotation}
+                    color="teal"
+                    variant="outline"
+                    mt="md"
+                  >
+                    Scan Next Key (Rotation: {log.length})
+                  </Button>
+                  {parsedData.rotation === log.length && (
+                    <TransactionForm
+                      recipients={recipients}
+                      onAddRecipient={addRecipient}
+                      onRemoveRecipient={removeRecipient}
+                      onUpdateRecipient={updateRecipient}
+                      onSendTransaction={handleSignTransaction}
+                      setFocusedRotation={setFocusedRotation}
+                      styles={styles}
+                      feeEstimate={feeEstimate}
+                    />
+                  )}
+                  {combinedHistory.length > 0 && (
+                    <TransactionHistory
+                      combinedHistory={paginatedHistory}
+                      currentPage={currentPage}
+                      totalPages={totalPages}
+                      onPageChange={setCurrentPage}
+                      styles={styles}
+                    />
+                  )}
+                </>
+              )}
+            </>
             <Button
               onClick={resetWalletState}
               color="red"

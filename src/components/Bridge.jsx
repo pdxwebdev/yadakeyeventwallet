@@ -7,16 +7,7 @@ import WrappedTokenArtifact from "../utils/abis/WrappedToken.json";
 import MockERC20Artifact from "../utils/abis/MockERC20.json";
 import { createHDWallet, deriveSecurePath } from "../utils/hdWallet";
 import { getKeyState } from "../shared/keystate";
-import {
-  BRIDGE_ADDRESS,
-  KEYLOG_REGISTRY_ADDRESS,
-  localProvider,
-  MOCK2_ERC20_ADDRESS,
-  MOCK_ERC20_ADDRESS,
-  WRAPPED_TOKEN_ADDRESS,
-  Y_WRAPPED_TOKEN_ADDRESS,
-  HARDHAT_MNEMONIC,
-} from "../shared/constants";
+import { localProvider, HARDHAT_MNEMONIC } from "../shared/constants";
 import {
   Button,
   Checkbox,
@@ -29,7 +20,7 @@ import {
 } from "@mantine/core";
 import { useAppContext } from "../context/AppContext";
 import Markets from "./Markets";
-import TokenHolders from "./TokenHolders";
+// import TokenHolders from "./TokenHolders";
 import WalletConnector from "./WalletConnector";
 
 const BRIDGE_ABI = BridgeArtifact.abi;
@@ -81,7 +72,10 @@ function Bridge() {
   };
 
   const generatePermit = async (tokenAddress, signer, amount) => {
-    const isWrapped = [WRAPPED_TOKEN_ADDRESS, Y_WRAPPED_TOKEN_ADDRESS]
+    const isWrapped = [
+      contractAddresses.wrappedTokenWMOCKAddress,
+      contractAddresses.wrappedTokenYMOCKAddress,
+    ]
       .map((addr) => addr.toLowerCase())
       .includes(tokenAddress.toLowerCase());
     const abi = isWrapped ? WRAPPED_TOKEN_ABI : ERC20_ABI;
@@ -109,7 +103,7 @@ function Bridge() {
       const permitDeadline = Math.floor(Date.now() / 1000) + 60 * 60;
       const message = {
         owner,
-        spender: BRIDGE_ADDRESS,
+        spender: contractAddresses.bridgeAddress,
         value: amount.toString(),
         nonce: permitNonce.toString(),
         deadline: permitDeadline,
@@ -233,7 +227,7 @@ function Bridge() {
         if (!signer) throw new Error("No signer available");
 
         const keyLogRegistry = new ethers.Contract(
-          KEYLOG_REGISTRY_ADDRESS,
+          contractAddresses.keyLogRegistryAddress,
           KEYLOG_REGISTRY_ABI,
           signer
         );
@@ -269,7 +263,7 @@ function Bridge() {
 
         if (log.length === 0) {
           const bridge = new ethers.Contract(
-            BRIDGE_ADDRESS,
+            contractAddresses.bridgeAddress,
             BRIDGE_ABI,
             signer
           );
@@ -362,8 +356,8 @@ function Bridge() {
 
           await printBalances(signer, [
             ...supportedOriginalTokens,
-            WRAPPED_TOKEN_ADDRESS,
-            Y_WRAPPED_TOKEN_ADDRESS,
+            contractAddresses.wrappedTokenWMOCKAddress,
+            contractAddresses.wrappedTokenYMOCKAddress,
           ]);
 
           const tx = await bridge.registerKeyWithTransfer(
@@ -399,8 +393,8 @@ function Bridge() {
 
           await printBalances(signer, [
             ...supportedOriginalTokens,
-            WRAPPED_TOKEN_ADDRESS,
-            Y_WRAPPED_TOKEN_ADDRESS,
+            contractAddresses.wrappedTokenWMOCKAddress,
+            contractAddresses.wrappedTokenYMOCKAddress,
           ]);
           setStatus(
             `User key log initialized and transferred ${ethers.formatEther(
@@ -409,7 +403,7 @@ function Bridge() {
           );
         } else {
           const bridge = new ethers.Contract(
-            BRIDGE_ADDRESS,
+            contractAddresses.bridgeAddress,
             BRIDGE_ABI,
             signer
           );
@@ -442,7 +436,7 @@ function Bridge() {
     try {
       const { keyState, log } = userKeyState[account];
       const bridge = new ethers.Contract(
-        BRIDGE_ADDRESS,
+        contractAddresses.bridgeAddress,
         BRIDGE_ABI,
         keyState.currentDerivedKey.signer
       );
@@ -595,8 +589,8 @@ function Bridge() {
       }
 
       const allTokens = (await bridge.getSupportedTokens()).concat([
-        WRAPPED_TOKEN_ADDRESS,
-        Y_WRAPPED_TOKEN_ADDRESS,
+        contractAddresses.wrappedTokenWMOCKAddress,
+        contractAddresses.wrappedTokenYMOCKAddress,
       ]);
       await printBalances(keyState.currentDerivedKey.signer, allTokens);
 
@@ -609,7 +603,7 @@ function Bridge() {
       await tx.wait();
 
       const keyLogRegistry = new ethers.Contract(
-        KEYLOG_REGISTRY_ADDRESS,
+        contractAddresses.keyLogRegistryAddress,
         KEYLOG_REGISTRY_ABI,
         keyState.currentDerivedKey.signer
       );
@@ -664,13 +658,13 @@ function Bridge() {
     try {
       const { keyState } = userKeyState[account];
       const bridge = new ethers.Contract(
-        BRIDGE_ADDRESS,
+        contractAddresses.bridgeAddress,
         BRIDGE_ABI,
         keyState.currentDerivedKey.signer
       );
       const wrappedTokenAddress = isCrossChain
-        ? WRAPPED_TOKEN_ADDRESS
-        : Y_WRAPPED_TOKEN_ADDRESS;
+        ? contractAddresses.wrappedTokenWMOCKAddress
+        : contractAddresses.wrappedTokenYMOCKAddress;
       const wrappedToken = new ethers.Contract(
         wrappedTokenAddress,
         WRAPPED_TOKEN_ABI,
@@ -816,8 +810,8 @@ function Bridge() {
       }
 
       const allTokens = (await bridge.getSupportedTokens()).concat([
-        WRAPPED_TOKEN_ADDRESS,
-        Y_WRAPPED_TOKEN_ADDRESS,
+        contractAddresses.wrappedTokenWMOCKAddress,
+        contractAddresses.wrappedTokenYMOCKAddress,
       ]);
       await printBalances(keyState.currentDerivedKey.signer, allTokens);
 
@@ -830,7 +824,7 @@ function Bridge() {
       await tx.wait();
 
       const keyLogRegistry = new ethers.Contract(
-        KEYLOG_REGISTRY_ADDRESS,
+        contractAddresses.keyLogRegistryAddress,
         KEYLOG_REGISTRY_ABI,
         keyState.currentDerivedKey.signer
       );
@@ -875,7 +869,11 @@ function Bridge() {
     }
     setLoading(true);
     try {
-      const bridge = new ethers.Contract(BRIDGE_ADDRESS, BRIDGE_ABI, signer);
+      const bridge = new ethers.Contract(
+        contractAddresses.bridgeAddress,
+        BRIDGE_ABI,
+        signer
+      );
       const tx = await bridge.addTokenPair(
         originalToken,
         tokenName,
@@ -1024,7 +1022,7 @@ function Bridge() {
           })}
         </Table.Tbody>
       </Table>
-      <TokenHolders />
+      {/* <TokenHolders /> */}
     </div>
   );
 }

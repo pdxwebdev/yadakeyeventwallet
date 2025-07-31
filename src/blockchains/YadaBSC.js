@@ -3,8 +3,6 @@ import { ethers } from "ethers";
 import { useAppContext } from "../context/AppContext";
 import { createHDWallet, fromWIF, decompressPublicKey } from "../utils/hdWallet";
 import {
-  BRIDGE_ADDRESS,
-  KEYLOG_REGISTRY_ADDRESS,
   HARDHAT_MNEMONIC,
   localProvider,
 } from "../shared/constants";
@@ -30,6 +28,7 @@ class YadaBSC {
 
   // Helper to generate EIP-2612 permit
   async generatePermit(tokenAddress, signer, amount, nonce) {
+    const {contractAddresses} = this.appContext
     // Skip permit generation for BNB (native currency)
     if (tokenAddress.toLowerCase() === "0x0000000000000000000000000000000000000000") {
       console.warn(`Permits not applicable for BNB (${tokenAddress}). Skipping permit generation.`);
@@ -74,7 +73,7 @@ class YadaBSC {
       const permitDeadline = Math.floor(Date.now() / 1000) + 60 * 60;
       const message = {
         owner,
-        spender: BRIDGE_ADDRESS,
+        spender: contractAddresses.bridgeAddress,
         value: amount.toString(),
         nonce: nonce.toString(),
         deadline: permitDeadline,
@@ -99,6 +98,7 @@ async buildTransactionHistory() {
     setCombinedHistory,
     setCurrentPage,
     selectedToken,
+    contractAddresses
   } = this.appContext;
 
   if (!privateKey || !selectedToken) {
@@ -116,7 +116,7 @@ async buildTransactionHistory() {
     setLoading(true);
     setCombinedHistory([]); // Clear previous history
     const keyLogRegistry = new ethers.Contract(
-      KEYLOG_REGISTRY_ADDRESS,
+      contractAddresses.keyLogRegistryAddress,
       KEYLOG_REGISTRY_ABI,
       signer
     );
@@ -281,12 +281,12 @@ async buildTransactionHistory() {
 
 async fetchTransactionsForKey(publicKeyHash, rotation, fromBlock, toBlock, selectedToken) {
   try {
-    const { privateKey, supportedTokens } = this.appContext;
+    const { privateKey, supportedTokens, contractAddresses } = this.appContext;
     if (!privateKey) {
       return { transactions: [], totalReceived: BigInt(0), totalSent: BigInt(0) };
     }
     const signer = new ethers.Wallet(ethers.hexlify(privateKey.privateKey), localProvider);
-    const bridge = new ethers.Contract(BRIDGE_ADDRESS, BRIDGE_ABI, signer);
+    const bridge = new ethers.Contract(contractAddresses.bridgeAddress, BRIDGE_ABI, signer);
     let transactionsForKey = [];
     let totalReceivedForKey = BigInt(0);
     let totalSentForKey = BigInt(0);
@@ -435,9 +435,9 @@ async fetchTransactionsForKey(publicKeyHash, rotation, fromBlock, toBlock, selec
 
   // Checks wallet initialization status
   async checkInitializationStatus() {
-    const { privateKey, setLog, parsedData } = this.appContext;
+    const { privateKey, setLog, parsedData, contractAddresses } = this.appContext;
 
-    if (!privateKey) {
+    if (!privateKey || !contractAddresses.keyLogRegistryAddress) {
       return { status: "no_signer" };
     }
 
@@ -445,7 +445,7 @@ async fetchTransactionsForKey(publicKeyHash, rotation, fromBlock, toBlock, selec
 
     try {
       const keyLogRegistry = new ethers.Contract(
-        KEYLOG_REGISTRY_ADDRESS,
+        contractAddresses.keyLogRegistryAddress,
         KEYLOG_REGISTRY_ABI,
         signer
       );
@@ -575,7 +575,7 @@ async fetchTransactionsForKey(publicKeyHash, rotation, fromBlock, toBlock, selec
     }
   
     try {
-      const bridge = new ethers.Contract(BRIDGE_ADDRESS, BRIDGE_ABI, signer);
+      const bridge = new ethers.Contract(contractAddresses.bridgeAddress, BRIDGE_ABI, signer);
       
       // Estimate gas for a sample transaction (using registerKeyWithTransfer as reference)
       const publicKey = Buffer.from(signer.signingKey.publicKey.slice(2), 'hex').slice(1);
@@ -634,7 +634,8 @@ async fetchTransactionsForKey(publicKeyHash, rotation, fromBlock, toBlock, selec
 
   // Fetches token balances
   async fetchBalance() {
-    const { privateKey, selectedToken, setLoading, setBalance, setSymbol, supportedTokens } = this.appContext;
+    const { privateKey, selectedToken, setLoading, setBalance, setSymbol, supportedTokens, contractAddresses } = this.appContext;
+    
     if (!privateKey || !selectedToken) return;
 
     const signer = new ethers.Wallet(ethers.hexlify(privateKey.privateKey), localProvider);
@@ -651,7 +652,7 @@ async fetchTransactionsForKey(publicKeyHash, rotation, fromBlock, toBlock, selec
         totalBalance += nativeBalance;
       } else {
         // Fetch ERC20 token balance
-        const bridge = new ethers.Contract(BRIDGE_ADDRESS, BRIDGE_ABI, signer);
+        const bridge = new ethers.Contract(contractAddresses.bridgeAddress, BRIDGE_ABI, signer);
 
         const token = supportedTokens.find(item => item.address === selectedToken)
         setSymbol(token.symbol);
@@ -694,7 +695,7 @@ async fetchTransactionsForKey(publicKeyHash, rotation, fromBlock, toBlock, selec
 
   // Initializes key event log
 async initializeKeyEventLog() {
-  const { privateKey, setLoading, parsedData } = this.appContext;
+  const { privateKey, setLoading, parsedData, contractAddresses } = this.appContext;
   if (!privateKey) return;
 
   const signer = new ethers.Wallet(ethers.hexlify(privateKey.privateKey), localProvider);
@@ -702,9 +703,9 @@ async initializeKeyEventLog() {
 
   try {
     setLoading(true);
-    const bridge = new ethers.Contract(BRIDGE_ADDRESS, BRIDGE_ABI, signer);
+    const bridge = new ethers.Contract(contractAddresses.bridgeAddress, BRIDGE_ABI, signer);
     const keyLogRegistry = new ethers.Contract(
-      KEYLOG_REGISTRY_ADDRESS,
+      contractAddresses.keyLogRegistryAddress,
       KEYLOG_REGISTRY_ABI,
       signer
     );
@@ -734,8 +735,8 @@ async initializeKeyEventLog() {
           const abi = isWrapped ? WRAPPED_TOKEN_ABI : ERC20_ABI;
           const tokenContract = new ethers.Contract(tokenAddress, abi, signer);
           const balance = await tokenContract.balanceOf(signer.address);
-          const nonce = await tokenContract.nonces(signer.address);
           if (balance > 0n) {
+            const nonce = await tokenContract.nonces(signer.address);
             const permit = await this.generatePermit(tokenAddress, signer, balance, nonce);
             if (permit) {
               return {
@@ -833,7 +834,8 @@ async signTransaction() {
     selectedToken,
     supportedTokens,
     log,
-    setLog
+    setLog,
+    contractAddresses
   } = this.appContext;
 
   // Validate ethers
@@ -887,7 +889,7 @@ async signTransaction() {
     const newAddress = await newSigner.getAddress();
 
 
-    const bridge = new ethers.Contract(BRIDGE_ADDRESS, BRIDGE_ABI, signer);
+    const bridge = new ethers.Contract(contractAddresses.bridgeAddress, BRIDGE_ABI, signer);
 
     const nonce = await localProvider.getTransactionCount(address, 'latest');
     const bridgeNonce = await bridge.nonces(address);
@@ -1158,7 +1160,7 @@ async signTransaction() {
       from: receipt.from,
       gasUsed: receipt.gasUsed.toString(),
       EthTransferredEvents: receipt.logs
-        .filter(log => log.address === BRIDGE_ADDRESS)
+        .filter(log => log.address === contractAddresses.bridgeAddress)
         .map(log => {
           try {
             const parsed = bridge.interface.parseLog(log);
@@ -1175,7 +1177,7 @@ async signTransaction() {
     });
 
     // Update key log
-    const keyLogRegistry = new ethers.Contract(KEYLOG_REGISTRY_ADDRESS, KEYLOG_REGISTRY_ABI, newSigner);
+    const keyLogRegistry = new ethers.Contract(contractAddresses.keyLogRegistryAddress, KEYLOG_REGISTRY_ABI, newSigner);
     const updatedLog = await keyLogRegistry.buildFromPublicKey(
       decompressPublicKey(Buffer.from(newPrivateKey.publicKey)).slice(1)
     );
@@ -1204,7 +1206,7 @@ async signTransaction() {
 
   // Processes QR code in YadaCoin format: wifString|prerotatedKeyHash|twicePrerotatedKeyHash|prevPublicKeyHash|rotation
   async processScannedQR(qrData, isTransactionFlow = false) {
-    const { setUserKeyState, setSigner, privateKey, signer } = this.appContext;
+    const { setUserKeyState, setSigner, privateKey, signer, contractAddresses, setContractAddresses } = this.appContext;
 
     try {
       const [wifString, prerotatedKeyHash, twicePrerotatedKeyHash, prevPublicKeyHash, rotation] = qrData.split("|");
@@ -1241,9 +1243,25 @@ async signTransaction() {
         blockchain: 'bsc',
       };
 
+
+      const deploy = async () => {
+        const wif = newParsedData.wif;
+        const res = await axios.get(
+          `http://localhost:3001/deploy?wif=${wif}&clean=1`
+        );
+        setContractAddresses(res.data.addresses);
+        return res.data.addresses
+      };
+      let ca;
+      if (!contractAddresses.keyLogRegistryAddress) {
+        ca = await deploy();
+      } else {
+        ca = contractAddresses
+      }
+
       // Fetch key log from KeyLogRegistry
       const keyLogRegistry = new ethers.Contract(
-        KEYLOG_REGISTRY_ADDRESS,
+        ca.keyLogRegistryAddress,
         KEYLOG_REGISTRY_ABI,
         signer2
       );

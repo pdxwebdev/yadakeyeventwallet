@@ -30,6 +30,7 @@ export const AppProvider = ({ children }) => {
   const [supportedTokens, setSupportedTokens] = useState([]); // New: List of supported tokens
   const [selectedToken, setSelectedToken] = useState(null); // New: Selected token
   const [symbol, setSymbol] = useState(""); // New: Selected token
+  const [contractAddresses, setContractAddresses] = useState({});
 
   return (
     <AppContext.Provider
@@ -82,6 +83,8 @@ export const AppProvider = ({ children }) => {
         setSelectedOriginal,
         symbol,
         setSymbol,
+        contractAddresses,
+        setContractAddresses,
       }}
     >
       {children}

@@ -4,13 +4,13 @@ import { useAppContext } from "../../context/AppContext";
 import { walletManagerFactory } from "../../blockchains/WalletManagerFactory";
 import { Button, Group, Text, Select } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
-import { BRIDGE_ADDRESS } from "../../shared/constants";
 import { ethers } from "ethers";
 import { localProvider } from "../../shared/constants";
 import BridgeArtifact from "../../utils/abis/Bridge.json";
 import KeyLogRegistryArtifact from "../../utils/abis/KeyLogRegistry.json";
 import MockERC20Artifact from "../../utils/abis/MockERC20.json";
 import WrappedTokenArtifact from "../../utils/abis/WrappedToken.json";
+import axios from "axios";
 
 const BRIDGE_ABI = BridgeArtifact.abi;
 const KEYLOG_REGISTRY_ABI = KeyLogRegistryArtifact.abi;
@@ -26,6 +26,8 @@ const TokenSelector = () => {
     setSelectedToken,
     setBalance,
     privateKey,
+    contractAddresses,
+    setContractAddresses,
   } = useAppContext();
 
   const walletManager = walletManagerFactory(
@@ -33,12 +35,26 @@ const TokenSelector = () => {
     useAppContext()
   );
 
+  useEffect(() => {
+    const deploy = async () => {
+      const wif = localStorage.getItem("walletWif_bsc");
+      if (!wif) return;
+      const res = await axios.get(
+        `http://localhost:3001/deploy?wif=${wif}&clean=1`
+      );
+      setContractAddresses(res.data.addresses);
+    };
+    if (supportedTokens.length === 0) {
+      deploy();
+    }
+  }, [supportedTokens]);
+
   // Fetch supported tokens and add native coin
   useEffect(() => {
     const fetchTokens = async () => {
       try {
         const bridge = new ethers.Contract(
-          BRIDGE_ADDRESS,
+          contractAddresses.bridgeAddress,
           BRIDGE_ABI,
           localProvider
         );
@@ -85,8 +101,13 @@ const TokenSelector = () => {
       }
     };
 
-    fetchTokens();
-  }, [selectedBlockchain, setSupportedTokens, setSelectedToken]);
+    if (contractAddresses.bridgeAddress) fetchTokens();
+  }, [
+    selectedBlockchain,
+    setSupportedTokens,
+    setSelectedToken,
+    contractAddresses,
+  ]);
 
   // Fetch balance when token or private key changes
   useEffect(() => {

@@ -22,16 +22,7 @@ import MockERC20Artifact from "../utils/abis/MockERC20.json";
 import TokenPairWrapperArtifact from "../utils/abis/TokenPairWrapper.json";
 import { createHDWallet, deriveSecurePath } from "../utils/hdWallet";
 import { deriveNextKey, getKeyState } from "../shared/keystate";
-import {
-  BRIDGE_ADDRESS,
-  HARDHAT_MNEMONIC,
-  KEYLOG_REGISTRY_ADDRESS,
-  localProvider,
-  MOCK2_ERC20_ADDRESS,
-  MOCK_ERC20_ADDRESS,
-  WRAPPED_TOKEN_ADDRESS,
-  TOKEN_PAIR_WRAPPER_ADDRESS,
-} from "../shared/constants";
+import { localProvider } from "../shared/constants";
 
 const BRIDGE_ABI = BridgeArtifact.abi;
 const KEYLOG_REGISTRY_ABI = KeyLogRegistryArtifact.abi;
@@ -59,9 +50,13 @@ function AdminPanel() {
     const init = async () => {
       try {
         const hdWallet = createHDWallet(HARDHAT_MNEMONIC);
-        const bridge = new ethers.Contract(BRIDGE_ADDRESS, BRIDGE_ABI, wallet);
+        const bridge = new ethers.Contract(
+          contractAddresses.bridgeAddress,
+          BRIDGE_ABI,
+          wallet
+        );
         const keyLogRegistry = new ethers.Contract(
-          KEYLOG_REGISTRY_ADDRESS,
+          contractAddresses.keyLogRegistryAddress,
           KEYLOG_REGISTRY_ABI,
           wallet
         );
@@ -80,19 +75,19 @@ function AdminPanel() {
           );
 
           const mockERC20 = new ethers.Contract(
-            MOCK_ERC20_ADDRESS,
+            contractAddresses.yadaERC20Address,
             ERC20_ABI,
             wallet
           );
           const mock2ERC20 = new ethers.Contract(
-            MOCK2_ERC20_ADDRESS,
+            contractAddresses.mockPepeAddress,
             ERC20_ABI,
             wallet
           );
           const largeApprovalAmount = ethers.parseEther("1000000");
 
           const mockApprovalTx = await mockERC20.approve(
-            BRIDGE_ADDRESS,
+            contractAddresses.bridgeAddress,
             largeApprovalAmount,
             { nonce: walletNonce }
           );
@@ -100,7 +95,7 @@ function AdminPanel() {
           walletNonce++;
 
           const mock2ApprovalTx = await mock2ERC20.approve(
-            BRIDGE_ADDRESS,
+            contractAddresses.bridgeAddress,
             largeApprovalAmount,
             { nonce: walletNonce }
           );
@@ -127,11 +122,11 @@ function AdminPanel() {
             await keyLogRegistry.authorizedCaller();
           if (
             currentAuthorizedCaller.toLowerCase() !==
-            BRIDGE_ADDRESS.toLowerCase()
+            contractAddresses.bridgeAddress.toLowerCase()
           ) {
             console.log("Authorizing Bridge contract as caller...");
             const authTx = await keyLogRegistry.setAuthorizedCaller(
-              BRIDGE_ADDRESS,
+              contractAddresses.bridgeAddress,
               { nonce: walletNonce }
             );
             await authTx.wait();
@@ -153,7 +148,7 @@ function AdminPanel() {
           }
 
           const authTx = await keyLogRegistry.setAuthorizedCaller(
-            BRIDGE_ADDRESS,
+            contractAddresses.bridgeAddress,
             { nonce: walletNonce }
           );
           await authTx.wait();
@@ -200,7 +195,7 @@ function AdminPanel() {
       const wrappedTokenContract = await factory.deploy(
         tokenName || `${tokenSymbol} Wrapped Token`,
         tokenSymbol,
-        BRIDGE_ADDRESS
+        contractAddresses.bridgeAddress
       );
 
       await wrappedTokenContract.waitForDeployment();
@@ -293,24 +288,24 @@ function AdminPanel() {
       const hdWallet = createHDWallet(HARDHAT_MNEMONIC);
       const keyState = await getKeyState(hdWallet, log, kdp);
       const bridge = new ethers.Contract(
-        BRIDGE_ADDRESS,
+        contractAddresses.bridgeAddress,
         BRIDGE_ABI,
         keyState.currentDerivedKey.signer
       );
       const keyLogRegistry = new ethers.Contract(
-        KEYLOG_REGISTRY_ADDRESS,
+        contractAddresses.keyLogRegistryAddress,
         KEYLOG_REGISTRY_ABI,
         keyState.currentDerivedKey.signer
       );
       const keyLogRegistryWithWallet = new ethers.Contract(
-        KEYLOG_REGISTRY_ADDRESS,
+        contractAddresses.keyLogRegistryAddress,
         KEYLOG_REGISTRY_ABI,
         wallet
       );
 
       const amount = ethers.parseEther(mintAmount);
       const tx = await bridge.mintWrappedToken(
-        WRAPPED_TOKEN_ADDRESS,
+        contractAddresses.wrappedTokenWMOCKAddress,
         mintBurnAddress,
         amount
       );
@@ -423,7 +418,7 @@ function AdminPanel() {
       }
 
       const wrappedToken = new ethers.Contract(
-        WRAPPED_TOKEN_ADDRESS,
+        contractAddresses.wrappedTokenWMOCKAddress,
         WRAPPED_TOKEN_ABI,
         wallet
       );

@@ -16,11 +16,6 @@ import { useState, useEffect } from "react";
 import { ethers } from "ethers";
 import BridgeArtifact from "../utils/abis/Bridge.json";
 import WrappedTokenArtifact from "../utils/abis/WrappedToken.json";
-import {
-  BRIDGE_ADDRESS,
-  MOCK2_ERC20_ADDRESS,
-  MOCK_ERC20_ADDRESS,
-} from "../shared/constants";
 import { useAppContext } from "../context/AppContext";
 
 const localProvider = new ethers.JsonRpcProvider("http://127.0.0.1:8545/");
@@ -34,6 +29,7 @@ function Markets() {
     setLoading,
     error,
     setError,
+    contractAddresses,
   } = useAppContext();
 
   useEffect(() => {

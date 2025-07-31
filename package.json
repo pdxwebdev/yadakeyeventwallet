@@ -9,9 +9,10 @@
     "copy-abis": "cp artifacts/contracts/Bridge.sol/Bridge.json src/utils/abis/ && cp artifacts/contracts/KeyLogRegistry.sol/KeyLogRegistry.json src/utils/abis/ && cp artifacts/contracts/WrappedToken.sol/WrappedToken.json src/utils/abis/ && cp artifacts/contracts/MockERC20.sol/MockERC20.json src/utils/abis/ && cp artifacts/contracts/PriceFeedAggregatorV3.sol/PriceFeedAggregatorV3.json src/utils/abis/ && cp artifacts/contracts/TokenPairWrapper.sol/TokenPairWrapper.json src/utils/abis/",
     "refresh": "rm -rf artifacts/ && npx hardhat compile && npm run copy-abis",
     "node": "npx hardhat node",
-    "deploy": "rm -rf deployments.json && npx hardhat run ./scripts/deploy.js --network localhost",
+    "deploy": "npx hardhat run ./scripts/deploy.js --network localhost",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "server": "node server.js"
   },
   "dependencies": {
     "@chainlink/contracts": "^1.3.0",
@@ -41,13 +42,16 @@
     "bip39": "^3.1.0",
     "bitcoinjs-lib": "^7.0.0-rc.0",
     "browserify": "^17.0.1",
+    "cors": "^2.8.5",
     "dayjs": "^1.11.13",
     "eccrypto-js": "^5.4.0",
     "ecpair": "^3.0.0-rc.0",
     "embla-carousel-react": "^7.1.0",
     "esp-web-tools": "^10.1.1",
     "ethers": "^6.13.5",
+    "express": "^5.1.0",
     "jsqr": "^1.4.0",
+    "nodemon": "^3.1.10",
     "qrcode.react": "^4.2.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
@@ -59,6 +63,7 @@
     "vite-plugin-node-polyfills": "^0.22.0",
     "vite-plugin-top-level-await": "^1.4.4",
     "vite-plugin-wasm": "^3.3.0",
+    "vm": "^0.1.0",
     "yarn": "^1.22.22"
   },
   "devDependencies": {

@@ -2,22 +2,16 @@ import React, { useState, useEffect } from "react";
 import { ethers } from "ethers";
 import { Loader, Table, Pagination, Button, Group } from "@mantine/core"; // Added Button
 import WrappedTokenArtifact from "../utils/abis/WrappedToken.json";
-import {
-  localProvider,
-  MOCK2_ERC20_ADDRESS,
-  MOCK_ERC20_ADDRESS,
-  WRAPPED_TOKEN_ADDRESS,
-  Y_WRAPPED_TOKEN_ADDRESS,
-} from "../shared/constants";
+import { localProvider } from "../shared/constants";
 import { useAppContext } from "../context/AppContext";
 
 const WRAPPED_TOKEN_ABI = WrappedTokenArtifact.abi;
 
 const tokens = {
-  [WRAPPED_TOKEN_ADDRESS]: "WYDA",
-  [Y_WRAPPED_TOKEN_ADDRESS]: "YPEPE",
-  [MOCK_ERC20_ADDRESS]: "YDA",
-  [MOCK2_ERC20_ADDRESS]: "PEPE",
+  [contractAddresses.wrappedTokenWMOCKAddress]: "WYDA",
+  [contractAddresses.wrappedTokenYMOCKAddress]: "YPEPE",
+  [contractAddresses.yadaERC20Address]: "YDA",
+  [contractAddresses.mockPepeAddress]: "PEPE",
 };
 
 function TokenHolders() {
@@ -33,10 +27,10 @@ function TokenHolders() {
     setLoading(true);
     try {
       const wrappedTokens = [
-        WRAPPED_TOKEN_ADDRESS,
-        Y_WRAPPED_TOKEN_ADDRESS,
-        MOCK2_ERC20_ADDRESS,
-        MOCK_ERC20_ADDRESS,
+        contractAddresses.wrappedTokenWMOCKAddress,
+        contractAddresses.wrappedTokenYMOCKAddress,
+        contractAddresses.mockPepeAddress,
+        contractAddresses.yadaERC20Address,
       ];
       const holdersSet = new Set();
 

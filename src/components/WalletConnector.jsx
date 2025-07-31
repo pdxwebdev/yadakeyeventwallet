@@ -6,7 +6,6 @@ import { useAppContext } from "../context/AppContext";
 import { HARDHAT_MNEMONIC, localProvider } from "../shared/constants";
 import { createHDWallet, deriveSecurePath } from "../utils/hdWallet";
 import { getKeyState } from "../shared/keystate";
-import { KEYLOG_REGISTRY_ADDRESS } from "../shared/constants";
 import KeyLogRegistryArtifact from "../utils/abis/KeyLogRegistry.json";
 
 const KEYLOG_REGISTRY_ABI = KeyLogRegistryArtifact.abi;
@@ -27,7 +26,7 @@ const WalletConnector = () => {
   const initializeUserKeyState = async (signer, address) => {
     try {
       const keyLogRegistry = new ethers.Contract(
-        KEYLOG_REGISTRY_ADDRESS,
+        contractAddresses.keyLogRegistryAddress,
         KEYLOG_REGISTRY_ABI,
         signer
       );
