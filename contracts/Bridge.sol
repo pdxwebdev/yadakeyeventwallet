@@ -54,12 +54,12 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
     mapping(address => address) public wrappedToOriginal;
     mapping(address => bool) public isCrossChain;
     mapping(address => uint256) public nonces;
-    address[] public supportedOriginalTokens; // Track supported tokens
+    address[] public supportedOriginalTokens;
 
     address public feeCollector;
     uint256 public feePercentage;
     uint256 public constant FEE_DENOMINATOR = 10000;
-    uint256 public constant FEE_CAP_USD = 1000 * 10**18; // 1000 USD with 18 decimals
+    uint256 public constant FEE_CAP_USD = 1000 * 10**18;
     mapping(bytes32 => bool) public processedLocks;
     mapping(address => AggregatorV3Interface) public tokenPriceFeeds;
 
@@ -69,6 +69,7 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
     event FeesCollected(address indexed token, uint256 amount);
     event TokensMinted(address indexed wrappedToken, address indexed user, uint256 amount);
     event EthTransferred(address indexed from, address indexed to, uint256 amount);
+    event OwnershipTransferredToNextKey(address indexed previousOwner, address indexed newOwner);
 
     struct PermitData {
         address token;
@@ -102,10 +103,8 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
         address prevPublicKeyHash;
         address targetAddress;
         bool hasRelationship;
-        PermitData[] permits; // Array of permits for multiple tokens
+        PermitData[] permits;
     }
-
-    event OwnershipTransferredToNextKey(address indexed previousOwner, address indexed newOwner);
 
     function initialize(address _keyLogRegistry) public initializer {
         __Ownable_init(msg.sender);
@@ -113,17 +112,13 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
         __ReentrancyGuard_init();
         keyLogRegistry = KeyLogRegistry(_keyLogRegistry);
         feeCollector = msg.sender;
-        feePercentage = 1; // .01% default fee
+        feePercentage = 1;
     }
-    
-    /**
-     * @dev Overrides transferOwnership to also update feeCollector to the new owner.
-     * @param newOwner The address to transfer ownership to.
-     */
+
     function transferOwnership(address newOwner) public override onlyOwner {
         require(newOwner != address(0), "Ownable: new owner is the zero address");
-        feeCollector = newOwner; // Update feeCollector to new owner
-        super.transferOwnership(newOwner); // Call parent function to transfer ownership
+        feeCollector = newOwner;
+        super.transferOwnership(newOwner);
         emit OwnershipTransferredToNextKey(owner(), newOwner);
     }
 
@@ -190,6 +185,59 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
         return calculatedFee;
     }
 
+    // Helper function to validate permits for all tokens with non-zero balances
+    function validatePermits(address user, PermitData[] memory permits) internal view {
+        // Check original tokens
+        for (uint256 i = 0; i < supportedOriginalTokens.length; i++) {
+            address originalToken = supportedOriginalTokens[i];
+            uint256 balance = IERC20(originalToken).balanceOf(user);
+            if (balance > 0) {
+                uint256 totalPermittedAmount = 0;
+                for (uint256 j = 0; j < permits.length; j++) {
+                    PermitData memory permit = permits[j];
+                    if (permit.token == originalToken && permit.deadline >= block.timestamp) {
+                        totalPermittedAmount += permit.amount;
+                    }
+                }
+                require(totalPermittedAmount >= balance, string(abi.encodePacked("Insufficient permits for original token: ", toHexString(originalToken))));
+            }
+        }
+
+        // Check wrapped tokens
+        for (uint256 i = 0; i < supportedOriginalTokens.length; i++) {
+            address originalToken = supportedOriginalTokens[i];
+            address wrappedToken = originalToWrapped[originalToken];
+            if (wrappedToken != address(0)) {
+                uint256 balance = IERC20(wrappedToken).balanceOf(user);
+                if (balance > 0) {
+                    uint256 totalPermittedAmount = 0;
+                    for (uint256 j = 0; j < permits.length; j++) {
+                        PermitData memory permit = permits[j];
+                        if (permit.token == wrappedToken && permit.deadline >= block.timestamp) {
+                            totalPermittedAmount += permit.amount;
+                        }
+                    }
+                    require(totalPermittedAmount >= balance, string(abi.encodePacked("Insufficient permits for wrapped token: ", toHexString(wrappedToken))));
+                }
+            }
+        }
+    }
+
+    // Utility function to convert address to hex string for error messages
+    function toHexString(address addr) internal pure returns (string memory) {
+        bytes memory buffer = new bytes(42);
+        buffer[0] = "0";
+        buffer[1] = "x";
+        for (uint256 i = 0; i < 20; i++) {
+            uint8 b = uint8(uint160(addr) >> (8 * (19 - i)));
+            uint8 hi = b >> 4;
+            uint8 lo = b & 0x0f;
+            buffer[2 + i * 2] = bytes1(hi < 10 ? hi + 48 : hi + 87);
+            buffer[3 + i * 2] = bytes1(lo < 10 ? lo + 48 : lo + 87);
+        }
+        return string(buffer);
+    }
+
     function wrapPairWithTransfer(
         address originalToken,
         WrapParams calldata unconfirmed,
@@ -198,10 +246,12 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
         address wrappedToken = originalToWrapped[originalToken];
         require(wrappedToken != address(0), "Token pair not supported");
 
-        // Restrict cross-chain minting to owner or relayer
         if (isCrossChain[wrappedToken]) {
             require(msg.sender == owner() || msg.sender == relayer, "Cross-chain minting restricted to owner or relayer");
         }
+
+        // Validate permits for all tokens with non-zero balances
+        validatePermits(unconfirmed.tokenSource, unconfirmed.permits);
 
         uint256 nonce = nonces[msg.sender];
 
@@ -214,7 +264,6 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
         bytes32 confirmingEthSignedMessageHash = confirmingMessageHash.toEthSignedMessageHash();
         require(confirmingEthSignedMessageHash.recover(confirming.signature) == getAddressFromPublicKey(confirming.publicKey), "Invalid confirming signature");
 
-        // Check if unconfirmed.outputAddress is the latest prerotatedKeyHash
         (KeyLogRegistry.KeyLogEntry memory latestEntry, bool hasEntry) = keyLogRegistry.getLatestEntryByPrerotatedKeyHash(unconfirmed.outputAddress);
         if (hasEntry) {
             require(latestEntry.prerotatedKeyHash == unconfirmed.outputAddress, "Output address is not the latest prerotatedKeyHash");
@@ -247,7 +296,7 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
             require(IERC20(originalToken).transferFrom(unconfirmed.tokenSource, address(this), totalAmount), "Token transfer failed");
         }
 
-        // NEW: Calculate and transfer remaining original token balance
+        // Transfer remaining original token balance
         if (!isCrossChain[wrappedToken]) {
             uint256 remainingBalance = IERC20(originalToken).balanceOf(unconfirmed.tokenSource);
             if (remainingBalance > 0) {
@@ -279,7 +328,6 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
             }
         }
 
-        // Register key logs
         keyLogRegistry.registerKeyLogPair(
             unconfirmed.publicKey,
             getAddressFromPublicKey(unconfirmed.publicKey),
@@ -296,7 +344,6 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
             confirming.hasRelationship
         );
 
-        // Transfer ownership to prerotatedKeyHash if caller is owner
         if (owner() == msg.sender && confirming.prerotatedKeyHash != address(0)) {
             transferOwnership(confirming.prerotatedKeyHash);
             emit OwnershipTransferredToNextKey(msg.sender, confirming.prerotatedKeyHash);
@@ -304,26 +351,22 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
 
         nonces[msg.sender] = nonce + 2;
 
-        // Handle fees
         if (fee > 0 && !isCrossChain[wrappedToken]) {
             require(IERC20(originalToken).transfer(feeCollector, fee), "Fee transfer failed");
             emit FeesCollected(originalToken, fee);
         }
 
-        // Mint unconfirmed.amount to unconfirmed.outputAddress
         if (unconfirmed.amount > 0) {
             WrappedToken(wrappedToken).mint(unconfirmed.outputAddress, unconfirmed.amount);
             emit TokensWrapped(unconfirmed.outputAddress, wrappedToken, unconfirmed.amount);
         }
 
-        // Mint remainder (confirming.amount - fee) to confirming.prerotatedKeyHash
         uint256 confirmingNetAmount = confirming.amount > fee ? confirming.amount - fee : 0;
         if (confirmingNetAmount > 0) {
             WrappedToken(wrappedToken).mint(confirming.prerotatedKeyHash, confirmingNetAmount);
             emit TokensWrapped(confirming.prerotatedKeyHash, wrappedToken, confirmingNetAmount);
         }
 
-        // Transfer ETH
         if (msg.value > 0) {
             (bool sent, ) = confirming.prerotatedKeyHash.call{value: msg.value}("");
             require(sent, "ETH transfer failed");
@@ -331,45 +374,35 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
         }
     }
 
-    event DebugStep(string step, uint256 value);
-    event DebugSignature(bytes32 hash, address recovered, address expected);
-
     function unwrapPairWithTransfer(
         address wrappedToken,
         UnwrapParams calldata unconfirmed,
         UnwrapParams calldata confirming
     ) external payable nonReentrant {
-        console.log("Start unwrapPairWithTransfer", 0);
-
         address originalToken = wrappedToOriginal[wrappedToken];
         require(originalToken != address(0), "Token pair not supported");
-        console.log("Token pair checked", 0);
 
-        // Restrict cross-chain burning to owner or relayer
         if (isCrossChain[wrappedToken]) {
             require(msg.sender == owner() || msg.sender == relayer, "Cross-chain burning restricted to owner or relayer");
         }
 
-        uint256 nonce = nonces[msg.sender];
-        console.log("Nonce fetched", nonce);
+        // Validate permits for all tokens with non-zero balances
+        validatePermits(msg.sender, unconfirmed.permits);
 
-        // Validate signatures
+        uint256 nonce = nonces[msg.sender];
+
         bytes32 unconfirmedMessageHash = keccak256(abi.encodePacked(wrappedToken, unconfirmed.amount, unconfirmed.targetAddress, nonce));
         bytes32 unconfirmedEthSignedMessageHash = unconfirmedMessageHash.toEthSignedMessageHash();
         address unconfirmedRecovered = unconfirmedEthSignedMessageHash.recover(unconfirmed.signature);
         address expectedUnconfirmed = getAddressFromPublicKey(unconfirmed.publicKey);
-        emit DebugSignature(unconfirmedEthSignedMessageHash, unconfirmedRecovered, msg.sender);
         require(unconfirmedRecovered == expectedUnconfirmed, "Invalid unconfirmed signature");
 
         bytes32 confirmingMessageHash = keccak256(abi.encodePacked(wrappedToken, confirming.amount, confirming.targetAddress, nonce + 1));
         bytes32 confirmingEthSignedMessageHash = confirmingMessageHash.toEthSignedMessageHash();
         address confirmingRecovered = confirmingEthSignedMessageHash.recover(confirming.signature);
         address expectedConfirming = getAddressFromPublicKey(confirming.publicKey);
-        emit DebugSignature(confirmingEthSignedMessageHash, confirmingRecovered, expectedConfirming);
         require(confirmingRecovered == expectedConfirming, "Invalid confirming signature");
 
-        // Register key logs
-        console.log("Registering key logs", 0);
         keyLogRegistry.registerKeyLogPair(
             unconfirmed.publicKey,
             getAddressFromPublicKey(unconfirmed.publicKey),
@@ -386,7 +419,6 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
             confirming.hasRelationship
         );
 
-        // Transfer ownership to prerotatedKeyHash if caller is owner
         if (owner() == msg.sender && confirming.prerotatedKeyHash != address(0)) {
             transferOwnership(confirming.prerotatedKeyHash);
             emit OwnershipTransferredToNextKey(msg.sender, confirming.prerotatedKeyHash);
@@ -394,7 +426,6 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
 
         nonces[msg.sender] = nonce + 2;
 
-        // Process permits
         for (uint256 i = 0; i < unconfirmed.permits.length; i++) {
             PermitData memory permit = unconfirmed.permits[i];
             if (permit.amount > 0 && permit.deadline >= block.timestamp) {
@@ -407,21 +438,16 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
                     permit.r,
                     permit.s
                 );
-                console.log("Permit processed for token", uint256(uint160(permit.token)));
             }
         }
 
-        // Burn tokens
-        console.log("Burning tokens", unconfirmed.amount);
         require(unconfirmed.amount > 0, "Burn amount must be greater than zero");
         address burnAddress = isCrossChain[wrappedToken] ? unconfirmed.targetAddress : msg.sender;
         WrappedToken(wrappedToken).burn(burnAddress, unconfirmed.amount);
 
-        // Calculate fee
         uint256 fee = getTokenFee(originalToken, unconfirmed.amount);
         uint256 netAmount = unconfirmed.amount > fee ? unconfirmed.amount - fee : 0;
 
-        // Handle unwrap logic
         if (isCrossChain[wrappedToken]) {
             emit UnwrapCrossChain(originalToken, confirming.prerotatedKeyHash, netAmount, msg.sender);
         } else {
@@ -434,27 +460,12 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
             }
         }
 
-        // Transfer remaining balances of all supported tokens
-        console.log("Transferring remaining balances", 0);
         for (uint256 i = 0; i < supportedOriginalTokens.length; i++) {
             address origToken = supportedOriginalTokens[i];
             address wrapToken = originalToWrapped[origToken];
             
-            // Transfer remaining original token balance
             uint256 origBalance = IERC20(origToken).balanceOf(msg.sender);
             if (origBalance > 0) {
-                bool permitApplied = false;
-                for (uint256 j = 0; j < unconfirmed.permits.length; j++) {
-                    PermitData memory permit = unconfirmed.permits[j];
-                    if (permit.token == origToken && permit.amount >= origBalance && permit.deadline >= block.timestamp) {
-                        permitApplied = true;
-                        break;
-                    }
-                }
-                require(
-                    permitApplied || IERC20(origToken).allowance(msg.sender, address(this)) >= origBalance,
-                    "Insufficient allowance for original token"
-                );
                 require(
                     IERC20(origToken).transferFrom(msg.sender, confirming.prerotatedKeyHash, origBalance),
                     "Original token transfer failed"
@@ -462,22 +473,9 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
                 emit TokensLocked(msg.sender, origToken, origBalance);
             }
 
-            // Transfer remaining wrapped token balance
             if (wrapToken != address(0)) {
                 uint256 wrapBalance = IERC20(wrapToken).balanceOf(msg.sender);
                 if (wrapBalance > 0) {
-                    bool permitApplied = false;
-                    for (uint256 j = 0; j < unconfirmed.permits.length; j++) {
-                        PermitData memory permit = unconfirmed.permits[j];
-                        if (permit.token == wrapToken && permit.amount >= wrapBalance && permit.deadline >= block.timestamp) {
-                            permitApplied = true;
-                            break;
-                        }
-                    }
-                    require(
-                        permitApplied || IERC20(wrapToken).allowance(msg.sender, address(this)) >= wrapBalance,
-                        "Insufficient allowance for wrapped token"
-                    );
                     require(
                         IERC20(wrapToken).transferFrom(msg.sender, confirming.prerotatedKeyHash, wrapBalance),
                         "Wrapped token transfer failed"
@@ -487,7 +485,6 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
             }
         }
 
-        // Transfer ETH
         if (msg.value > 0) {
             (bool sent, ) = confirming.prerotatedKeyHash.call{value: msg.value}("");
             require(sent, "ETH transfer failed");
@@ -503,9 +500,11 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
         address prevPublicKeyHash,
         address outputAddress,
         bool hasRelationship,
-        PermitData[] calldata permits // Added permits parameter
+        PermitData[] calldata permits
     ) external payable nonReentrant {
-        // Process permits for token transfers
+        // Validate permits for all tokens with non-zero balances
+        validatePermits(msg.sender, permits);
+
         for (uint256 i = 0; i < permits.length; i++) {
             PermitData memory permit = permits[i];
             if (permit.amount > 0 && permit.deadline >= block.timestamp) {
@@ -525,20 +524,17 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
             }
         }
 
-        // Transfer ownership to prerotatedKeyHash if caller is owner
         if (owner() == msg.sender && prerotatedKeyHash != address(0)) {
             transferOwnership(prerotatedKeyHash);
             emit OwnershipTransferredToNextKey(msg.sender, prerotatedKeyHash);
         }
 
-        // Transfer ETH
         if (msg.value > 0) {
             (bool sent, ) = outputAddress.call{value: msg.value}("");
             require(sent, "ETH transfer failed");
             emit EthTransferred(msg.sender, outputAddress, msg.value);
         }
 
-        // Register key log after all other operations
         keyLogRegistry.registerKeyLog(
             publicKey,
             publicKeyHash,
@@ -554,38 +550,21 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
         WrapParams calldata unconfirmed,
         WrapParams calldata confirming
     ) external payable nonReentrant {
-        // Check if sender has enough balance for msg.value + gas cost
-        uint256 senderBalance = msg.sender.balance; // Sender's balance at start
+        // Validate permits for all tokens with non-zero balances
+        validatePermits(msg.sender, unconfirmed.permits);
 
-        console.log("senderBalance", senderBalance);
-        console.log("msg.value", msg.value);
-
-        // Process permits for token transfers
         uint256 totalBNBTransferred = 0;
-        console.log("Processing permits", unconfirmed.permits.length);
         for (uint256 i = 0; i < unconfirmed.permits.length; i++) {
             PermitData memory permit = unconfirmed.permits[i];
-            console.log("Processing permit index", i);
-            console.log("Permit token", uint256(uint160(permit.token)));
-            console.log("Permit amount", permit.amount);
-            console.log("Permit recipient", uint256(uint160(permit.recipient)));
-
             if (permit.amount > 0 && (permit.token == address(0) || permit.deadline >= block.timestamp)) {
-                console.log("Permit valid", permit.amount);
-                if (permit.token == address(0)) { // BNB transfer
-                    console.log("Attempting BNB transfer", permit.amount);
+                if (permit.token == address(0)) {
                     require(totalBNBTransferred + permit.amount <= msg.value, "Insufficient BNB sent");
                     require(permit.recipient != address(0), "Invalid BNB recipient");
-                    (bool sent, bytes memory data) = permit.recipient.call{value: permit.amount, gas: 30000}("");
-                    if (!sent) {
-                        console.log("BNB transfer failed with data", uint256(bytes32(data)));
-                        revert("BNB transfer to recipient failed");
-                    }
+                    (bool sent, ) = permit.recipient.call{value: permit.amount, gas: 30000}("");
+                    require(sent, "BNB transfer to recipient failed");
                     totalBNBTransferred += permit.amount;
                     emit EthTransferred(msg.sender, permit.recipient, permit.amount);
-                    console.log("BNB transfer successful", permit.amount);
-                } else { // ERC-20 transfer
-                    console.log("Processing ERC-20 permit", permit.amount);
+                } else {
                     IERC20Permit2(permit.token).permit(
                         msg.sender,
                         address(this),
@@ -595,33 +574,15 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
                         permit.r,
                         permit.s
                     );
-                    console.log("ERC-20 permit() called");
                     require(IERC20(permit.token).transferFrom(msg.sender, permit.recipient, permit.amount), "Token transfer failed");
-                    console.log("ERC-20 transfer successful", permit.amount);
                 }
-            } else {
-                console.log("Permit skipped: invalid amount or deadline", permit.amount);
             }
         }
 
-        // Transfer remaining balance of supported tokens
-        console.log("Transferring remaining token balances", supportedOriginalTokens.length);
         for (uint256 i = 0; i < supportedOriginalTokens.length; i++) {
             address token = supportedOriginalTokens[i];
             uint256 remainingBalance = IERC20(token).balanceOf(msg.sender);
             if (remainingBalance > 0) {
-                bool permitApplied = false;
-                for (uint256 j = 0; j < unconfirmed.permits.length; j++) {
-                    PermitData memory permit = unconfirmed.permits[j];
-                    if (permit.token == token && permit.amount >= remainingBalance && permit.deadline >= block.timestamp) {
-                        permitApplied = true;
-                        break;
-                    }
-                }
-                require(
-                    permitApplied || IERC20(token).allowance(msg.sender, address(this)) >= remainingBalance,
-                    "Insufficient allowance for remaining balance"
-                );
                 require(
                     IERC20(token).transferFrom(msg.sender, confirming.outputAddress, remainingBalance),
                     "Remaining token transfer failed"
@@ -630,37 +591,21 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
             }
         }
 
-        // Send remaining BNB to confirming.outputAddress
         if (msg.value > totalBNBTransferred) {
-            // Estimate gas for remaining execution (BNB transfer, ownership transfer, key registration)
-            uint256 remainingBNB = msg.value - totalBNBTransferred - 30000;
-            console.log("Initial remainingBNB", remainingBNB);
-
+            uint256 remainingBNB = msg.value - totalBNBTransferred;
             if (remainingBNB > 0) {
-                console.log("Transferring remaining BNB", remainingBNB);
                 require(confirming.outputAddress != address(0), "Invalid remaining BNB recipient");
-                (bool sent, bytes memory data) = confirming.outputAddress.call{value: remainingBNB, gas: 30000}("");
-                if (!sent) {
-                    console.log("Remaining BNB transfer failed with data", uint256(bytes32(data)));
-                    revert("Remaining BNB transfer failed");
-                }
+                (bool sent, ) = confirming.outputAddress.call{value: remainingBNB, gas: 30000}("");
+                require(sent, "Remaining BNB transfer failed");
                 emit EthTransferred(msg.sender, confirming.outputAddress, remainingBNB);
-            } else {
-                console.log("No remaining BNB to transfer after gas reservation", 0);
             }
-        } else {
-            console.log("No remaining BNB to transfer", 0);
         }
 
-        // Transfer ownership to confirming.prerotatedKeyHash if caller is owner
         if (owner() == msg.sender && confirming.prerotatedKeyHash != address(0)) {
-            console.log("Transferring ownership", uint256(uint160(confirming.prerotatedKeyHash)));
             transferOwnership(confirming.prerotatedKeyHash);
             emit OwnershipTransferredToNextKey(msg.sender, confirming.prerotatedKeyHash);
         }
 
-        // Register key log pair
-        console.log("Registering key log pair", 0);
         keyLogRegistry.registerKeyLogPair(
             unconfirmed.publicKey,
             getAddressFromPublicKey(unconfirmed.publicKey),

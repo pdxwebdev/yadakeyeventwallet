@@ -319,5 +319,5 @@ export async function main() {
   };
 }
 main().then((output) => {
-console.log(output)
+  console.log(output)
 })

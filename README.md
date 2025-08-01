@@ -1,8 +1,15 @@
-# React + Vite
+# Setup
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Fork this repo first.
 
-Currently, two official plugins are available:
+- `git clone git@github.com:yourusername/yadakeyeventwallet.git`
+- `cd yadakeyeventwallet`
+- `npm install`
+- `npm run dev`
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react/README.md) uses [Babel](https://babeljs.io/) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+This will give YadaCoin functionality.
+
+# To test BSC functionality
+
+- `npm run refresh` - Only needs to run once unless you make changes to the smart contracts
+- `node server.js` - This serves the smart contract deploy addresses to the react app

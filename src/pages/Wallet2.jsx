@@ -185,15 +185,9 @@ const Wallet2 = () => {
   };
 
   useEffect(() => {
-    if (privateKey && isInitialized && selectedToken) {
-      walletManager.buildTransactionHistory();
-      walletManager.fetchFeeEstimate();
-    }
-  }, [privateKey, isInitialized, selectedToken]);
-
-  useEffect(() => {
     if (privateKey && isInitialized) {
       walletManager.buildTransactionHistory();
+      walletManager.fetchFeeEstimate();
     }
   }, [privateKey, isInitialized]);
 
