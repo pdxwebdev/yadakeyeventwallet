@@ -190,6 +190,10 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
         // Check original tokens
         for (uint256 i = 0; i < supportedOriginalTokens.length; i++) {
             address originalToken = supportedOriginalTokens[i];
+            // Skip native asset (0x0000...)
+            if (originalToken == address(0)) {
+                continue;
+            }
             uint256 balance = IERC20(originalToken).balanceOf(user);
             if (balance > 0) {
                 uint256 totalPermittedAmount = 0;

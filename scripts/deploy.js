@@ -5,6 +5,9 @@ import * as shajs from "sha.js";
 import * as tinysecp256k1 from "tiny-secp256k1";
 const { ethers, upgrades } = pkg;
 
+
+const NATIVE_ASSET_ADDRESS = "0x0000000000000000000000000000000000000000";
+
 // Function to read and parse WIF key from a file
 const readWIFKeyFromFile = (filePath) => {
   try {
@@ -71,14 +74,7 @@ export async function main() {
     if (isDeployed) {
       console.log('saved')
       return {
-        bridgeAddress: deployments.bridgeAddress,
-        keyLogRegistryAddress: deployments.keyLogRegistryAddress,
-        tokenPairWrapperAddress: deployments.tokenPairWrapperAddress,
-        wrappedTokenWMOCKAddress: deployments.wrappedTokenWMOCKAddress,
-        wrappedTokenYMOCKAddress: deployments.wrappedTokenYMOCKAddress,
-        yadaERC20Address: deployments.yadaERC20Address,
-        mockPepeAddress: deployments.mockPepeAddress,
-        priceFeedAddress: deployments.priceFeedAddress,
+        ...deployments
       };
     }
   }
@@ -244,6 +240,20 @@ export async function main() {
   }
   const mockPepeAddress = deployments.pepeERC20_2;
 
+   // Deploy WrappedNativeToken (e.g., WETH)
+  const WrappedNativeToken = await ethers.getContractFactory("WrappedNativeToken");
+  let wrappedNativeToken;
+  if (deployments.wrappedNativeToken) {
+    wrappedNativeToken = await WrappedNativeToken.attach(deployments.wrappedNativeToken);
+    console.log("Using existing WrappedNativeToken:", deployments.wrappedNativeToken);
+  } else {
+    wrappedNativeToken = await WrappedNativeToken.deploy("Wrapped Native", "WNATIVE");
+    await wrappedNativeToken.waitForDeployment();
+    deployments.wrappedNativeToken = await wrappedNativeToken.getAddress();
+    console.log("WrappedNativeToken (WNATIVE):", deployments.wrappedNativeToken);
+  }
+  const wrappedNativeTokenAddress = deployments.wrappedNativeToken;
+
   // Deploy Mock Price Feed
   const PriceFeedAggregatorV3 = await ethers.getContractFactory("PriceFeedAggregatorV3");
   let priceFeed;
@@ -274,6 +284,13 @@ export async function main() {
     await bridge.connect(deployer).setTokenPriceFeed(mockPepeAddress, priceFeedAddress);
     // console.log("Set price feed for $PEPE");
 
+
+    await bridge.connect(deployer).addTokenPair(
+      NATIVE_ASSET_ADDRESS,
+      wrappedNativeTokenAddress,
+      false // on-chain pair (since wrapping ETH is local to the chain)
+    );
+
     deployments.configured = true;
   }
 
@@ -290,7 +307,8 @@ export async function main() {
     wrappedTokenYMOCKAddress,
     yadaERC20Address,
     mockPepeAddress,
-    priceFeedAddress
+    priceFeedAddress,
+    wrappedNativeTokenAddress // Add this
   }, null, 2));
 
   // Output for React
@@ -315,7 +333,8 @@ export async function main() {
     wrappedTokenYMOCKAddress,
     yadaERC20Address,
     mockPepeAddress,
-    priceFeedAddress
+    priceFeedAddress,
+    wrappedNativeTokenAddress // Add this
   };
 }
 main().then((output) => {

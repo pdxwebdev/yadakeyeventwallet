@@ -348,7 +348,18 @@ const Wallet2 = () => {
             styles={styles.card}
           >
             <WalletHeader styles={styles} />
-            {selectedBlockchainObject.isBridge && <TokenSelector />}
+            {selectedBlockchainObject.isBridge && (
+              <>
+                <TokenSelector />
+                <Button
+                  onClick={() => {
+                    walletManager.wrap();
+                  }}
+                >
+                  Wrap
+                </Button>
+              </>
+            )}
             <>
               <WalletStateHandler
                 privateKey={privateKey}

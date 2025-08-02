@@ -61,27 +61,25 @@ const TokenSelector = () => {
         const tokens = await bridge.getSupportedTokens();
         const tokenData = await Promise.all(
           tokens.map(async (tokenAddress) => {
-            const tokenContract = new ethers.Contract(
-              tokenAddress,
-              ERC20_ABI,
-              localProvider
-            );
-            const name = await tokenContract.name();
-            const symbol = await tokenContract.symbol();
+            let name, symbol;
+            if (tokenAddress === "0x0000000000000000000000000000000000000000") {
+              name = "Binance Coin"; // Or 'Wrapped ETH' depending on the chain
+              symbol = "BNB"; // Or 'WETH'
+            } else {
+              const tokenContract = new ethers.Contract(
+                tokenAddress,
+                ERC20_ABI,
+                localProvider
+              );
+              name = await tokenContract.name();
+              symbol = await tokenContract.symbol();
+            }
             return { address: tokenAddress, name, symbol, value: tokenAddress };
           })
         );
-        // Add native coin (BNB) to the token list
-        const nativeCoin = {
-          address: ethers.ZeroAddress, // Use ZeroAddress to represent native coin
-          name: "Binance Coin",
-          symbol: "BNB",
-          value: ethers.ZeroAddress,
-        };
-        const updatedTokenData = [nativeCoin, ...tokenData];
-        setSupportedTokens(updatedTokenData || []);
-        if (updatedTokenData.length > 0 && !selectedToken) {
-          setSelectedToken(updatedTokenData[0].address); // Default to first token (BNB)
+        setSupportedTokens(tokenData || []);
+        if (tokenData.length > 0 && !selectedToken) {
+          setSelectedToken(tokenData[0].address); // Default to first token (BNB)
         }
       } catch (error) {
         console.error("Error fetching supported tokens:", error);
