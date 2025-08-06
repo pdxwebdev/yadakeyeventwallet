@@ -96,7 +96,6 @@ contract KeyLogRegistry is Ownable {
 
     function registerKeyLogPair(
         bytes memory publicKey,
-        address unconfirmedPublicKeyHash,
         address unconfirmedPrerotatedKeyHash,
         address unconfirmedTwicePrerotatedKeyHash,
         address unconfirmedPrevPublicKeyHash,
@@ -109,6 +108,7 @@ contract KeyLogRegistry is Ownable {
         address confirmingOutputAddress,
         bool confirmingHasRelationship
     ) external onlyAuthorized {
+        address unconfirmedPublicKeyHash = getAddressFromPublicKey(publicKey);
         // Step 1: Validate both entries in a single call
         (KeyEventFlag unconfirmedFlag, KeyEventFlag confirmingFlag) = validateTransaction(
             publicKey,
@@ -229,7 +229,6 @@ contract KeyLogRegistry is Ownable {
 
         // Pair case: Validate the confirming entry and sequence
         require(twicePrerotatedKeyHash == confirmingPrerotatedKeyHash, "Sequence mismatch: twicePrerotatedKeyHash != confirmingPrerotatedKeyHash");
-        require(hasRelationship || outputAddress != prerotatedKeyHash, "Unconfirmed conditions not met"); // Ensure first is UNCONFIRMED
         require(!confirmingHasRelationship && confirmingOutputAddress == confirmingPrerotatedKeyHash, "Invalid confirming conditions");
         require(prerotatedKeyHash == confirmingPublicKeyHash, "Sequence mismatch: prerotatedKeyHash != publicKeyHash");
         require(confirmingPrevPublicKeyHash == publicKeyHash, "Confirming prevPublicKeyHash must match unconfirmed publicKeyHash");

@@ -203,45 +203,153 @@ const Wallet2 = () => {
 
   const handleKeyScan = async () => {
     try {
-      setIsScannerOpen(true);
-      let qrData;
-      let attempts = 0;
-      const maxAttempts = 100;
+      // Check if deployment exists
+      const checkResponse = await axios.post(
+        "http://localhost:3001/check-deployment",
+        {}
+      );
+      const maxScans = checkResponse.data.deployed ? 1 : 3; // Scan 1 QR if deployed, 3 if not
+      const qrResults = [];
 
-      while (attempts < maxAttempts) {
-        try {
-          qrData = await capture(webcamRef);
-          break;
-        } catch (error) {
-          attempts++;
-          await new Promise((resolve) => setTimeout(resolve, 300));
+      if (checkResponse.data.deployed) {
+        notifications.show({
+          title: "Deployment Found",
+          message: `Contracts already deployed: ${JSON.stringify(
+            checkResponse.data.addresses
+          )}`,
+          color: "green",
+        });
+        setContractAddresses(checkResponse.data.addresses);
+      } else {
+        notifications.show({
+          title: "No Deployment Found",
+          message: "Proceeding to scan 3 QR codes for deployment.",
+          color: "yellow",
+        });
+      }
+
+      // Scan QR codes
+      for (let i = 0; i < maxScans; i++) {
+        notifications.show({
+          title: `Scan QR Code ${i + 1}`,
+          message: `Please scan QR code ${i + 1} of ${maxScans}.`,
+          color: "blue",
+        });
+
+        setIsScannerOpen(true);
+        let qrData;
+        let attempts = 0;
+        const maxAttemptsPerScan = 100;
+        const scanTimeout = 300;
+
+        while (attempts < maxAttemptsPerScan) {
+          try {
+            qrData = await capture(webcamRef);
+            if (qrData) {
+              // Check if this QR code is different from previous ones
+              const [wifString] = qrData.split("|");
+              if (
+                qrResults.some(
+                  (result) => result.newParsedData.wif === wifString
+                )
+              ) {
+                throw new Error(
+                  `QR code ${
+                    i + 1
+                  } is identical to a previously scanned QR code. Please scan a different QR code.`
+                );
+              }
+              break;
+            }
+          } catch (error) {
+            attempts++;
+            await new Promise((resolve) => setTimeout(resolve, scanTimeout));
+          }
+        }
+
+        setIsScannerOpen(false);
+
+        if (!qrData) {
+          throw new Error(
+            `No QR code scanned for scan ${i + 1} within time limit`
+          );
+        }
+
+        const { newPrivateKey, newParsedData, status, error } =
+          await walletManager.processScannedQR(
+            qrData,
+            false,
+            !checkResponse.data.deployed
+          );
+
+        if (error) {
+          throw new Error(error || `Failed to process QR code ${i + 1}`);
+        }
+
+        qrResults.push({ newPrivateKey, newParsedData });
+
+        notifications.show({
+          title: `QR Code ${i + 1} Loaded`,
+          message: `Wallet key for rotation ${newParsedData.rotation} loaded successfully.`,
+          color: "green",
+        });
+
+        // Short delay to allow user to prepare the next QR code (if not the last scan)
+        if (i < maxScans - 1) {
+          await new Promise((resolve) => setTimeout(resolve, 1000)); // 1-second delay
         }
       }
 
-      if (!qrData) {
-        setIsScannerOpen(false);
-        throw new Error("No QR code scanned within time limit");
+      // Deploy contracts only if no deployment was found
+      if (!checkResponse.data.deployed) {
+        // Validate that we have 3 QR codes
+        if (qrResults.length !== 3) {
+          throw new Error("Three QR codes are required for deployment");
+        }
+
+        const [wif1, wif2, wif3] = qrResults.map(
+          (result) => result.newParsedData.wif
+        );
+        const cprkh = qrResults[0].newParsedData.prerotatedKeyHash;
+        const ctprkh = qrResults[0].newParsedData.twicePrerotatedKeyHash;
+        const clean = true;
+
+        const deployResult = await walletManager.deploy(
+          wif1,
+          wif2,
+          wif3,
+          cprkh,
+          ctprkh,
+          clean
+        );
+
+        if (deployResult.status && deployResult.addresses) {
+          setContractAddresses(deployResult.addresses);
+          notifications.show({
+            title: "Deployment Successful",
+            message: "Contracts deployed successfully.",
+            color: "green",
+          });
+        } else {
+          throw new Error(deployResult.error || "Failed to deploy contracts");
+        }
       }
 
-      setIsScannerOpen(false);
-      const { newPrivateKey, newParsedData } =
-        await walletManager.processScannedQR(qrData);
+      // Set the last scanned key as the active key
+      const lastResult = qrResults[qrResults.length - 1];
+      setPrivateKey(lastResult.newPrivateKey);
+      setWif(lastResult.newParsedData.wif);
+      setParsedData(lastResult.newParsedData);
 
-      localStorage.removeItem(`walletPrivateKey_${selectedBlockchain}`);
-      localStorage.removeItem(`walletWif_${selectedBlockchain}`);
-      localStorage.removeItem(`walletParsedData_${selectedBlockchain}`);
-      localStorage.removeItem(`walletIsInitialized_${selectedBlockchain}`);
-
-      setPrivateKey(newPrivateKey);
-      setWif(newParsedData.wif);
-      setParsedData(newParsedData);
-
-      notifications.show({
-        title: "Key Loaded",
-        message: `Wallet key for rotation ${newParsedData.rotation} loaded successfully.`,
-        color: "green",
+      // Store all parsed data in localStorage
+      qrResults.forEach((result, index) => {
+        localStorage.setItem(
+          `walletParsedData_${selectedBlockchain}_QR${index + 1}`,
+          JSON.stringify(result.newParsedData)
+        );
       });
 
+      // Check initialization status for the last key
       const initStatus = await walletManager.checkInitializationStatus();
       if (initStatus.status === "no_transaction") {
         notifications.show({
@@ -253,15 +361,27 @@ const Wallet2 = () => {
       } else if (initStatus.status === "pending_mempool") {
         notifications.show({
           title: "Pending Transaction",
-          message: `Key at rotation ${newParsedData.rotation} has a pending transaction in mempool. Waiting for confirmation.`,
+          message: `Key at rotation ${lastResult.newParsedData.rotation} has a pending transaction in mempool. Waiting for confirmation.`,
           color: "yellow",
         });
       }
+
+      notifications.show({
+        title: checkResponse.data.deployed
+          ? "Key Loaded"
+          : "All QR Codes Scanned and Deployed",
+        message: checkResponse.data.deployed
+          ? "Successfully loaded key from QR code."
+          : `Successfully processed ${maxScans} QR codes and deployed contracts.`,
+        color: "green",
+        autoClose: 5000,
+      });
     } catch (error) {
+      setIsScannerOpen(false);
       notifications.show({
         title: "Error",
         message:
-          error.message || "Failed to process QR code. Please try again.",
+          error.message || "Failed to process QR code(s) or deploy contracts.",
         color: "red",
       });
     }

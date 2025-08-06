@@ -14,22 +14,19 @@ Full license terms: see LICENSE.txt in this repository.
 pragma solidity ^0.8.0;
 
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
-import "@openzeppelin/contracts/access/Ownable.sol";
-import "@openzeppelin/contracts/token/ERC20/extensions/ERC20Permit.sol";
+import "./KeyLogRegistry.sol";
 
-contract WrappedToken is ERC20, Ownable, ERC20Permit {
+contract WrappedToken is ERC20 {
     address public bridge;
+    KeyLogRegistry public keyLogRegistry;
 
-    constructor(
-        string memory name,
-        string memory symbol,
-        address _bridge
-    ) ERC20(name, symbol) Ownable(msg.sender) ERC20Permit(name) {
+    constructor(string memory name, string memory symbol, address _bridge, address _keyLogRegistry) ERC20(name, symbol) {
         bridge = _bridge;
+        keyLogRegistry = KeyLogRegistry(_keyLogRegistry);
     }
 
     modifier onlyBridge() {
-        require(msg.sender == bridge, "Only Bridge can call this function");
+        require(msg.sender == bridge, "Only bridge can call");
         _;
     }
 
@@ -41,8 +38,21 @@ contract WrappedToken is ERC20, Ownable, ERC20Permit {
         _burn(from, amount);
     }
 
-    function setBridge(address _newBridge) external onlyOwner {
-        require(_newBridge != address(0), "Invalid Bridge address");
-        bridge = _newBridge;
+    function transfer(address to, uint256 amount) public override returns (bool) {
+        require(_validateKeyLog(msg.sender, to), "Invalid key log for transfer");
+        return super.transfer(to, amount);
+    }
+
+    function transferFrom(address from, address to, uint256 amount) public override returns (bool) {
+        require(_validateKeyLog(from, to), "Invalid key log for transfer");
+        return super.transferFrom(from, to, amount);
+    }
+
+    function _validateKeyLog(address from, address to) internal view returns (bool) {
+        (KeyLogRegistry.KeyLogEntry memory latestEntry, bool hasEntry) = keyLogRegistry.getLatestEntryByPrerotatedKeyHash(from);
+        if (hasEntry) {
+            return latestEntry.prerotatedKeyHash == from || latestEntry.prerotatedKeyHash == to;
+        }
+        return false; // No valid key log entry found
     }
 }
