@@ -1,6 +1,6 @@
 // src/pages/Wallet2.js
 import { useState, useEffect, useRef, useMemo } from "react";
-import { AppShell, Container, Card, Button, Text } from "@mantine/core";
+import { AppShell, Container, Card, Button, Text, Group } from "@mantine/core";
 import { notifications, Notifications } from "@mantine/notifications";
 import { useAppContext } from "../context/AppContext";
 import { walletManagerFactory } from "../blockchains/WalletManagerFactory";
@@ -13,7 +13,7 @@ import QRDisplayModal from "../components/Wallet2/QRDisplayModal";
 import WalletStateHandler from "../components/Wallet2/WalletStateHandler";
 import BlockchainNav from "../components/Wallet2/BlockchainNav";
 import { styles } from "../shared/styles";
-import { fromWIF, getP2PKH } from "../utils/hdWallet";
+import { fromWIF } from "../utils/hdWallet";
 import TokenSelector from "../components/Wallet2/TokenSelector";
 import { capture } from "../shared/capture";
 import { BLOCKCHAINS } from "../shared/constants";
@@ -56,20 +56,64 @@ const Wallet2 = () => {
     setFeeEstimate,
     balance,
     setBalance,
-    selectedToken, // New
+    selectedToken,
     contractAddresses,
     setContractAddresses,
+    isDeployed,
+    setIsDeployed,
     supportedTokens,
   } = useAppContext();
 
   const webcamRef = useRef(null);
   const appContext = useAppContext();
+  const isDeploymentChecked = useRef(false); // Ref to track if deployment check has run
 
-  // Instantiate WalletManager based on selected blockchain
   const walletManager = useMemo(
-    () => walletManagerFactory(selectedBlockchain, appContext, webcamRef),
-    [selectedBlockchain, appContext, webcamRef]
+    () => walletManagerFactory(selectedBlockchain, webcamRef),
+    [selectedBlockchain, webcamRef]
   );
+
+  // Check deployment status on mount and when blockchain changes
+  useEffect(() => {
+    const checkDeploymentStatus = async () => {
+      // Skip if already deployed and addresses are set
+      if (isDeployed && Object.keys(contractAddresses).length > 0) {
+        return;
+      }
+
+      try {
+        const result = await walletManager.checkDeployment(appContext);
+        setIsDeployed(result.status);
+        if (result.status && result.addresses) {
+          setContractAddresses(result.addresses);
+        }
+      } catch (error) {
+        console.error("Deployment check failed:", error);
+        notifications.show({
+          title: "Error",
+          message: "Failed to check deployment status",
+          color: "red",
+        });
+      }
+    };
+
+    if (!isDeploymentChecked.current) {
+      checkDeploymentStatus();
+      isDeploymentChecked.current = true; // Mark as checked
+    }
+
+    // Reset the ref when selectedBlockchain changes
+    return () => {
+      isDeploymentChecked.current = false;
+    };
+  }, [
+    selectedBlockchain,
+    isDeployed,
+    contractAddresses,
+    walletManager,
+    setIsDeployed,
+    setContractAddresses,
+  ]);
 
   // Load state from localStorage
   useEffect(() => {
@@ -88,14 +132,12 @@ const Wallet2 = () => {
       try {
         const privateKeyObj = fromWIF(storedWif);
         const parsed = JSON.parse(storedParsedData);
-        // Only set state if parsedData matches the current blockchain
         if (parsed.blockchain === selectedBlockchain) {
           setPrivateKey(privateKeyObj);
           setWif(storedWif);
           setParsedData({ ...parsed });
           setIsInitialized(storedIsInitialized === "true");
         } else {
-          // Clear in-memory state for mismatch but preserve localStorage
           setPrivateKey(null);
           setWif("");
           setParsedData(null);
@@ -103,20 +145,24 @@ const Wallet2 = () => {
         }
       } catch (error) {
         console.error("Error restoring private key:", error);
-        // Clear in-memory state on error but preserve localStorage
         setPrivateKey(null);
         setWif("");
         setParsedData(null);
         setIsInitialized(false);
       }
     } else {
-      // No data for this blockchain, initialize empty state
       setPrivateKey(null);
       setWif("");
       setParsedData(null);
       setIsInitialized(false);
     }
-  }, [selectedBlockchain]);
+  }, [
+    selectedBlockchain,
+    setPrivateKey,
+    setWif,
+    setParsedData,
+    setIsInitialized,
+  ]);
 
   // Save state to localStorage
   useEffect(() => {
@@ -176,6 +222,9 @@ const Wallet2 = () => {
     localStorage.removeItem(`walletWif_${selectedBlockchain}`);
     localStorage.removeItem(`walletParsedData_${selectedBlockchain}`);
     localStorage.removeItem(`walletIsInitialized_${selectedBlockchain}`);
+    localStorage.removeItem(`walletParsedData_${selectedBlockchain}_QR1`);
+    localStorage.removeItem(`walletParsedData_${selectedBlockchain}_QR2`);
+    localStorage.removeItem(`walletParsedData_${selectedBlockchain}_QR3`);
     notifications.show({
       title: "Wallet Reset",
       message:
@@ -186,53 +235,35 @@ const Wallet2 = () => {
 
   useEffect(() => {
     if (privateKey && isInitialized) {
-      walletManager.buildTransactionHistory();
-      walletManager.fetchFeeEstimate();
+      walletManager.buildTransactionHistory(appContext);
+      if (log.length > 0 && log.length !== parsedData.rotation)
+        walletManager.fetchFeeEstimate(appContext);
     }
-  }, [privateKey, isInitialized]);
+  }, [privateKey, isInitialized, selectedToken, walletManager]);
 
   useEffect(() => {
     if (privateKey && !isInitialized && !isSubmitting && parsedData) {
-      walletManager.checkStatus();
+      walletManager.checkStatus(appContext);
     }
-  }, [privateKey, isInitialized, isSubmitting, parsedData]);
+  }, [privateKey, isInitialized, isSubmitting, parsedData, walletManager, log]);
 
   useEffect(() => {
-    walletManager.fetchBalance();
-  }, [privateKey, isInitialized, log]);
+    if (privateKey && isInitialized) {
+      walletManager.fetchBalance(appContext);
+    }
+  }, [privateKey, isInitialized, log, walletManager]);
 
-  const handleKeyScan = async () => {
+  const handleDeployContracts = async () => {
     try {
-      // Check if deployment exists
-      const checkResponse = await axios.post(
-        "http://localhost:3001/check-deployment",
-        {}
-      );
-      const maxScans = checkResponse.data.deployed ? 1 : 3; // Scan 1 QR if deployed, 3 if not
+      const maxScans = 3;
       const qrResults = [];
 
-      if (checkResponse.data.deployed) {
-        notifications.show({
-          title: "Deployment Found",
-          message: `Contracts already deployed: ${JSON.stringify(
-            checkResponse.data.addresses
-          )}`,
-          color: "green",
-        });
-        setContractAddresses(checkResponse.data.addresses);
-      } else {
-        notifications.show({
-          title: "No Deployment Found",
-          message: "Proceeding to scan 3 QR codes for deployment.",
-          color: "yellow",
-        });
-      }
-
-      // Scan QR codes
       for (let i = 0; i < maxScans; i++) {
         notifications.show({
           title: `Scan QR Code ${i + 1}`,
-          message: `Please scan QR code ${i + 1} of ${maxScans}.`,
+          message: `Please scan QR code ${
+            i + 1
+          } of ${maxScans} for deployment.`,
           color: "blue",
         });
 
@@ -246,7 +277,6 @@ const Wallet2 = () => {
           try {
             qrData = await capture(webcamRef);
             if (qrData) {
-              // Check if this QR code is different from previous ones
               const [wifString] = qrData.split("|");
               if (
                 qrResults.some(
@@ -256,7 +286,7 @@ const Wallet2 = () => {
                 throw new Error(
                   `QR code ${
                     i + 1
-                  } is identical to a previously scanned QR code. Please scan a different QR code.`
+                  } is identical to a previously scanned QR code.`
                 );
               }
               break;
@@ -275,17 +305,8 @@ const Wallet2 = () => {
           );
         }
 
-        const { newPrivateKey, newParsedData, status, error } =
-          await walletManager.processScannedQR(
-            qrData,
-            false,
-            !checkResponse.data.deployed
-          );
-
-        if (error) {
-          throw new Error(error || `Failed to process QR code ${i + 1}`);
-        }
-
+        const { newPrivateKey, newParsedData } =
+          await walletManager.processScannedQR(appContext, qrData, false, true);
         qrResults.push({ newPrivateKey, newParsedData });
 
         notifications.show({
@@ -294,94 +315,90 @@ const Wallet2 = () => {
           color: "green",
         });
 
-        // Short delay to allow user to prepare the next QR code (if not the last scan)
         if (i < maxScans - 1) {
-          await new Promise((resolve) => setTimeout(resolve, 1000)); // 1-second delay
+          await new Promise((resolve) => setTimeout(resolve, 1000));
         }
       }
 
-      // Deploy contracts only if no deployment was found
-      if (!checkResponse.data.deployed) {
-        // Validate that we have 3 QR codes
-        if (qrResults.length !== 3) {
-          throw new Error("Three QR codes are required for deployment");
-        }
+      // Validate key continuity for deployment
+      await walletManager.validateDeploymentKeyContinuity(
+        appContext,
+        qrResults.map((r) => r.newParsedData)
+      );
 
-        const [wif1, wif2, wif3] = qrResults.map(
-          (result) => result.newParsedData.wif
+      const [wif1, wif2, wif3] = qrResults.map(
+        (result) => result.newParsedData.wif
+      );
+      const cprkh = qrResults[2].newParsedData.prerotatedKeyHash;
+      const ctprkh = qrResults[2].newParsedData.twicePrerotatedKeyHash;
+      const clean = true;
+
+      const deployResult = await walletManager.deploy(
+        appContext,
+        wif1,
+        wif2,
+        wif3,
+        cprkh,
+        ctprkh,
+        clean
+      );
+
+      if (deployResult.status && deployResult.addresses) {
+        setContractAddresses(deployResult.addresses);
+        setIsDeployed(true);
+
+        // Set the last scanned key as the active key
+        const lastResult = qrResults[qrResults.length - 1];
+        setPrivateKey(lastResult.newPrivateKey);
+        setWif(lastResult.newParsedData.wif);
+        setParsedData(lastResult.newParsedData);
+
+        // Store parsed data
+        qrResults.forEach((result, index) => {
+          localStorage.setItem(
+            `walletParsedData_${selectedBlockchain}_QR${index + 1}`,
+            JSON.stringify(result.newParsedData)
+          );
+        });
+
+        // Check initialization status
+        const initStatus = await walletManager.checkInitializationStatus(
+          appContext
         );
-        const cprkh = qrResults[0].newParsedData.prerotatedKeyHash;
-        const ctprkh = qrResults[0].newParsedData.twicePrerotatedKeyHash;
-        const clean = true;
-
-        const deployResult = await walletManager.deploy(
-          wif1,
-          wif2,
-          wif3,
-          cprkh,
-          ctprkh,
-          clean
-        );
-
-        if (deployResult.status && deployResult.addresses) {
-          setContractAddresses(deployResult.addresses);
+        if (initStatus.status === "no_transaction") {
           notifications.show({
-            title: "Deployment Successful",
-            message: "Contracts deployed successfully.",
-            color: "green",
+            title: "No Key Event Log Entry",
+            message: "Submitting wallet initialization transaction.",
+            color: "yellow",
           });
-        } else {
-          throw new Error(deployResult.error || "Failed to deploy contracts");
+          await walletManager.initializeKeyEventLog(appContext);
         }
-      }
 
-      // Set the last scanned key as the active key
-      const lastResult = qrResults[qrResults.length - 1];
-      setPrivateKey(lastResult.newPrivateKey);
-      setWif(lastResult.newParsedData.wif);
-      setParsedData(lastResult.newParsedData);
-
-      // Store all parsed data in localStorage
-      qrResults.forEach((result, index) => {
-        localStorage.setItem(
-          `walletParsedData_${selectedBlockchain}_QR${index + 1}`,
-          JSON.stringify(result.newParsedData)
-        );
-      });
-
-      // Check initialization status for the last key
-      const initStatus = await walletManager.checkInitializationStatus();
-      if (initStatus.status === "no_transaction") {
         notifications.show({
-          title: "No Key Event Log Entry",
-          message: "Submitting wallet initialization transaction.",
-          color: "yellow",
+          title: "Deployment Successful",
+          message: "Contracts deployed and wallet initialized.",
+          color: "green",
         });
-        await walletManager.initializeKeyEventLog();
-      } else if (initStatus.status === "pending_mempool") {
-        notifications.show({
-          title: "Pending Transaction",
-          message: `Key at rotation ${lastResult.newParsedData.rotation} has a pending transaction in mempool. Waiting for confirmation.`,
-          color: "yellow",
-        });
+      } else {
+        throw new Error(deployResult.error || "Failed to deploy contracts");
       }
-
-      notifications.show({
-        title: checkResponse.data.deployed
-          ? "Key Loaded"
-          : "All QR Codes Scanned and Deployed",
-        message: checkResponse.data.deployed
-          ? "Successfully loaded key from QR code."
-          : `Successfully processed ${maxScans} QR codes and deployed contracts.`,
-        color: "green",
-        autoClose: 5000,
-      });
     } catch (error) {
       setIsScannerOpen(false);
       notifications.show({
         title: "Error",
-        message:
-          error.message || "Failed to process QR code(s) or deploy contracts.",
+        message: error.message || "Failed to deploy contracts",
+        color: "red",
+      });
+    }
+  };
+
+  const handleRotateKey = async () => {
+    try {
+      await walletManager.rotateKey(appContext, webcamRef);
+    } catch (error) {
+      notifications.show({
+        title: "Error",
+        message: error.message || "Failed to rotate key",
         color: "red",
       });
     }
@@ -427,7 +444,7 @@ const Wallet2 = () => {
 
   const handleSignTransaction = async () => {
     try {
-      await walletManager.signTransaction();
+      await walletManager.signTransaction(appContext);
     } catch (error) {
       notifications.show({
         title: "Error",
@@ -442,9 +459,10 @@ const Wallet2 = () => {
   const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
   const endIndex = startIndex + ITEMS_PER_PAGE;
   const paginatedHistory = combinedHistory.slice(startIndex, endIndex);
-  const selectedBlockchainObject = BLOCKCHAINS.find((item) => {
-    return item.id === selectedBlockchain;
-  });
+  const selectedBlockchainObject = BLOCKCHAINS.find(
+    (item) => item.id === selectedBlockchain
+  );
+
   return (
     <AppShell
       navbar={{
@@ -472,85 +490,81 @@ const Wallet2 = () => {
               <>
                 <TokenSelector />
                 <Button
-                  onClick={() => {
-                    walletManager.wrap();
-                  }}
+                  onClick={() => walletManager.wrap(appContext)}
+                  disabled={!isDeployed || !isInitialized}
                 >
                   Wrap
                 </Button>
               </>
             )}
-            <>
-              <WalletStateHandler
-                privateKey={privateKey}
-                isSubmitting={isSubmitting}
-                isInitialized={isInitialized}
-                parsedData={parsedData}
-                log={log}
-                onScanKey={handleKeyScan}
-                onReset={resetWalletState}
-                styles={styles}
-              />
-              {privateKey && (
-                <>
-                  <WalletBalance
-                    balance={balance}
-                    parsedData={parsedData}
-                    log={log}
-                    onRefresh={() => {
-                      walletManager.fetchBalance();
-                      walletManager.buildTransactionHistory();
-                    }}
-                    onCopyAddress={copyAddressToClipboard}
-                    onShowQR={() => setIsQRModalOpen(true)}
+            <WalletStateHandler
+              privateKey={privateKey}
+              isSubmitting={isSubmitting}
+              isInitialized={isInitialized}
+              parsedData={parsedData}
+              log={log}
+              onDeployContracts={handleDeployContracts}
+              onRotateKey={handleRotateKey}
+              onReset={resetWalletState}
+              isDeployed={isDeployed}
+              styles={styles}
+            />
+            {privateKey && isDeployed && (
+              <>
+                <WalletBalance
+                  balance={balance}
+                  parsedData={parsedData}
+                  log={log}
+                  onRefresh={() => {
+                    walletManager.fetchBalance(appContext);
+                    walletManager.buildTransactionHistory(appContext);
+                  }}
+                  onCopyAddress={copyAddressToClipboard}
+                  onShowQR={() => setIsQRModalOpen(true)}
+                  styles={styles}
+                />
+                <Text mb="md">
+                  {parsedData.rotation === log.length
+                    ? `Wallet is ready. You can send transactions with this key (rotation ${parsedData.rotation}).`
+                    : `Please rotate to the next key (rotation ${log.length}) to sign transactions.`}
+                </Text>
+                {parsedData.rotation === log.length && (
+                  <TransactionForm
+                    recipients={recipients}
+                    onAddRecipient={addRecipient}
+                    onRemoveRecipient={removeRecipient}
+                    onUpdateRecipient={updateRecipient}
+                    onSendTransaction={handleSignTransaction}
+                    setFocusedRotation={setFocusedRotation}
+                    styles={styles}
+                    feeEstimate={feeEstimate}
+                  />
+                )}
+                {combinedHistory.length > 0 && (
+                  <TransactionHistory
+                    combinedHistory={paginatedHistory}
+                    currentPage={currentPage}
+                    totalPages={totalPages}
+                    onPageChange={setCurrentPage}
                     styles={styles}
                   />
-                  <Text mb="md">
-                    {parsedData.rotation === log.length
-                      ? `Wallet is ready. You can send transactions with this key (rotation ${parsedData.rotation}).`
-                      : `Please scan the next key (rotation ${log.length}) to sign transactions.`}
-                  </Text>
-                  <Button
-                    onClick={handleKeyScan}
-                    disabled={log.length === parsedData.rotation}
-                    color="teal"
-                    variant="outline"
-                    mt="md"
-                  >
-                    Scan Next Key (Rotation: {log.length})
-                  </Button>
-                  {parsedData.rotation === log.length && (
-                    <TransactionForm
-                      recipients={recipients}
-                      onAddRecipient={addRecipient}
-                      onRemoveRecipient={removeRecipient}
-                      onUpdateRecipient={updateRecipient}
-                      onSendTransaction={handleSignTransaction}
-                      setFocusedRotation={setFocusedRotation}
-                      styles={styles}
-                      feeEstimate={feeEstimate}
-                    />
-                  )}
-                  {combinedHistory.length > 0 && (
-                    <TransactionHistory
-                      combinedHistory={paginatedHistory}
-                      currentPage={currentPage}
-                      totalPages={totalPages}
-                      onPageChange={setCurrentPage}
-                      styles={styles}
-                    />
-                  )}
-                </>
+                )}
+              </>
+            )}
+            <Group mt="xl">
+              {!isDeployed && (
+                <Button
+                  onClick={handleDeployContracts}
+                  color="blue"
+                  variant="filled"
+                >
+                  Deploy Contracts
+                </Button>
               )}
-            </>
-            <Button
-              onClick={resetWalletState}
-              color="red"
-              variant="outline"
-              mt="xl"
-            >
-              Erase Wallet Cache
-            </Button>
+              <Button onClick={resetWalletState} color="red" variant="outline">
+                Erase Wallet Cache
+              </Button>
+            </Group>
             <QRScannerModal
               isOpen={isScannerOpen}
               onClose={() => {

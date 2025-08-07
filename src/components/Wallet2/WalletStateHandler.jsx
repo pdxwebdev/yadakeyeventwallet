@@ -1,3 +1,4 @@
+// src/components/Wallet2/WalletStateHandler.js
 import {
   Button,
   Collapse,
@@ -7,8 +8,8 @@ import {
   Text,
   Title,
 } from "@mantine/core";
-import Flasher from "./Flasher";
 import { useDisclosure } from "@mantine/hooks";
+import Flasher from "./Flasher";
 
 const WalletStateHandler = ({
   privateKey,
@@ -16,16 +17,21 @@ const WalletStateHandler = ({
   isInitialized,
   parsedData,
   log,
-  onScanKey,
+  onDeployContracts,
+  onRotateKey,
   onReset,
+  isDeployed,
   styles,
 }) => {
   const [opened, { toggle }] = useDisclosure(false);
-  if (!privateKey) {
+
+  if (privateKey) {
     return (
       <>
         <Title order={3} mb="md" fw="bold">
-          Please scan a QR code from your hardware wallet.
+          {isDeployed
+            ? "Please scan a QR code for the active key."
+            : "Please deploy contracts to initialize the wallet."}
         </Title>
         <Flex direction="row">
           <Button mb="md" onClick={toggle} variant="subtle" color="blue">
@@ -48,15 +54,27 @@ const WalletStateHandler = ({
             <a
               href="https://github.com/pdxwebdev/yada-wallet/blob/master/README.md"
               target="_blank"
+              rel="noopener noreferrer"
             >
               Follow this link for documentation
             </a>
             .
           </Text>
         </Collapse>
-        <Button onClick={onScanKey} color="teal" variant="outline" mt="md">
-          Scan Key (Rotation: {log.length})
-        </Button>
+        {isDeployed ? (
+          <Button onClick={onRotateKey} color="teal" variant="outline" mt="md">
+            Scan Key (Rotation: {log.length})
+          </Button>
+        ) : (
+          <Button
+            onClick={onDeployContracts}
+            color="blue"
+            variant="filled"
+            mt="md"
+          >
+            Deploy Contracts
+          </Button>
+        )}
       </>
     );
   }
@@ -70,14 +88,27 @@ const WalletStateHandler = ({
     );
   }
 
+  if (!isDeployed) {
+    return (
+      <Stack align="center" spacing="md">
+        <Text>
+          Contracts are not deployed. Please deploy contracts to proceed.
+        </Text>
+        <Button onClick={onDeployContracts} color="blue" variant="filled">
+          Deploy Contracts
+        </Button>
+      </Stack>
+    );
+  }
+
   if (!isInitialized) {
     return (
       <Stack align="center" spacing="md">
         <Text>
-          Current key (rotation {parsedData.rotation}) is not initialized.
-          Please scan the correct key (rotation {log.length}) to proceed.
+          Current key (rotation {log.length}) is not initialized. Please scan
+          the correct key (rotation {log.length}) to proceed.
         </Text>
-        <Button onClick={onScanKey} color="teal" variant="outline">
+        <Button onClick={onRotateKey} color="teal" variant="outline">
           Scan Key (Rotation: {log.length})
         </Button>
       </Stack>

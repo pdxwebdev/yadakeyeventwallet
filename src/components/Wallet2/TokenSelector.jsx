@@ -18,6 +18,7 @@ const ERC20_ABI = MockERC20Artifact.abi;
 const WRAPPED_TOKEN_ABI = WrappedTokenArtifact.abi;
 
 const TokenSelector = () => {
+  const appContext = useAppContext();
   const {
     selectedBlockchain,
     supportedTokens,
@@ -28,26 +29,9 @@ const TokenSelector = () => {
     privateKey,
     contractAddresses,
     setContractAddresses,
-  } = useAppContext();
+  } = appContext;
 
-  const walletManager = walletManagerFactory(
-    selectedBlockchain,
-    useAppContext()
-  );
-
-  useEffect(() => {
-    const deploy = async () => {
-      const wif = localStorage.getItem("walletWif_bsc");
-      if (!wif) return;
-      const res = await axios.get(
-        `http://localhost:3001/deploy?wif=${wif}&clean=1`
-      );
-      setContractAddresses(res.data.addresses);
-    };
-    if (supportedTokens.length === 0) {
-      deploy();
-    }
-  }, [supportedTokens]);
+  const walletManager = walletManagerFactory(selectedBlockchain);
 
   // Fetch supported tokens and add native coin
   useEffect(() => {
@@ -110,7 +94,7 @@ const TokenSelector = () => {
   // Fetch balance when token or private key changes
   useEffect(() => {
     if (selectedToken && privateKey) {
-      walletManager.fetchBalance();
+      walletManager.fetchBalance(appContext);
     }
   }, [selectedToken, privateKey]);
 

@@ -31,10 +31,10 @@ contract KeyLogRegistry is Ownable {
 
     KeyLogEntry[] public keyLogEntries;
 
-    mapping(address => uint256[]) public byPublicKeyHash;
-    mapping(address => uint256[]) public byPrevPublicKeyHash;
-    mapping(address => uint256[]) public byPrerotatedKeyHash;
-    mapping(address => uint256[]) public byTwicePrerotatedKeyHash;
+    mapping(address => uint256) public byPublicKeyHash;
+    mapping(address => uint256) public byPrevPublicKeyHash;
+    mapping(address => uint256) public byPrerotatedKeyHash;
+    mapping(address => uint256) public byTwicePrerotatedKeyHash;
 
     event KeyLogRegistered(address indexed publicKeyHash, uint256 index);
     event KeyRotated(address indexed publicKeyHash, uint256 index);
@@ -60,7 +60,7 @@ contract KeyLogRegistry is Ownable {
             outputAddress,
             hasRelationship,
             false, // isPair = false
-            address(0), address(0), address(0), address(0), false // Dummy pair params
+            address(0), address(0), address(0), address(0), address(0), false // Dummy pair params
         );
 
         // Step 2: Apply state changes after validation
@@ -76,15 +76,15 @@ contract KeyLogRegistry is Ownable {
         }));
 
         uint256 newIndex = keyLogEntries.length - 1;
-        byPublicKeyHash[publicKeyHash].push(newIndex);
+        byPublicKeyHash[publicKeyHash] = newIndex + 1;
         if (prevPublicKeyHash != address(0)) {
-            byPrevPublicKeyHash[prevPublicKeyHash].push(newIndex);
+            byPrevPublicKeyHash[prevPublicKeyHash] = newIndex + 1;
         }
         if (prerotatedKeyHash != address(0)) {
-            byPrerotatedKeyHash[prerotatedKeyHash].push(newIndex);
+            byPrerotatedKeyHash[prerotatedKeyHash] = newIndex + 1;
         }
         if (twicePrerotatedKeyHash != address(0)) {
-            byTwicePrerotatedKeyHash[twicePrerotatedKeyHash].push(newIndex);
+            byTwicePrerotatedKeyHash[twicePrerotatedKeyHash] = newIndex + 1;
         }
 
         // Step 3: Emit events
@@ -121,6 +121,7 @@ contract KeyLogRegistry is Ownable {
             true, // isPair = true
             confirmingPublicKeyHash,
             confirmingPrerotatedKeyHash,
+            confirmingTwicePrerotatedKeyHash,
             confirmingPrevPublicKeyHash,
             confirmingOutputAddress,
             confirmingHasRelationship
@@ -139,15 +140,15 @@ contract KeyLogRegistry is Ownable {
         }));
         uint256 unconfirmedIndex = keyLogEntries.length - 1;
 
-        byPublicKeyHash[unconfirmedPublicKeyHash].push(unconfirmedIndex);
+        byPublicKeyHash[unconfirmedPublicKeyHash] = unconfirmedIndex + 1;
         if (unconfirmedPrevPublicKeyHash != address(0)) {
-            byPrevPublicKeyHash[unconfirmedPrevPublicKeyHash].push(unconfirmedIndex);
+            byPrevPublicKeyHash[unconfirmedPrevPublicKeyHash] = unconfirmedIndex + 1;
         }
         if (unconfirmedPrerotatedKeyHash != address(0)) {
-            byPrerotatedKeyHash[unconfirmedPrerotatedKeyHash].push(unconfirmedIndex);
+            byPrerotatedKeyHash[unconfirmedPrerotatedKeyHash] = unconfirmedIndex + 1;
         }
         if (unconfirmedTwicePrerotatedKeyHash != address(0)) {
-            byTwicePrerotatedKeyHash[unconfirmedTwicePrerotatedKeyHash].push(unconfirmedIndex);
+            byTwicePrerotatedKeyHash[unconfirmedTwicePrerotatedKeyHash] = unconfirmedIndex + 1;
         }
 
         keyLogEntries.push(KeyLogEntry({
@@ -162,15 +163,15 @@ contract KeyLogRegistry is Ownable {
         }));
         uint256 confirmingIndex = keyLogEntries.length - 1;
 
-        byPublicKeyHash[confirmingPublicKeyHash].push(confirmingIndex);
+        byPublicKeyHash[confirmingPublicKeyHash] = confirmingIndex + 1;
         if (confirmingPrevPublicKeyHash != address(0)) {
-            byPrevPublicKeyHash[confirmingPrevPublicKeyHash].push(confirmingIndex);
+            byPrevPublicKeyHash[confirmingPrevPublicKeyHash] = confirmingIndex + 1;
         }
         if (confirmingPrerotatedKeyHash != address(0)) {
-            byPrerotatedKeyHash[confirmingPrerotatedKeyHash].push(confirmingIndex);
+            byPrerotatedKeyHash[confirmingPrerotatedKeyHash] = confirmingIndex + 1;
         }
         if (confirmingTwicePrerotatedKeyHash != address(0)) {
-            byTwicePrerotatedKeyHash[confirmingTwicePrerotatedKeyHash].push(confirmingIndex);
+            byTwicePrerotatedKeyHash[confirmingTwicePrerotatedKeyHash] = confirmingIndex + 1;
         }
 
         // Step 3: Emit events
@@ -190,6 +191,7 @@ contract KeyLogRegistry is Ownable {
         bool isPair,
         address confirmingPublicKeyHash,
         address confirmingPrerotatedKeyHash,
+        address confirmingTwicePrerotatedKeyHash,
         address confirmingPrevPublicKeyHash,
         address confirmingOutputAddress,
         bool confirmingHasRelationship
@@ -209,6 +211,10 @@ contract KeyLogRegistry is Ownable {
 
         // Ensure the provided publicKeyHash matches the computed one
         require(computedPublicKeyHash == publicKeyHash, "Public key hash mismatch");
+        require(byPrerotatedKeyHash[prerotatedKeyHash] == 0, "Prerotated key hash already used");
+        require(byTwicePrerotatedKeyHash[twicePrerotatedKeyHash] == 0, "Twice prerotated key hash already used");
+        require(byPrerotatedKeyHash[confirmingPrerotatedKeyHash] == 0, "Confirming rerotated key hash already used");
+        require(byTwicePrerotatedKeyHash[confirmingTwicePrerotatedKeyHash] == 0, "Confirming twice prerotated key hash already used");
 
         // Determine the flag for the first (or only) entry
         KeyEventFlag firstFlag;
@@ -245,18 +251,18 @@ contract KeyLogRegistry is Ownable {
 
     // Add this function to KeyLogRegistry.sol
     function getLatestEntryByPrerotatedKeyHash(address prerotatedKeyHash) public view returns (KeyLogEntry memory, bool) {
-        uint256[] memory indices = byPrerotatedKeyHash[prerotatedKeyHash];
-        if (indices.length == 0) {
-            indices = byTwicePrerotatedKeyHash[prerotatedKeyHash];
-            if (indices.length == 0) {
+        uint256 idx = byPrerotatedKeyHash[prerotatedKeyHash];
+        if (idx == 0) {
+            idx = byTwicePrerotatedKeyHash[prerotatedKeyHash];
+            if (idx == 0) {
                 KeyLogEntry memory emptyEntry;
                 return (emptyEntry, false);
             }
         }
-        KeyLogEntry memory entry = keyLogEntries[indices[indices.length - 1]];
+        KeyLogEntry memory entry = keyLogEntries[idx - 1];
         address currentAddress = entry.prerotatedKeyHash;
-        indices = byPublicKeyHash[currentAddress];
-        require(indices.length == 0, "Not the latest key rotation.");
+        idx = byPublicKeyHash[currentAddress];
+        require(idx == 0, "Not the latest key rotation.");
         return (entry, true);
     }
 
@@ -271,16 +277,19 @@ contract KeyLogRegistry is Ownable {
 
         KeyLogEntry memory entry;
         while (true) {
-            uint256[] memory indices = byPublicKeyHash[currentAddress];
-            if(indices.length == 0) {
-                indices = byPrerotatedKeyHash[currentAddress];
-                if(indices.length == 0) {
-                    KeyLogEntry[] memory emptyLog = new KeyLogEntry[](0);
-                    return emptyLog;
-                }
+            uint256 idx = byPublicKeyHash[currentAddress];
+            if (idx == 0) {
+                idx = byPrerotatedKeyHash[currentAddress];
+            }
+            if (idx == 0) {
+                idx = byTwicePrerotatedKeyHash[currentAddress];
+            }
+            if (idx == 0) {
+                KeyLogEntry[] memory emptyLog = new KeyLogEntry[](0);
+                return emptyLog;
             }
 
-            entry = keyLogEntries[indices[indices.length - 1]];
+            entry = keyLogEntries[idx - 1];
             if (entry.prevPublicKeyHash == address(0)) {
                 inception = entry;
                 foundInception = true;
@@ -296,11 +305,11 @@ contract KeyLogRegistry is Ownable {
             currentAddress = inception.prerotatedKeyHash;
 
             while (true) {
-                uint256[] memory indices = byPublicKeyHash[currentAddress];
-                if (indices.length == 0) {
+                uint256 idx = byPublicKeyHash[currentAddress];
+                if (idx == 0) {
                     break;
                 } else {
-                    entry = keyLogEntries[indices[indices.length - 1]];
+                    entry = keyLogEntries[idx - 1];
                     log[logIndex] = entry;
                     logIndex++;
                     currentAddress = entry.prerotatedKeyHash;
@@ -326,13 +335,13 @@ contract KeyLogRegistry is Ownable {
     }
 
     function getPreviousEntry(bytes memory publicKey) public view returns (KeyLogEntry memory, bool) {
-        uint256[] memory indices = byPrerotatedKeyHash[getAddressFromPublicKey(publicKey)];
-        if (indices.length == 0) {
+        uint256 idx = byPrerotatedKeyHash[getAddressFromPublicKey(publicKey)];
+        if (idx == 0) {
             KeyLogEntry memory emptyEntry;
             return (emptyEntry, false);
         }
 
-        KeyLogEntry memory currentEntry = keyLogEntries[indices[indices.length - 1]];
+        KeyLogEntry memory currentEntry = keyLogEntries[idx - 1];
         return (currentEntry, true);
     }
 
@@ -346,12 +355,12 @@ contract KeyLogRegistry is Ownable {
     }
 
     function getLatestEntry(address publicKeyHash) public view returns (KeyLogEntry memory, bool) {
-        uint256[] memory indices = byPublicKeyHash[publicKeyHash];
-        if (indices.length == 0) {
+        uint256 idx = byPublicKeyHash[publicKeyHash];
+        if (idx == 0) {
             KeyLogEntry memory emptyEntry;
             return (emptyEntry, false);
         }
-        return (keyLogEntries[indices[indices.length - 1]], true);
+        return (keyLogEntries[idx - 1], true);
     }
 
     address public authorizedCaller;

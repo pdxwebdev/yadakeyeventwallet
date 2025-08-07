@@ -22,20 +22,19 @@ const WRAPPED_TOKEN_ABI = WrappedTokenArtifact.abi;
 
 class YadaBSC {
   constructor(appContext, webcamRef) {
-    this.appContext = appContext;
     this.webcamRef = webcamRef
   }
 
   // Helper to generate EIP-2612 permit
-  async generatePermit(tokenAddress, signer, amount, nonce) {
-    const {contractAddresses} = this.appContext
+  async generatePermit(appContext, tokenAddress, signer, amount, nonce) {
+    const {contractAddresses, supportedTokens} = appContext
     // Skip permit generation for BNB (native currency)
     if (tokenAddress.toLowerCase() === "0x0000000000000000000000000000000000000000") {
       console.warn(`Permits not applicable for BNB (${tokenAddress}). Skipping permit generation.`);
       return null;
     }
   
-    const isWrapped = this.appContext.supportedTokens
+    const isWrapped = supportedTokens
       .map((token) => token.address.toLowerCase())
       .includes(tokenAddress.toLowerCase());
     const abi = isWrapped ? WRAPPED_TOKEN_ABI : ERC20_ABI;
@@ -88,7 +87,7 @@ class YadaBSC {
   }
 
   // Builds transaction history from KeyLogRegistry and token transfer events
-  async buildTransactionHistory() {
+  async buildTransactionHistory(appContext) {
     const {
       privateKey,
       setLog,
@@ -98,14 +97,9 @@ class YadaBSC {
       setCurrentPage,
       selectedToken,
       contractAddresses
-    } = this.appContext;
+    } = appContext;
 
     if (!privateKey || !selectedToken) {
-      notifications.show({
-        title: "Error",
-        message: "Wallet or token not selected",
-        color: "red",
-      });
       return;
     }
 
@@ -278,9 +272,9 @@ class YadaBSC {
     }
   }
 
-  async fetchTransactionsForKey(publicKeyHash, rotation, fromBlock, toBlock, selectedToken) {
+  async fetchTransactionsForKey(appContext, publicKeyHash, rotation, fromBlock, toBlock, selectedToken) {
     try {
-      const { privateKey, supportedTokens, contractAddresses } = this.appContext;
+      const { privateKey, supportedTokens, contractAddresses } = appContext;
       if (!privateKey) {
         return { transactions: [], totalReceived: BigInt(0), totalSent: BigInt(0) };
       }
@@ -433,14 +427,14 @@ class YadaBSC {
   }
 
   // Checks wallet initialization status
-  async checkInitializationStatus() {
-    const { privateKey, setLog, parsedData, contractAddresses } = this.appContext;
+async checkInitializationStatus(appContext) {
+    const { privateKey, setLog, parsedData, contractAddresses } = appContext;
 
     if (!privateKey || !contractAddresses.keyLogRegistryAddress) {
       return { status: "no_signer" };
     }
 
-    const signer = new ethers.Wallet(ethers.hexlify(privateKey.privateKey), localProvider)
+    const signer = new ethers.Wallet(ethers.hexlify(privateKey.privateKey), localProvider);
 
     try {
       const keyLogRegistry = new ethers.Contract(
@@ -451,27 +445,77 @@ class YadaBSC {
       const address = await signer.getAddress();
       const publicKey = Buffer.from(signer.signingKey.publicKey.slice(2), 'hex').slice(1);
       const fetchedLog = await keyLogRegistry.buildFromPublicKey(publicKey);
-      setLog(fetchedLog);
-      if (fetchedLog.length === 0) {
+
+      // Debug: Log raw fetchedLog
+      console.log("Raw fetchedLog:", JSON.stringify(fetchedLog, (key, value) => 
+        typeof value === 'bigint' ? value.toString() : value, 2));
+
+      // Filter out duplicates and invalid entries
+      const uniqueLog = [];
+      const seenKeys = new Set();
+      for (const entry of fetchedLog) {
+        if (
+          entry &&
+          entry.publicKeyHash &&
+          entry.publicKeyHash !== ethers.ZeroAddress &&
+          !seenKeys.has(entry.publicKeyHash)
+        ) {
+          uniqueLog.push({
+            twicePrerotatedKeyHash: entry.twicePrerotatedKeyHash,
+            prerotatedKeyHash: entry.prerotatedKeyHash,
+            publicKeyHash: entry.publicKeyHash,
+            prevPublicKeyHash: entry.prevPublicKeyHash,
+            outputAddress: entry.outputAddress,
+            hasRelationship: entry.hasRelationship,
+            isOnChain: entry.isOnChain,
+            flag: Number(entry.flag) // Convert enum to number for clarity
+          });
+          seenKeys.add(entry.publicKeyHash);
+        }
+      }
+
+      // Sort by rotation (using index as a proxy since flag may not be reliable)
+      uniqueLog.sort((a, b) => {
+        const rotationA = a.prevPublicKeyHash === ethers.ZeroAddress ? 0 : uniqueLog.indexOf(a) + 1;
+        const rotationB = b.prevPublicKeyHash === ethers.ZeroAddress ? 0 : uniqueLog.indexOf(b) + 1;
+        return rotationA - rotationB;
+      });
+
+      // Debug: Log filtered log and check for duplicates
+      console.log("Filtered uniqueLog:", JSON.stringify(uniqueLog, (key, value) => 
+        typeof value === 'bigint' ? value.toString() : value, 2));
+      if (uniqueLog.length > 0) {
+        for (let i = 0; i < uniqueLog.length - 1; i++) {
+          for (let j = i + 1; j < uniqueLog.length; j++) {
+            if (uniqueLog[i].publicKeyHash === uniqueLog[j].publicKeyHash) {
+              console.warn(`Duplicate publicKeyHash detected: ${uniqueLog[i].publicKeyHash} at indices ${i} and ${j}`);
+            }
+          }
+        }
+      }
+
+      setLog(uniqueLog);
+
+      if (uniqueLog.length === 0) {
         return { status: "no_transaction" };
       }
 
-      const latestEntry = fetchedLog[fetchedLog.length - 1];
+      const latestEntry = uniqueLog[uniqueLog.length - 1];
       if (latestEntry.publicKeyHash === address) {
         return { status: "active" };
       }
 
-      const isKeyInLog = fetchedLog.some(
+      const isKeyInLog = uniqueLog.some(
         (entry) => entry.isOnChain && entry.publicKeyHash === address
       );
       if (isKeyInLog) {
-        const logEntry = fetchedLog.find(
-          (entry) => !entry.mempool && entry.public_key_hash === address
+        const logEntry = uniqueLog.find(
+          (entry) => !entry.mempool && entry.publicKeyHash === address
         );
         const isValidContinuity =
           (parsedData.rotation === 0 && !parsedData.prevPublicKeyHash) ||
           (parsedData.prevPublicKeyHash &&
-            fetchedLog.some(
+            uniqueLog.some(
               (e) => !e.mempool && e.publicKeyHash === parsedData.prevPublicKeyHash
             ) &&
             logEntry.prerotatedKeyHash === parsedData.publicKeyHash &&
@@ -483,9 +527,9 @@ class YadaBSC {
         return { status: "revoked" };
       }
 
-      if (parsedData.rotation === fetchedLog.length) {
-        if (fetchedLog.length > 0) {
-          const lastLogEntry = fetchedLog[fetchedLog.length - 1];
+      if (parsedData.rotation === uniqueLog.length) {
+        if (uniqueLog.length > 0) {
+          const lastLogEntry = uniqueLog[uniqueLog.length - 1];
           const isValidContinuity =
             lastLogEntry.publicKeyHash === parsedData.prevPublicKeyHash &&
             lastLogEntry.prerotatedKeyHash === address &&
@@ -514,11 +558,11 @@ class YadaBSC {
   }
 
   // Checks and initializes wallet status
-  async checkStatus() {
+  async checkStatus(appContext) {
     const { setIsInitialized, log } =
-      this.appContext;
+      appContext;
 
-    const initStatus = await this.checkInitializationStatus();
+    const initStatus = await this.checkInitializationStatus(appContext);
     if (initStatus.status === "active") {
       setIsInitialized(true);
       localStorage.setItem("walletIsInitialized", "true");
@@ -561,9 +605,9 @@ class YadaBSC {
     }
   }
   
-  async fetchFeeEstimate() {
-    const { setFeeEstimate, signer, parsedData, contractAddresses } = this.appContext;
-    
+  async fetchFeeEstimate(appContext) {
+    const { setFeeEstimate, parsedData, contractAddresses, privateKey } = appContext;
+    const signer = new ethers.Wallet(ethers.hexlify(privateKey.privateKey), localProvider);
     if (!signer) {
       notifications.show({
         title: "Error",
@@ -632,8 +676,8 @@ class YadaBSC {
   }
 
   // Fetches token balances
-  async fetchBalance() {
-    const { privateKey, selectedToken, setLoading, setBalance, setSymbol, supportedTokens, contractAddresses } = this.appContext;
+  async fetchBalance(appContext) {
+    const { privateKey, selectedToken, setLoading, setBalance, setSymbol, supportedTokens, contractAddresses } = appContext;
     
     if (!privateKey || !selectedToken) return;
 
@@ -693,8 +737,8 @@ class YadaBSC {
   }
 
   // Initializes key event log
-  async initializeKeyEventLog() {
-    const { privateKey, setLoading, parsedData, contractAddresses } = this.appContext;
+  async initializeKeyEventLog(appContext) {
+    const { privateKey, setLoading, parsedData, contractAddresses, supportedTokens } = appContext;
     if (!privateKey) return;
 
     const signer = new ethers.Wallet(ethers.hexlify(privateKey.privateKey), localProvider);
@@ -728,7 +772,7 @@ class YadaBSC {
             return null;
           }
           try {
-            const isWrapped = this.appContext.supportedTokens
+            const isWrapped = supportedTokens
               .map((token) => token.address.toLowerCase())
               .includes(tokenAddress.toLowerCase());
             const abi = isWrapped ? WRAPPED_TOKEN_ABI : ERC20_ABI;
@@ -820,7 +864,7 @@ class YadaBSC {
   }
 
 
-  async signTransaction() {
+  async signTransaction(appContext) {
     const {
       privateKey,
       recipients,
@@ -835,7 +879,7 @@ class YadaBSC {
       log,
       setLog,
       contractAddresses
-    } = this.appContext;
+    } = appContext;
 
     // Validate ethers
     if (!ethers) {
@@ -883,7 +927,7 @@ class YadaBSC {
       }
 
       setIsScannerOpen(false);
-      const { newPrivateKey, newParsedData } = await this.processScannedQR(qrData, true);
+      const { newPrivateKey, newParsedData } = await this.processScannedQR(appContext, qrData, true);
       const newSigner = new ethers.Wallet(ethers.hexlify(newPrivateKey.privateKey), localProvider);
       const newAddress = await newSigner.getAddress();
 
@@ -932,7 +976,7 @@ class YadaBSC {
           if (tAddress.toLowerCase() === '0x0000000000000000000000000000000000000000') {
             return;
           }
-          const isWrapped = this.appContext.supportedTokens
+          const isWrapped = supportedTokens
             .map((token) => token.address.toLowerCase())
             .includes(tAddress.toLowerCase());
           const abi = isWrapped ? WRAPPED_TOKEN_ABI : ERC20_ABI;
@@ -1203,12 +1247,115 @@ class YadaBSC {
     }
   }
 
-  // Deploy function to send POST request with three WIFs
-  async deploy(wif1, wif2, wif3, cprkh, ctprkh, clean) {
-    const { setContractAddresses, notifications } = this.appContext;
+  // Check if contracts are deployed
+  async checkDeployment(appContext) {
+    const { setContractAddresses, setIsDeployed } = appContext;
+    try {
+      const response = await axios.post("http://localhost:3001/check-deployment", {});
+      const { deployed, addresses } = response.data;
+      if (deployed && addresses) {
+        setContractAddresses(addresses);
+        setIsDeployed(true);
+        return { status: true, addresses };
+      } else {
+        setIsDeployed(false);
+        return { status: false };
+      }
+    } catch (error) {
+      console.error("Error checking deployment:", error);
+      notifications.show({
+        title: "Error",
+        message: "Failed to check contract deployment status",
+        color: "red",
+      });
+      setIsDeployed(false);
+      return { status: false, error: error.message };
+    }
+  }
+
+  // Rotate key with a single QR scan
+  async rotateKey(appContext, webcamRef) {
+    const {
+      privateKey,
+      parsedData,
+      setIsScannerOpen,
+      setParsedData,
+      setLoading,
+      log,
+      setLog,
+      contractAddresses,
+      setPrivateKey,
+      setWif,
+      supportedTokens
+    } = appContext;
+
+    if (!privateKey || !contractAddresses.keyLogRegistryAddress) {
+      notifications.show({
+        title: "Error",
+        message: "Wallet or contracts not initialized",
+        color: "red",
+      });
+      return;
+    }
+
+    const signer = new ethers.Wallet(ethers.hexlify(privateKey.privateKey), localProvider);
 
     try {
-      const response = await axios.post('http://localhost:3001/deploy', {
+      notifications.show({
+        title: "Key Rotation Required",
+        message: `Please scan the QR code for the next key (rotation ${log.length + 1}).`,
+        color: "yellow",
+      });
+      setIsScannerOpen(true);
+
+      let qrData;
+      let attempts = 0;
+      const maxAttempts = 100;
+      while (attempts < maxAttempts) {
+        try {
+          qrData = await capture(webcamRef);
+          break;
+        } catch (error) {
+          attempts++;
+          await new Promise((resolve) => setTimeout(resolve, 300));
+        }
+      }
+      if (!qrData) {
+        throw new Error("No QR code scanned within time limit");
+      }
+
+      setIsScannerOpen(false);
+      setLoading(true);
+
+      const { newPrivateKey, newParsedData } = await this.processScannedQR(appContext, qrData, false);
+      setParsedData(newParsedData);
+      setPrivateKey(newPrivateKey);
+      setWif(newParsedData.wif);
+
+      notifications.show({
+        title: "Success",
+        message: "Key rotation completed successfully.",
+        color: "green",
+      });
+    } catch (error) {
+      console.error("Key rotation error:", error);
+      notifications.show({
+        title: "Error",
+        message: error.message || "Failed to rotate key",
+        color: "red",
+      });
+    } finally {
+      setLoading(false);
+      setIsScannerOpen(false);
+    }
+  }
+
+  // Deploy function to send POST request with three WIFs
+  async deploy(appContext, wif1, wif2, wif3, cprkh, ctprkh, clean) {
+    const { setContractAddresses, setIsDeployed } = appContext;
+
+    try {
+      const response = await axios.post("http://localhost:3001/deploy", {
         wif1,
         wif2,
         wif3,
@@ -1221,28 +1368,34 @@ class YadaBSC {
 
       if (status && addresses) {
         setContractAddresses(addresses);
+        setIsDeployed(true);
+        notifications.show({
+          title: "Deployment Successful",
+          message: "Contracts deployed successfully.",
+          color: "green",
+        });
         return { status: true, addresses };
       } else {
-        throw new Error(error || 'Failed to deploy contracts');
+        throw new Error(error || "Failed to deploy contracts");
       }
     } catch (error) {
-      console.error('Deployment error:', error);
+      console.error("Deployment error:", error);
       notifications.show({
-        title: 'Error',
-        message: error.message || 'Failed to deploy contracts',
-        color: 'red',
+        title: "Error",
+        message: error.message || "Failed to deploy contracts",
+        color: "red",
       });
       return { status: false, error: error.message };
     }
   }
 
   // Processes QR code in YadaCoin format: wifString|prerotatedKeyHash|twicePrerotatedKeyHash|prevPublicKeyHash|rotation
-  async processScannedQR(qrData, isTransactionFlow = false, isDeployment = false) {
-    const { setUserKeyState, setSigner, privateKey, signer, contractAddresses, setContractAddresses } = this.appContext;
+  async processScannedQR(appContext, qrData, isTransactionFlow = false, isDeployment = false) {
+    const { setUserKeyState, setSigner, privateKey, contractAddresses } = appContext;
 
     try {
       const [wifString, prerotatedKeyHash, twicePrerotatedKeyHash, prevPublicKeyHash, rotation] = qrData.split("|");
-      
+
       // Validate inputs
       if (
         !wifString ||
@@ -1257,38 +1410,36 @@ class YadaBSC {
       // Convert WIF to Ethereum wallet
       const newWallet = fromWIF(wifString);
       const publicKey = newWallet.publicKey;
-      const signer2 = new ethers.Wallet(
-        ethers.hexlify(newWallet.privateKey),
-        localProvider
-      );
-      setSigner(signer2);
-      const publicKeyHash = signer2.address;
+      const signer = new ethers.Wallet(ethers.hexlify(newWallet.privateKey), localProvider);
+      setSigner(signer);
+      const publicKeyHash = signer.address;
 
       const newParsedData = {
         publicKey,
         publicKeyHash,
-        prerotatedKeyHash: prerotatedKeyHash,
-        twicePrerotatedKeyHash: twicePrerotatedKeyHash,
+        prerotatedKeyHash,
+        twicePrerotatedKeyHash,
         prevPublicKeyHash: prevPublicKeyHash || ethers.ZeroAddress,
         rotation: parseInt(rotation, 10),
         wif: wifString,
         blockchain: 'bsc',
       };
 
+      if (isDeployment) {
+        return { newPrivateKey: newWallet, newParsedData };
+      }
 
-      if (isDeployment) return { newPrivateKey: newWallet, newParsedData };
-
-      // Fetch key log from KeyLogRegistry
+      // Fetch key log only for non-deployment cases
       const keyLogRegistry = new ethers.Contract(
-        contractAddresses.keyLogRegistryAddress || '0x0000000000000000000000000000000000000000', // Fallback address
+        contractAddresses.keyLogRegistryAddress || ethers.ZeroAddress,
         KEYLOG_REGISTRY_ABI,
-        signer2
+        signer
       );
       const log = await keyLogRegistry.buildFromPublicKey(
         decompressPublicKey(Buffer.from(privateKey ? privateKey.publicKey : newWallet.publicKey)).slice(1)
       );
 
-      // Validate key continuity
+      // Validate key continuity for non-deployment
       this.validateKeyContinuity(newParsedData, log, isTransactionFlow);
 
       return { newPrivateKey: newWallet, newParsedData };
@@ -1303,21 +1454,74 @@ class YadaBSC {
     }
   }
 
-  // Validates key continuity
-  validateKeyContinuity(qrResults, fetchedLog, isTransactionFlow) {
-    const { privateKey, parsedData, isInitialized } = this.appContext;
 
+  // Validates key continuity for deployment (3 QR codes, no fetchedLog)
+  validateDeploymentKeyContinuity(appContext, qrResults) {
     if (!Array.isArray(qrResults) || qrResults.length !== 3) {
-      throw new Error("Exactly three QR codes are required");
+      throw new Error("Exactly three QR codes are required for deployment");
     }
 
     qrResults.forEach((newParsedData, index) => {
-      const newPublicKeyHash = newParsedData.publicKeyHash;
+      // Validate rotation numbers are sequential (0, 1, 2)
+      if (newParsedData.rotation !== index) {
+        throw new Error(
+          `Invalid rotation at position ${index + 1}: expected ${index}, got ${newParsedData.rotation}`
+        );
+      }
 
-      if (newParsedData.rotation > 0) {
-        if (fetchedLog.length === 0) {
+      // First key should have no prevPublicKeyHash (or ZeroAddress)
+      if (index === 0) {
+        if (newParsedData.prevPublicKeyHash !== ethers.ZeroAddress) {
           throw new Error(
-            `No confirmed key event log entries found, but rotation ${newParsedData.rotation} requires a previous key`
+            `First key (rotation 0) must have prevPublicKeyHash as ZeroAddress, got ${newParsedData.prevPublicKeyHash}`
+          );
+        }
+      }
+
+      // Check continuity between consecutive keys
+      if (index < qrResults.length - 1) {
+        const nextParsedData = qrResults[index + 1];
+        // Current key's prerotatedKeyHash should match next key's publicKeyHash
+        if (newParsedData.prerotatedKeyHash !== nextParsedData.publicKeyHash) {
+          throw new Error(
+            `Key at position ${index + 1} (rotation ${newParsedData.rotation}) prerotatedKeyHash (${newParsedData.prerotatedKeyHash}) does not match next key's publicKeyHash (${nextParsedData.publicKeyHash})`
+          );
+        }
+        // Current key's twicePrerotatedKeyHash should match next key's prerotatedKeyHash
+        if (newParsedData.twicePrerotatedKeyHash !== nextParsedData.prerotatedKeyHash) {
+          throw new Error(
+            `Key at position ${index + 1} (rotation ${newParsedData.rotation}) twicePrerotatedKeyHash (${newParsedData.twicePrerotatedKeyHash}) does not match next key's prerotatedKeyHash (${nextParsedData.prerotatedKeyHash})`
+          );
+        }
+        // Next key's prevPublicKeyHash should match current key's publicKeyHash
+        if (nextParsedData.prevPublicKeyHash !== newParsedData.publicKeyHash) {
+          throw new Error(
+            `Key at position ${index + 2} (rotation ${nextParsedData.rotation}) prevPublicKeyHash (${nextParsedData.prevPublicKeyHash}) does not match current key's publicKeyHash (${newParsedData.publicKeyHash})`
+          );
+        }
+      }
+    });
+
+    return true;
+  }
+
+  // Validates key continuity
+
+
+  // Validates key continuity for rotation or transactions (uses fetchedLog)
+  validateKeyContinuity(appContext, newParsedData, fetchedLog, isTransactionFlow) {
+    const { privateKey, isInitialized } = appContext;
+
+    // Ensure newParsedData is an object (single QR) or array (for compatibility)
+    const qrResults = Array.isArray(newParsedData) ? newParsedData : [newParsedData];
+
+    qrResults.forEach((data, index) => {
+      const newPublicKeyHash = data.publicKeyHash;
+
+      if (data.rotation > 0) {
+        if (!fetchedLog || fetchedLog.length === 0) {
+          throw new Error(
+            `No confirmed key event log entries found, but rotation ${data.rotation} requires a previous key`
           );
         }
         const lastEntry = fetchedLog[fetchedLog.length - 1];
@@ -1328,35 +1532,35 @@ class YadaBSC {
         }
 
         let isValidContinuity = false;
-        if (index === 0 && isTransactionFlow && isInitialized) {
+        if (index === 0 && isTransactionFlow && isInitialized && privateKey) {
           const signer = new ethers.Wallet(ethers.hexlify(privateKey.privateKey), localProvider);
           isValidContinuity =
-            newParsedData.prevPublicKeyHash === signer.address &&
-            (!newParsedData.prevPublicKeyHash ||
-              signer.address === newParsedData.prevPublicKeyHash);
+            data.prevPublicKeyHash === signer.address &&
+            (!data.prevPublicKeyHash || signer.address === data.prevPublicKeyHash);
         } else if (index > 0) {
           isValidContinuity =
-            newParsedData.prevPublicKeyHash === qrResults[index - 1].publicKeyHash &&
-            newParsedData.prerotatedKeyHash === qrResults[index - 1].twicePrerotatedKeyHash;
+            data.prevPublicKeyHash === qrResults[index - 1].publicKeyHash &&
+            data.prerotatedKeyHash === qrResults[index - 1].twicePrerotatedKeyHash;
         } else {
           isValidContinuity =
             lastEntry.prerotatedKeyHash === newPublicKeyHash &&
-            lastEntry.twicePrerotatedKeyHash === newParsedData.prerotatedKeyHash &&
-            (!newParsedData.prevPublicKeyHash ||
-              lastEntry.publicKeyHash === newParsedData.prevPublicKeyHash);
+            lastEntry.twicePrerotatedKeyHash === data.prerotatedKeyHash &&
+            (!data.prevPublicKeyHash ||
+              lastEntry.publicKeyHash === data.prevPublicKeyHash);
         }
 
         if (!isValidContinuity) {
           throw new Error(
-            `The scanned key (rotation ${newParsedData.rotation}) at position ${index + 1} does not maintain continuity`
+            `The scanned key (rotation ${data.rotation}) at position ${index + 1} does not maintain continuity`
           );
         }
       }
 
+      // For non-first keys in an array, ensure prerotatedKeyHash matches next key's publicKeyHash
       if (index < qrResults.length - 1) {
-        if (newParsedData.prerotatedKeyHash !== qrResults[index + 1].publicKeyHash) {
+        if (data.prerotatedKeyHash !== qrResults[index + 1].publicKeyHash) {
           throw new Error(
-            `Key at position ${index + 1} (rotation ${newParsedData.rotation}) prerotatedKeyHash does not match key at position ${index + 2}`
+            `Key at position ${index + 1} (rotation ${data.rotation}) prerotatedKeyHash does not match key at position ${index + 2}`
           );
         }
       }
@@ -1365,8 +1569,8 @@ class YadaBSC {
     return true;
   }
 
-  async fetchTokenPairs() {
-    const { setLoading, contractAddresses, setTokenPairs } = this.appContext;
+  async fetchTokenPairs(appContext) {
+    const { setLoading, contractAddresses, setTokenPairs } = appContext;
     if (!contractAddresses.bridgeAddress) return;
 
     try {
@@ -1430,8 +1634,8 @@ class YadaBSC {
   }
 
   // Wrap tokens with key rotation
-  async wrap() {
-    const { selectedToken, setLoading, log, contractAddresses, privateKey, setIsScannerOpen, parsedData, supportedTokens, setLog } = this.appContext;
+  async wrap(appContext) {
+    const { selectedToken, setLoading, log, contractAddresses, privateKey, setIsScannerOpen, parsedData, supportedTokens, setLog } = appContext;
     const signer = new ethers.Wallet(ethers.hexlify(privateKey.privateKey), localProvider);
     const tokenPairs = await this.fetchTokenPairs();
     const selectedOriginal = tokenPairs.find(
@@ -1502,7 +1706,7 @@ class YadaBSC {
       setIsScannerOpen(false);
       setLoading(true);
 
-      const { newPrivateKey, newParsedData } = await this.processScannedQR(qrData, true);
+      const { newPrivateKey, newParsedData } = await this.processScannedQR(appContext, qrData, true);
 
       publicKey = decompressPublicKey(Buffer.from(privateKey.publicKey)).slice(1);
 
@@ -1542,7 +1746,7 @@ class YadaBSC {
             return null;
           }
           try {
-            const isWrapped = this.appContext.supportedTokens
+            const isWrapped = supportedTokens
               .map((token) => token.address.toLowerCase())
               .includes(tokenAddress.address.toLowerCase());
             const abi = isWrapped ? WRAPPED_TOKEN_ABI : ERC20_ABI;
