@@ -1,6 +1,4 @@
-import { ActionIcon, Card, Flex, Group, Text } from "@mantine/core";
-import { IconCopy, IconQrcode, IconRefresh } from "@tabler/icons-react";
-import { useAppContext } from "../../context/AppContext";
+import { Card, Text, Button, Group } from "@mantine/core";
 
 const WalletBalance = ({
   balance,
@@ -10,67 +8,38 @@ const WalletBalance = ({
   onCopyAddress,
   onShowQR,
   styles,
+  tokenSymbol,
+  wrappedTokenSymbol,
 }) => {
-  const { symbol } = useAppContext();
   return (
-    <Card shadow="xs" padding="md" mb="md" styles={styles?.nestedCard}>
-      <Flex
-        direction={{ base: "column", sm: "row" }}
-        justify="space-between"
-        gap="md"
-      >
-        <Group align="center">
-          <div
-            onClick={() => balance !== null && balance > 0 && onRefresh()}
-            style={{ cursor: "pointer" }}
-          >
-            <Text fw={500} styles={styles?.title}>
-              Wallet Balance
-            </Text>
-            <Text>
-              {balance} {symbol.toUpperCase()}
-            </Text>
-          </div>
-          <ActionIcon
-            onClick={onRefresh}
-            color="teal"
-            variant="outline"
-            title="Refresh Balance"
-          >
-            <IconRefresh />
-          </ActionIcon>
-        </Group>
-
-        <Flex direction="column" mt={{ base: "md", sm: 0 }}>
-          <Text fw={500}>
-            Address (Rotation: {log.length > 0 ? log.length : 0})
+    <Card withBorder radius="md" p="md" style={styles.card}>
+      <Text size="lg" weight={500}>
+        Wallet Balance
+      </Text>
+      {parsedData && (
+        <Text size="sm" color="dimmed">
+          Address: {parsedData.publicKeyHash}
+        </Text>
+      )}
+      {balance ? (
+        <>
+          <Text>
+            Original Balance: {balance.original} {tokenSymbol || "Token"}
           </Text>
-          <Group spacing="xs" align="center" wrap="wrap">
-            <Text>
-              {parsedData.rotation != log.length
-                ? parsedData.prerotatedKeyHash
-                : parsedData.publicKeyHash}
-            </Text>
-            <ActionIcon
-              onClick={onCopyAddress}
-              color="teal"
-              variant="outline"
-              title="Copy Address"
-            >
-              <IconCopy size={16} />
-            </ActionIcon>
-            <ActionIcon
-              onClick={onShowQR}
-              color="teal"
-              variant="outline"
-              title="Show QR Code"
-            >
-              <IconQrcode size={16} />
-            </ActionIcon>
-          </Group>
-        </Flex>
-      </Flex>
+          <Text>
+            Wrapped Balance: {balance.wrapped} {wrappedTokenSymbol || "WToken"}
+          </Text>
+        </>
+      ) : (
+        <Text>No balance available</Text>
+      )}
+      <Group mt="md">
+        <Button onClick={onRefresh}>Refresh Balance</Button>
+        <Button onClick={onCopyAddress}>Copy Address</Button>
+        <Button onClick={onShowQR}>Show QR</Button>
+      </Group>
     </Card>
   );
 };
+
 export default WalletBalance;

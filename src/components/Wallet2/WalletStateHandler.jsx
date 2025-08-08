@@ -62,7 +62,13 @@ const WalletStateHandler = ({
           </Text>
         </Collapse>
         {isDeployed ? (
-          <Button onClick={onRotateKey} color="teal" variant="outline" mt="md">
+          <Button
+            onClick={onRotateKey}
+            color="teal"
+            variant="outline"
+            mt="md"
+            disabled={log.length === parsedData.rotation}
+          >
             Scan Key (Rotation: {log.length})
           </Button>
         ) : (

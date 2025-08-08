@@ -14,13 +14,17 @@ Full license terms: see LICENSE.txt in this repository.
 pragma solidity ^0.8.0;
 
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/extensions/ERC20Permit.sol";
 import "./KeyLogRegistry.sol";
 
-contract WrappedToken is ERC20 {
+contract WrappedToken is ERC20, ERC20Permit {
     address public bridge;
     KeyLogRegistry public keyLogRegistry;
 
-    constructor(string memory name, string memory symbol, address _bridge, address _keyLogRegistry) ERC20(name, symbol) {
+    constructor(string memory name, string memory symbol, address _bridge, address _keyLogRegistry)
+        ERC20(name, symbol)
+        ERC20Permit(name)  // Initialize EIP-2612 with the token name
+    {
         bridge = _bridge;
         keyLogRegistry = KeyLogRegistry(_keyLogRegistry);
     }

@@ -21,7 +21,7 @@ const config = {
         useLiteralContent: true // Optional: Reduces metadata size
       },
       debug: {
-        // revertStrings: "strip" // Disable revert strings
+        revertStrings: "strip" // Disable revert strings
       }
     },
   },

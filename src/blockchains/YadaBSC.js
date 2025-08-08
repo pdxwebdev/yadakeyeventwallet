@@ -26,20 +26,22 @@ class YadaBSC {
   }
 
   // Helper to generate EIP-2612 permit
-  async generatePermit(appContext, tokenAddress, signer, amount, nonce) {
-    const {contractAddresses, supportedTokens} = appContext
+  async generatePermit(appContext, tokenAddress, signer, amount) {
+    const { contractAddresses, supportedTokens, tokenPairs } = appContext;
     // Skip permit generation for BNB (native currency)
     if (tokenAddress.toLowerCase() === "0x0000000000000000000000000000000000000000") {
       console.warn(`Permits not applicable for BNB (${tokenAddress}). Skipping permit generation.`);
       return null;
     }
-  
-    const isWrapped = supportedTokens
-      .map((token) => token.address.toLowerCase())
-      .includes(tokenAddress.toLowerCase());
+
+    // Determine if the token is wrapped using tokenPairs
+    const tokenPair = tokenPairs.find(
+      (pair) => pair.wrapped === tokenAddress || pair.original === tokenAddress
+    );
+    const isWrapped = tokenPair && tokenPair.wrapped === tokenAddress;
     const abi = isWrapped ? WRAPPED_TOKEN_ABI : ERC20_ABI;
     const token = new ethers.Contract(tokenAddress, abi, signer);
-  
+
     try {
       let name = "Unknown Token"; // Fallback name
       try {
@@ -52,7 +54,21 @@ class YadaBSC {
           color: "yellow",
         });
       }
-  
+
+      // Check if the token supports EIP-2612 by checking for the nonces function
+      let nonce;
+      try {
+        if (typeof token.nonces === "function") {
+          nonce = await token.nonces(signer.address);
+        } else {
+          console.warn(`Token ${tokenAddress} does not support EIP-2612 (nonces function missing). Skipping permit generation.`);
+          return null;
+        }
+      } catch (error) {
+        console.warn(`Error checking nonces for ${tokenAddress}: ${error.message}. Skipping permit generation.`);
+        return null;
+      }
+
       const domain = {
         name,
         version: "1",
@@ -82,6 +98,11 @@ class YadaBSC {
       return { token: tokenAddress, amount, deadline: permitDeadline, v, r, s };
     } catch (error) {
       console.warn(`Permit not supported for ${tokenAddress}:`, error);
+      notifications.show({
+        title: "Warning",
+        message: `Permit not supported for token ${tokenAddress}.`,
+        color: "yellow",
+      });
       return null;
     }
   }
@@ -90,7 +111,7 @@ class YadaBSC {
   async buildTransactionHistory(appContext) {
     const {
       privateKey,
-      setLog,
+      log,
       setLoading,
       setTransactions,
       setCombinedHistory,
@@ -116,19 +137,6 @@ class YadaBSC {
 
       // Fetch key log entries
       const currentPublicKey = decompressPublicKey(Buffer.from(privateKey.publicKey)).slice(1);
-      let log;
-      try {
-        log = await keyLogRegistry.buildFromPublicKey(currentPublicKey);
-        console.log("KeyLogRegistry log:", log); // Debug log
-      } catch (error) {
-        console.error("Failed to fetch key log:", error);
-        notifications.show({
-          title: "Error",
-          message: "Failed to fetch key log entries",
-          color: "red",
-        });
-        log = [];
-      }
 
       // Validate log structure
       if (!Array.isArray(log)) {
@@ -139,8 +147,6 @@ class YadaBSC {
       if (log.length === 0) {
         console.log("No key log entries found for public key:", currentPublicKey);
       }
-
-      setLog(log);
 
       const currentAddress = await signer.getAddress();
       const currentRotation = log.length;
@@ -606,7 +612,9 @@ async checkInitializationStatus(appContext) {
   }
   
   async fetchFeeEstimate(appContext) {
-    const { setFeeEstimate, parsedData, contractAddresses, privateKey } = appContext;
+    const { setFeeEstimate, parsedData, contractAddresses, privateKey, log } = appContext;
+
+    if (log.length > parsedData.rotation) return;
     const signer = new ethers.Wallet(ethers.hexlify(privateKey.privateKey), localProvider);
     if (!signer) {
       notifications.show({
@@ -677,62 +685,60 @@ async checkInitializationStatus(appContext) {
 
   // Fetches token balances
   async fetchBalance(appContext) {
-    const { privateKey, selectedToken, setLoading, setBalance, setSymbol, supportedTokens, contractAddresses } = appContext;
+    const { privateKey, selectedToken, setLoading, setBalance, setSymbol, supportedTokens, contractAddresses, log, parsedData } = appContext;
     
+    if (log.length > parsedData.rotation) return;
     if (!privateKey || !selectedToken) return;
 
     const signer = new ethers.Wallet(ethers.hexlify(privateKey.privateKey), localProvider);
     try {
-      setLoading(true);
-      const address = await signer.getAddress();
-      let totalBalance = BigInt(0);
+        setLoading(true);
+        const address = await signer.getAddress();
+        let originalBalance = BigInt(0);
+        let wrappedBalance = BigInt(0);
 
-      if (selectedToken === ethers.ZeroAddress) {
-
-        setSymbol('bnb');
-        // Fetch native coin (BNB) balance
-        const nativeBalance = await localProvider.getBalance(address);
-        totalBalance += nativeBalance;
-      } else {
-        // Fetch ERC20 token balance
         const bridge = new ethers.Contract(contractAddresses.bridgeAddress, BRIDGE_ABI, signer);
-
-        const token = supportedTokens.find(item => item.address === selectedToken)
-        setSymbol(token.symbol);
-
-        const tokenContract = new ethers.Contract(selectedToken, ERC20_ABI, signer);
-        const balance = await tokenContract.balanceOf(address);
-        totalBalance += balance;
-
-        // Check if the token has a wrapped version
         const wrappedToken = await bridge.originalToWrapped(selectedToken);
-        if (wrappedToken !== ethers.ZeroAddress) {
-          const wrappedContract = new ethers.Contract(
-            wrappedToken,
-            WRAPPED_TOKEN_ABI,
-            signer
-          );
-          const wrappedBalance = await wrappedContract.balanceOf(address);
-          totalBalance += wrappedBalance;
-        }
-      }
+        const hasWrapped = wrappedToken !== ethers.ZeroAddress;
 
-      setBalance(ethers.formatEther(totalBalance));
-      notifications.show({
-        title: "Success",
-        message: `Balance refreshed for ${selectedToken === ethers.ZeroAddress ? "BNB" : "selected token"}`,
-        color: "green",
-      });
+        if (selectedToken === ethers.ZeroAddress) {
+            setSymbol('bnb');
+            originalBalance = await localProvider.getBalance(address);
+            if (hasWrapped) {
+                const wrappedContract = new ethers.Contract(wrappedToken, WRAPPED_TOKEN_ABI, signer);
+                wrappedBalance = await wrappedContract.balanceOf(address);
+            }
+        } else {
+            const token = supportedTokens.find(item => item.address === selectedToken);
+            setSymbol(token.symbol);
+
+            const tokenContract = new ethers.Contract(selectedToken, ERC20_ABI, signer);
+            originalBalance = await tokenContract.balanceOf(address);
+            if (hasWrapped) {
+                const wrappedContract = new ethers.Contract(wrappedToken, WRAPPED_TOKEN_ABI, signer);
+                wrappedBalance = await wrappedContract.balanceOf(address);
+            }
+        }
+
+        setBalance({
+            original: ethers.formatEther(originalBalance),
+            wrapped: ethers.formatEther(wrappedBalance),
+        });
+        notifications.show({
+            title: "Success",
+            message: `Balance refreshed for ${selectedToken === ethers.ZeroAddress ? "BNB" : "selected token"}`,
+            color: "green",
+        });
     } catch (error) {
-      console.error("Error fetching balance:", error);
-      notifications.show({
-        title: "Error",
-        message: "Failed to load wallet balance",
-        color: "red",
-      });
-      setBalance(null);
+        console.error("Error fetching balance:", error);
+        notifications.show({
+            title: "Error",
+            message: "Failed to load wallet balance",
+            color: "red",
+        });
+        setBalance(null);
     } finally {
-      setLoading(false);
+        setLoading(false);
     }
   }
 
@@ -780,7 +786,7 @@ async checkInitializationStatus(appContext) {
             const balance = await tokenContract.balanceOf(signer.address);
             if (balance > 0n) {
               const nonce = await tokenContract.nonces(signer.address);
-              const permit = await this.generatePermit(tokenAddress, signer, balance, nonce);
+              const permit = await this.generatePermit(appContext, tokenAddress, signer, balance, nonce);
               if (permit) {
                 return {
                   token: tokenAddress,
@@ -1022,7 +1028,7 @@ async checkInitializationStatus(appContext) {
           if (adjustedAmount > 0n) {
             try {
               const nonce = tokenNonces.get(tAddress) || BigInt(0);
-              const permit = await this.generatePermit(tAddress, signer, adjustedAmount, nonce);
+              const permit = await this.generatePermit(appContext, tAddress, signer, adjustedAmount, nonce);
               if (permit) {
                 tokenNonces.set(tAddress, nonce + BigInt(1));
                 return {
@@ -1064,7 +1070,7 @@ async checkInitializationStatus(appContext) {
             const amount = ethers.parseUnits(recipient.amount, tokenDecimals);
             try {
               const nonce = tokenNonces.get(tokenAddress) || BigInt(0);
-              const permit = await this.generatePermit(tokenAddress, signer, amount, nonce);
+              const permit = await this.generatePermit(appContext, tokenAddress, signer, amount, nonce);
               if (permit) {
                 tokenNonces.set(tokenAddress, nonce + BigInt(1));
                 return {
@@ -1572,283 +1578,285 @@ async checkInitializationStatus(appContext) {
   async fetchTokenPairs(appContext) {
     const { setLoading, contractAddresses, setTokenPairs } = appContext;
     if (!contractAddresses.bridgeAddress) return;
-
     try {
       setLoading(true);
-
       const bridge = new ethers.Contract(
         contractAddresses.bridgeAddress,
         BridgeArtifact.abi,
         localProvider
       );
-
       // Known original tokens, including the native asset
       const knownOriginalTokens = [
         contractAddresses.yadaERC20Address, // $YDA
         contractAddresses.mockPepeAddress, // $PEPE
-        '0x0000000000000000000000000000000000000000', // Native asset (BNB/ETH)
+        "0x0000000000000000000000000000000000000000", // Native asset (BNB/ETH)
       ];
-
       const pairs = await Promise.all(
         knownOriginalTokens.map(async (original) => {
-          // Get the wrapped token address
-          const wrapped = await bridge.originalToWrapped(original);
-          if (wrapped !== ethers.ZeroAddress) {
+          // Get the token pair data from the tokenPairs mapping
+          const pair = await bridge.tokenPairs(original);
+          if (pair.wrappedToken !== ethers.ZeroAddress) {
             let name, symbol;
-
             // Handle native asset case
-            if (original.toLowerCase() === '0x0000000000000000000000000000000000000000') {
-              name = 'Wrapped BNB'; // Or 'Wrapped ETH' depending on the chain
-              symbol = 'WBNB'; // Or 'WETH'
+            if (original.toLowerCase() === "0x0000000000000000000000000000000000000000") {
+              name = "Wrapped BNB"; // Or 'Wrapped ETH' depending on the chain
+              symbol = "WBNB"; // Or 'WETH'
             } else {
               // Fetch name and symbol for ERC20 tokens
               const wrappedContract = new ethers.Contract(
-                wrapped,
+                pair.wrappedToken,
                 WrappedTokenArtifact.abi,
                 localProvider
               );
               name = await wrappedContract.name();
               symbol = await wrappedContract.symbol();
             }
-
-            const isCrossChain = await bridge.isCrossChain(wrapped);
-            return { original, wrapped, name, symbol, isCrossChain };
+            return {
+              original,
+              wrapped: pair.wrappedToken,
+              name,
+              symbol,
+              isCrossChain: pair.isCrossChain, // Access isCrossChain from tokenPairs mapping
+            };
           }
           return null;
         })
       );
-
       const filteredPairs = pairs.filter((pair) => pair !== null);
       setTokenPairs(filteredPairs);
       setLoading(false);
+      console.log("Token pairs fetched:", filteredPairs); // Debug log
       return filteredPairs;
     } catch (err) {
       console.error(`Error fetching token pairs: ${err.message}`);
       notifications.show({
-        title: 'Error',
+        title: "Error",
         message: `Failed to fetch token pairs: ${err.message}`,
-        color: 'red',
+        color: "red",
       });
       setLoading(false);
     }
   }
 
   // Wrap tokens with key rotation
-  async wrap(appContext) {
-    const { selectedToken, setLoading, log, contractAddresses, privateKey, setIsScannerOpen, parsedData, supportedTokens, setLog } = appContext;
-    const signer = new ethers.Wallet(ethers.hexlify(privateKey.privateKey), localProvider);
-    const tokenPairs = await this.fetchTokenPairs();
-    const selectedOriginal = tokenPairs.find(
-      (item) => item.original === selectedToken
-    );
-
-    try {
-      const bridge = new ethers.Contract(
-        contractAddresses.bridgeAddress,
-        BRIDGE_ABI,
-        signer
-      );
-      const amountToWrap = ethers.parseEther('1000');
-      const nonce = await localProvider.getTransactionCount(
-        signer.address,
-        "latest"
-      );
-      const bridgeNonce = await bridge.nonces(
-        signer.address
+  async wrap(appContext, webcamRef) {
+      const { selectedToken, setLoading, log, contractAddresses, privateKey, setIsScannerOpen, parsedData, supportedTokens, setLog } = appContext;
+      const signer = new ethers.Wallet(ethers.hexlify(privateKey.privateKey), localProvider);
+      const tokenPairs = await this.fetchTokenPairs(appContext);
+      const selectedOriginal = tokenPairs.find(
+          (item) => item.original === selectedToken
       );
 
-      if (!selectedOriginal.isCrossChain) {
-        const originalTokenContract = new ethers.Contract(
-          selectedOriginal.original,
-          ERC20_ABI,
-          signer
-        );
-        const balance = await originalTokenContract.balanceOf(
-          signer.address
-        );
-        if (balance < amountToWrap) {
-          throw new Error(
-            `Insufficient ${
-              isCrossChain ? "YDA" : "PEPE"
-            } balance: ${ethers.formatEther(balance)} available`
+      if (!selectedOriginal) {
+          throw new Error('Selected token not supported');
+      }
+
+      try {
+          const bridge = new ethers.Contract(
+              contractAddresses.bridgeAddress,
+              BRIDGE_ABI,
+              signer
           );
-        }
-      }
+          const amountToWrap = ethers.parseEther('1000');
+          const nonce = await localProvider.getTransactionCount(
+              signer.address,
+              "latest"
+          );
+          const bridgeNonce = await bridge.nonces(
+              signer.address
+          );
 
-      let publicKey,
-        prerotatedKeyHash,
-        twicePrerotatedKeyHash,
-        prevPublicKeyHash,
-        nextPublicKey,
-        outputAddress,
-        unconfirmedSignature,
-        confirmingSignature;
-
-      
-      setIsScannerOpen(true);
-
-      let qrData;
-      let attempts = 0;
-      const maxAttempts = 100;
-      while (attempts < maxAttempts) {
-        try {
-          qrData = await capture(this.webcamRef);
-          break;
-        } catch (error) {
-          attempts++;
-          await new Promise((resolve) => setTimeout(resolve, 300));
-        }
-      }
-      if (!qrData) {
-        throw new Error('No QR code scanned within time limit');
-      }
-      
-      setIsScannerOpen(false);
-      setLoading(true);
-
-      const { newPrivateKey, newParsedData } = await this.processScannedQR(appContext, qrData, true);
-
-      publicKey = decompressPublicKey(Buffer.from(privateKey.publicKey)).slice(1);
-
-      const unconfirmedMessage = ethers.solidityPacked(
-        ["address", "uint256", "address", "uint256"],
-        [selectedOriginal.original, amountToWrap, newParsedData.prerotatedKeyHash, bridgeNonce]
-      );
-      const unconfirmedMessageHash = ethers.keccak256(unconfirmedMessage);
-      unconfirmedSignature =
-        await signer.signMessage(
-          ethers.getBytes(unconfirmedMessageHash)
-        );
-
-      const newPublicKey = decompressPublicKey(Buffer.from(newPrivateKey.publicKey)).slice(1);
-
-      const newSigner = new ethers.Wallet(ethers.hexlify(newPrivateKey.privateKey), localProvider);
-
-      const confirmingMessage = ethers.solidityPacked(
-        ["address", "uint256", "address", "uint256"],
-        [
-          selectedOriginal.original,
-          '0',
-          newParsedData.prerotatedKeyHash,
-          bridgeNonce + 1n,
-        ]
-      );
-      const confirmingMessageHash = ethers.keccak256(confirmingMessage);
-      confirmingSignature = await newSigner.signMessage(
-        ethers.getBytes(confirmingMessageHash)
-      );
-
-      // Fetch balances for all supported tokens and generate permits
-      const permits = await Promise.all(
-        supportedTokens.map(async (tokenAddress) => {
-          if (tokenAddress.address.toLowerCase() === "0x0000000000000000000000000000000000000000") {
-            // Skip BNB (handled separately via msg.value)
-            return null;
-          }
-          try {
-            const isWrapped = supportedTokens
-              .map((token) => token.address.toLowerCase())
-              .includes(tokenAddress.address.toLowerCase());
-            const abi = isWrapped ? WRAPPED_TOKEN_ABI : ERC20_ABI;
-            const tokenContract = new ethers.Contract(tokenAddress.address, abi, signer);
-            const balance = await tokenContract.balanceOf(signer.address);
-            if (balance > 0n) {
-              const nonce = await tokenContract.nonces(signer.address);
-              const permit = await this.generatePermit(tokenAddress.address, signer, balance, nonce);
-              if (permit) {
-                return {
-                  token: tokenAddress.address,
-                  amount: balance,
-                  deadline: permit.deadline,
-                  v: permit.v,
-                  r: permit.r,
-                  s: permit.s,
-                  recipient: newParsedData.prerotatedKeyHash,
-                };
-              } else {
-                console.warn(`Permit not supported for token ${tokenAddress.address}`);
+          if (!selectedOriginal.isCrossChain) {
+              const originalTokenContract = new ethers.Contract(
+                  selectedOriginal.original,
+                  ERC20_ABI,
+                  signer
+              );
+              const balance = await originalTokenContract.balanceOf(
+                  signer.address
+              );
+              if (balance < amountToWrap) {
+                  throw new Error(
+                      `Insufficient ${selectedOriginal.name} balance: ${ethers.formatEther(balance)} available`
+                  );
               }
-            }
-            return null;
-          } catch (error) {
-            console.warn(`Error generating permit for token ${tokenAddress.address}:`, error);
-            return null;
+              // Approve the bridge contract to spend the tokens
+              const approveTx = await originalTokenContract.approve(
+                  contractAddresses.bridgeAddress,
+                  amountToWrap
+              );
+              await approveTx.wait();
           }
-        })
-      ).then(results => results.filter(permit => permit !== null)); // Filter out null permits
 
-      const txParams = [
-        selectedOriginal.original,
-        {
-          amount: amountToWrap,
-          signature: unconfirmedSignature,
-          publicKey,
-          prerotatedKeyHash: parsedData.prerotatedKeyHash,
-          twicePrerotatedKeyHash: parsedData.twicePrerotatedKeyHash,
-          prevPublicKeyHash: parsedData.prevPublicKeyHash,
-          outputAddress: newParsedData.prerotatedKeyHash,
-          hasRelationship: true,
-          tokenSource: signer.address,
-          permits,
-        },
-        {
-          amount: BigInt(0),
-          signature: confirmingSignature,
-          publicKey: newPublicKey,
-          prerotatedKeyHash: newParsedData.prerotatedKeyHash,
-          twicePrerotatedKeyHash: newParsedData.twicePrerotatedKeyHash,
-          prevPublicKeyHash: newParsedData.prevPublicKeyHash,
-          outputAddress: newParsedData.prerotatedKeyHash,
-          hasRelationship: false,
-          tokenSource: newSigner.address,
-          permits: [],
-        },
-      ];
+          setIsScannerOpen(true);
 
-      const balance = await localProvider.getBalance(
-        signer.address
-      );
-      const feeData = await localProvider.getFeeData();
-      const gasPrice = feeData.gasPrice;
-      const gasEstimate = await bridge.wrapPairWithTransfer.estimateGas(
-        ...txParams,
-        { value: 0n }
-      );
-      const gasCost = gasEstimate * gasPrice * 2n;
-      const amountToSend = balance - gasCost;
+          let qrData;
+          let attempts = 0;
+          const maxAttempts = 100;
+          while (attempts < maxAttempts) {
+              try {
+                  qrData = await capture(webcamRef);
+                  break;
+              } catch (error) {
+                  attempts++;
+                  await new Promise((resolve) => setTimeout(resolve, 300));
+              }
+          }
+          if (!qrData) {
+              throw new Error('No QR code scanned within time limit');
+          }
 
-      if (amountToSend <= 0n) {
-        throw new Error(
-          `Insufficient ETH balance: ${ethers.formatEther(balance)} ETH`
-        );
+          setIsScannerOpen(false);
+          setLoading(true);
+
+          const { newPrivateKey, newParsedData } = await this.processScannedQR(appContext, qrData, true);
+
+          const publicKey = decompressPublicKey(Buffer.from(privateKey.publicKey)).slice(1);
+
+          const unconfirmedMessage = ethers.AbiCoder.defaultAbiCoder().encode(
+              ["address", "uint256", "address", "uint256"],
+              [selectedOriginal.original, amountToWrap, newParsedData.prerotatedKeyHash, bridgeNonce]
+          );
+          const unconfirmedMessageHash = ethers.keccak256(unconfirmedMessage);
+          const unconfirmedSignature = await signer.signMessage(
+              ethers.getBytes(unconfirmedMessageHash)
+          );
+
+          const newPublicKey = decompressPublicKey(Buffer.from(newPrivateKey.publicKey)).slice(1);
+          const newSigner = new ethers.Wallet(ethers.hexlify(newPrivateKey.privateKey), localProvider);
+
+          const confirmingMessage = ethers.AbiCoder.defaultAbiCoder().encode(
+              ["address", "uint256", "address", "uint256"],
+              [
+                  selectedOriginal.original,
+                  '0',
+                  newParsedData.prerotatedKeyHash,
+                  bridgeNonce + 1n,
+              ]
+          );
+          const confirmingMessageHash = ethers.keccak256(confirmingMessage);
+          const confirmingSignature = await newSigner.signMessage(
+              ethers.getBytes(confirmingMessageHash)
+          );
+
+          // Fetch balances for all supported tokens except the selected token and generate permits
+          const permits = await Promise.all(
+              supportedTokens.map(async (token) => {
+                  if (
+                      token.address.toLowerCase() === "0x0000000000000000000000000000000000000000" ||
+                      token.address === selectedOriginal.original
+                  ) {
+                      // Skip BNB and the token being wrapped
+                      return null;
+                  }
+                  try {
+                      const isWrapped = supportedTokens
+                          .map((t) => t.address.toLowerCase())
+                          .includes(token.address.toLowerCase());
+                      const abi = isWrapped ? WRAPPED_TOKEN_ABI : ERC20_ABI;
+                      const tokenContract = new ethers.Contract(token.address, abi, signer);
+                      const balance = await tokenContract.balanceOf(signer.address);
+                      if (balance > 0n) {
+                          const nonce = await tokenContract.nonces(signer.address);
+                          const permit = await this.generatePermit(appContext, token.address, signer, balance);
+                          if (permit) {
+                              return {
+                                  token: token.address,
+                                  amount: balance,
+                                  deadline: permit.deadline,
+                                  v: permit.v,
+                                  r: permit.r,
+                                  s: permit.s,
+                                  recipient: newParsedData.prerotatedKeyHash,
+                              };
+                          } else {
+                              console.warn(`Permit not supported for token ${token.address}`);
+                          }
+                      }
+                      return null;
+                  } catch (error) {
+                      console.warn(`Error generating permit for token ${token.address}:`, error);
+                      return null;
+                  }
+              })
+          ).then(results => results.filter(permit => permit !== null));
+
+          const txParams = [
+              selectedOriginal.original,
+              {
+                  amount: amountToWrap,
+                  signature: unconfirmedSignature,
+                  publicKey,
+                  prerotatedKeyHash: parsedData.prerotatedKeyHash,
+                  twicePrerotatedKeyHash: parsedData.twicePrerotatedKeyHash,
+                  prevPublicKeyHash: parsedData.prevPublicKeyHash,
+                  outputAddress: newParsedData.prerotatedKeyHash,
+                  hasRelationship: true,
+                  tokenSource: signer.address,
+                  permits,
+              },
+              {
+                  amount: BigInt(0),
+                  signature: confirmingSignature,
+                  publicKey: newPublicKey,
+                  prerotatedKeyHash: newParsedData.prerotatedKeyHash,
+                  twicePrerotatedKeyHash: newParsedData.twicePrerotatedKeyHash,
+                  prevPublicKeyHash: newParsedData.prevPublicKeyHash,
+                  outputAddress: newParsedData.prerotatedKeyHash,
+                  hasRelationship: false,
+                  tokenSource: newSigner.address,
+                  permits: [],
+              },
+          ];
+
+          const balance = await localProvider.getBalance(signer.address);
+          const feeData = await localProvider.getFeeData();
+          const gasPrice = feeData.gasPrice;
+          const gasEstimate = await bridge.wrapPairWithTransfer.estimateGas(
+              ...txParams,
+              { value: 0n }
+          );
+          const gasCost = gasEstimate * gasPrice * 2n;
+          const amountToSend = balance > gasCost ? balance - gasCost : 0n;
+
+          if (amountToSend <= 0n) {
+              throw new Error(
+                  `Insufficient ETH balance: ${ethers.formatEther(balance)} ETH`
+              );
+          }
+
+          const tx = await bridge.wrapPairWithTransfer(...txParams, {
+              nonce,
+              value: amountToSend,
+              gasLimit: (gasEstimate * 150n) / 100n,
+              gasPrice,
+          });
+          await tx.wait();
+
+          const keyLogRegistry = new ethers.Contract(
+              contractAddresses.keyLogRegistryAddress,
+              KEYLOG_REGISTRY_ABI,
+              signer
+          );
+          const updatedLog = await keyLogRegistry.buildFromPublicKey(publicKey);
+          setLog(updatedLog);
+
+          notifications.show({
+              title: "Success",
+              message: `Successfully wrapped ${ethers.formatEther(amountToWrap)} ${selectedOriginal.symbol}`,
+              color: "green",
+          });
+      } catch (error) {
+          console.error("Wrap error:", error);
+          notifications.show({
+              title: "Error",
+              message: error.message || "Failed to wrap tokens",
+              color: "red",
+          });
+      } finally {
+          setLoading(false);
       }
-
-      const allTokens = (await bridge.getSupportedTokens()).concat([
-        contractAddresses.wrappedTokenWMOCKAddress,
-        contractAddresses.wrappedTokenYMOCKAddress,
-      ]);
-
-      const tx = await bridge.wrapPairWithTransfer(...txParams, {
-        nonce,
-        value: amountToSend,
-        gasLimit: (gasEstimate * 150n) / 100n,
-        gasPrice,
-      });
-      await tx.wait();
-
-      const keyLogRegistry = new ethers.Contract(
-        contractAddresses.keyLogRegistryAddress,
-        KEYLOG_REGISTRY_ABI,
-        signer
-      );
-      const updatedLog = await keyLogRegistry.buildFromPublicKey(publicKey);
-      setLog(updatedLog);
-
-    } catch (error) {
-      console.error("Wrap error:", error);
-    }
-    setLoading(false);
-  };
+  }
 }
 
 export default YadaBSC;

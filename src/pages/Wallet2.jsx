@@ -62,25 +62,53 @@ const Wallet2 = () => {
     isDeployed,
     setIsDeployed,
     supportedTokens,
+    tokenPairs,
   } = useAppContext();
 
   const webcamRef = useRef(null);
   const appContext = useAppContext();
-  const isDeploymentChecked = useRef(false); // Ref to track if deployment check has run
+  const isDeploymentChecked = useRef(false);
 
   const walletManager = useMemo(
     () => walletManagerFactory(selectedBlockchain, webcamRef),
     [selectedBlockchain, webcamRef]
   );
 
-  // Check deployment status on mount and when blockchain changes
+  // Derive token symbols for the selected token
+  const { tokenSymbol, wrappedTokenSymbol } = useMemo(() => {
+    let tokenSymbol = "Token";
+    let wrappedTokenSymbol = "WToken";
+
+    if (selectedToken) {
+      // Find the selected token in supportedTokens
+      const token = supportedTokens.find(
+        (t) => t.address.toLowerCase() === selectedToken.toLowerCase()
+      );
+      if (token) {
+        tokenSymbol = token.symbol || tokenSymbol;
+      }
+
+      // Find the wrapped token symbol in tokenPairs
+      const pair = tokenPairs.find(
+        (p) => p.original.toLowerCase() === selectedToken.toLowerCase()
+      );
+      if (pair) {
+        wrappedTokenSymbol = pair.symbol || wrappedTokenSymbol;
+      } else if (tokenSymbol === "BNB") {
+        wrappedTokenSymbol = "WBNB"; // Special case for BNB
+      } else if (tokenSymbol) {
+        wrappedTokenSymbol = `W${tokenSymbol}`; // Fallback: prepend "W" to original symbol
+      }
+    }
+
+    return { tokenSymbol, wrappedTokenSymbol };
+  }, [selectedToken, supportedTokens, tokenPairs]);
+
   useEffect(() => {
     const checkDeploymentStatus = async () => {
-      // Skip if already deployed and addresses are set
       if (isDeployed && Object.keys(contractAddresses).length > 0) {
         return;
       }
-
       try {
         const result = await walletManager.checkDeployment(appContext);
         setIsDeployed(result.status);
@@ -99,10 +127,9 @@ const Wallet2 = () => {
 
     if (!isDeploymentChecked.current) {
       checkDeploymentStatus();
-      isDeploymentChecked.current = true; // Mark as checked
+      isDeploymentChecked.current = true;
     }
 
-    // Reset the ref when selectedBlockchain changes
     return () => {
       isDeploymentChecked.current = false;
     };
@@ -115,7 +142,6 @@ const Wallet2 = () => {
     setContractAddresses,
   ]);
 
-  // Load state from localStorage
   useEffect(() => {
     const storedPrivateKey = localStorage.getItem(
       `walletPrivateKey_${selectedBlockchain}`
@@ -164,7 +190,6 @@ const Wallet2 = () => {
     setIsInitialized,
   ]);
 
-  // Save state to localStorage
   useEffect(() => {
     if (privateKey && parsedData?.blockchain === selectedBlockchain) {
       localStorage.setItem(
@@ -236,10 +261,18 @@ const Wallet2 = () => {
   useEffect(() => {
     if (privateKey && isInitialized) {
       walletManager.buildTransactionHistory(appContext);
-      if (log.length > 0 && log.length !== parsedData.rotation)
+      if (log.length > 0 && log.length !== parsedData.rotation) {
         walletManager.fetchFeeEstimate(appContext);
+      }
     }
-  }, [privateKey, isInitialized, selectedToken, walletManager]);
+  }, [
+    privateKey,
+    isInitialized,
+    selectedToken,
+    walletManager,
+    log,
+    parsedData,
+  ]);
 
   useEffect(() => {
     if (privateKey && !isInitialized && !isSubmitting && parsedData) {
@@ -251,7 +284,7 @@ const Wallet2 = () => {
     if (privateKey && isInitialized) {
       walletManager.fetchBalance(appContext);
     }
-  }, [privateKey, isInitialized, log, walletManager]);
+  }, [privateKey, isInitialized, log, walletManager, selectedToken]);
 
   const handleDeployContracts = async () => {
     try {
@@ -320,7 +353,6 @@ const Wallet2 = () => {
         }
       }
 
-      // Validate key continuity for deployment
       await walletManager.validateDeploymentKeyContinuity(
         appContext,
         qrResults.map((r) => r.newParsedData)
@@ -347,13 +379,11 @@ const Wallet2 = () => {
         setContractAddresses(deployResult.addresses);
         setIsDeployed(true);
 
-        // Set the last scanned key as the active key
         const lastResult = qrResults[qrResults.length - 1];
         setPrivateKey(lastResult.newPrivateKey);
         setWif(lastResult.newParsedData.wif);
         setParsedData(lastResult.newParsedData);
 
-        // Store parsed data
         qrResults.forEach((result, index) => {
           localStorage.setItem(
             `walletParsedData_${selectedBlockchain}_QR${index + 1}`,
@@ -361,7 +391,6 @@ const Wallet2 = () => {
           );
         });
 
-        // Check initialization status
         const initStatus = await walletManager.checkInitializationStatus(
           appContext
         );
@@ -454,6 +483,20 @@ const Wallet2 = () => {
     }
   };
 
+  const handleWrap = async () => {
+    try {
+      await walletManager.wrap(appContext, webcamRef);
+      await walletManager.fetchBalance(appContext);
+      await walletManager.buildTransactionHistory(appContext);
+    } catch (error) {
+      notifications.show({
+        title: "Error",
+        message: error.message || "Failed to wrap tokens",
+        color: "red",
+      });
+    }
+  };
+
   const totalItems = combinedHistory.length;
   const totalPages = Math.ceil(totalItems / ITEMS_PER_PAGE);
   const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
@@ -490,7 +533,7 @@ const Wallet2 = () => {
               <>
                 <TokenSelector />
                 <Button
-                  onClick={() => walletManager.wrap(appContext)}
+                  onClick={handleWrap}
                   disabled={!isDeployed || !isInitialized}
                 >
                   Wrap
@@ -522,6 +565,8 @@ const Wallet2 = () => {
                   onCopyAddress={copyAddressToClipboard}
                   onShowQR={() => setIsQRModalOpen(true)}
                   styles={styles}
+                  tokenSymbol={tokenSymbol}
+                  wrappedTokenSymbol={wrappedTokenSymbol}
                 />
                 <Text mb="md">
                   {parsedData.rotation === log.length
