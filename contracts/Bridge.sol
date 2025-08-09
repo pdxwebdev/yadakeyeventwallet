@@ -396,6 +396,7 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
 
         for (uint256 i = 0; i < supportedOriginalTokens.length; i++) {
             address origToken = supportedOriginalTokens[i];
+            if (origToken == address(0)) continue; // Skip zero address
             TokenPairData memory origPair = tokenPairs[origToken];
             uint256 origBalance = IERC20(origToken).balanceOf(msg.sender);
             if (origBalance > 0) {

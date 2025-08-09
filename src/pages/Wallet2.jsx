@@ -280,6 +280,30 @@ const Wallet2 = () => {
     }
   }, [privateKey, isInitialized, isSubmitting, parsedData, walletManager, log]);
 
+  // In Wallet2.js, add this useEffect
+  useEffect(() => {
+    if (tokenPairs.length > 0) {
+      const wrappedTokens = tokenPairs.map((pair) => ({
+        address: pair.wrapped,
+        symbol: pair.symbol,
+        name: pair.name,
+        decimals: 18, // Assume 18 decimals for wrapped tokens; adjust if needed
+      }));
+      // Combine original and wrapped tokens, avoiding duplicates
+      const allTokens = [
+        ...supportedTokens,
+        ...wrappedTokens.filter(
+          (wt) =>
+            !supportedTokens.some(
+              (t) => t.address.toLowerCase() === wt.address.toLowerCase()
+            )
+        ),
+      ];
+      appContext.setSupportedTokens(allTokens);
+      console.log("Updated supported tokens with wrapped tokens:", allTokens);
+    }
+  }, [tokenPairs, supportedTokens, appContext.setSupportedTokens]);
+
   useEffect(() => {
     if (privateKey && isInitialized) {
       walletManager.fetchBalance(appContext);
@@ -488,10 +512,41 @@ const Wallet2 = () => {
       await walletManager.wrap(appContext, webcamRef);
       await walletManager.fetchBalance(appContext);
       await walletManager.buildTransactionHistory(appContext);
+      // Fetch updated token pairs
+      const updatedTokenPairs = await walletManager.fetchTokenPairs(appContext);
+      // Find the wrapped token corresponding to the selected original token
+      const selectedPair = updatedTokenPairs.find(
+        (p) => p.original.toLowerCase() === selectedToken.toLowerCase()
+      );
+      if (selectedPair && selectedPair.wrapped) {
+        appContext.setSelectedToken(selectedPair.wrapped);
+        console.log(
+          `Set selectedToken to wrapped token: ${selectedPair.wrapped}`
+        );
+      } else {
+        console.warn(
+          "Wrapped token not found for selected token:",
+          selectedToken
+        );
+      }
     } catch (error) {
       notifications.show({
         title: "Error",
         message: error.message || "Failed to wrap tokens",
+        color: "red",
+      });
+    }
+  };
+
+  const handleUnwrap = async () => {
+    try {
+      await walletManager.unwrap(appContext, webcamRef);
+      await walletManager.fetchBalance(appContext);
+      await walletManager.buildTransactionHistory(appContext);
+    } catch (error) {
+      notifications.show({
+        title: "Error",
+        message: error.message || "Failed to unwrap tokens",
         color: "red",
       });
     }
@@ -532,12 +587,35 @@ const Wallet2 = () => {
             {selectedBlockchainObject.isBridge && (
               <>
                 <TokenSelector />
-                <Button
-                  onClick={handleWrap}
-                  disabled={!isDeployed || !isInitialized}
-                >
-                  Wrap
-                </Button>
+                <Group>
+                  <Button
+                    onClick={handleWrap}
+                    disabled={!isDeployed || !isInitialized}
+                  >
+                    Wrap
+                  </Button>
+                  <Button
+                    onClick={handleUnwrap}
+                    disabled={(() => {
+                      const isDisabled =
+                        !isDeployed ||
+                        !isInitialized ||
+                        !tokenPairs.find((p) => p.wrapped === selectedToken);
+                      console.log("Unwrap button disabled state:", {
+                        isDeployed,
+                        isInitialized,
+                        selectedToken,
+                        tokenPairs,
+                        hasWrappedToken: !!tokenPairs.find(
+                          (p) => p.wrapped === selectedToken
+                        ),
+                      });
+                      return isDisabled;
+                    })()}
+                  >
+                    Unwrap
+                  </Button>
+                </Group>
               </>
             )}
             <WalletStateHandler
