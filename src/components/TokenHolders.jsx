@@ -8,8 +8,8 @@ import { useAppContext } from "../context/AppContext";
 const WRAPPED_TOKEN_ABI = WrappedTokenArtifact.abi;
 
 const tokens = {
-  [contractAddresses.wrappedTokenWMOCKAddress]: "WYDA",
-  [contractAddresses.wrappedTokenYMOCKAddress]: "YPEPE",
+  [contractAddresses.wrappedTokenWMOCKAddress]: "YWYDA",
+  [contractAddresses.wrappedTokenYMOCKAddress]: "PEPE",
   [contractAddresses.yadaERC20Address]: "YDA",
   [contractAddresses.mockPepeAddress]: "PEPE",
 };

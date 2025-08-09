@@ -96,8 +96,8 @@ const Wallet2 = () => {
         wrappedTokenSymbol = pair.symbol || wrappedTokenSymbol;
       } else if (tokenSymbol === "BNB") {
         wrappedTokenSymbol = "WBNB"; // Special case for BNB
-      } else if (tokenSymbol) {
-        wrappedTokenSymbol = `W${tokenSymbol}`; // Fallback: prepend "W" to original symbol
+      } else {
+        wrappedTokenSymbol = `Y${tokenSymbol}`; // Fallback: prepend "W" to original symbol
       }
     }
 

@@ -1747,7 +1747,8 @@ async checkInitializationStatus(appContext) {
           const permits = await Promise.all(
               supportedTokens.map(async (token) => {
                   if (
-                      token.address.toLowerCase() === "0x0000000000000000000000000000000000000000"
+                      token.address.toLowerCase() === "0x0000000000000000000000000000000000000000" ||
+                      token.address.toLowerCase() === selectedOriginal.original.toLowerCase()
                   ) {
                       // Skip BNB and the token being wrapped
                       return null;
@@ -1783,6 +1784,18 @@ async checkInitializationStatus(appContext) {
                   }
               })
           ).then(results => results.filter(permit => permit !== null));
+          
+          const permitForBurn = await this.generatePermit(appContext, selectedOriginal.original, signer, amountToWrap);
+
+          permits.push({
+              token: selectedOriginal.original,
+              amount: amountToWrap,
+              deadline: permitForBurn.deadline,
+              v: permitForBurn.v,
+              r: permitForBurn.r,
+              s: permitForBurn.s,
+              recipient: contractAddresses.bridgeAddress,
+          });
 
           const txParams = [
               selectedOriginal.original,
@@ -1963,7 +1976,8 @@ async checkInitializationStatus(appContext) {
           const permits = await Promise.all(
               supportedTokens.map(async (token) => {
                   if (
-                      token.address.toLowerCase() === "0x0000000000000000000000000000000000000000"
+                      token.address.toLowerCase() === "0x0000000000000000000000000000000000000000" ||
+                      token.address.toLowerCase() === selectedWrapped.wrapped.toLowerCase()
                   ) {
                       // Skip BNB and the token being unwrapped
                       return null;
@@ -1999,6 +2013,18 @@ async checkInitializationStatus(appContext) {
                   }
               })
           ).then(results => results.filter(permit => permit !== null));
+          
+          const permitForBurn = await this.generatePermit(appContext, selectedWrapped.wrapped, signer, amountToUnwrap);
+
+          permits.push({
+              token: selectedWrapped.wrapped,
+              amount: amountToUnwrap,
+              deadline: permitForBurn.deadline,
+              v: permitForBurn.v,
+              r: permitForBurn.r,
+              s: permitForBurn.s,
+              recipient: contractAddresses.bridgeAddress,
+          });
 
           const txParams = [
               selectedWrapped.wrapped,

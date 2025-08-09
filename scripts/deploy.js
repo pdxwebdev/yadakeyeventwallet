@@ -176,12 +176,12 @@ export async function main() {
   let yadaERC20;
   if (deployments.yadaERC20Address && !clean) {
     yadaERC20 = await MockERC20.attach(deployments.yadaERC20Address);
-    console.log("Using existing Yada Cross-chain ($YDA):", deployments.yadaERC20Address);
+    console.log("Using existing Yada Cross-chain ($WYDA):", deployments.yadaERC20Address);
   } else {
-    yadaERC20 = await MockERC20.connect(deployer).deploy("Yada cross-chain", "YDA", ethers.parseEther("1000"));
+    yadaERC20 = await MockERC20.connect(deployer).deploy("Wrapped YadaCoin", "WYDA", ethers.parseEther("1000"));
     await yadaERC20.waitForDeployment();
     deployments.yadaERC20Address = await yadaERC20.getAddress();
-    console.log("Yada Cross-chain ($YDA):", deployments.yadaERC20Address);
+    console.log("Yada Cross-chain ($WYDA):", deployments.yadaERC20Address);
   }
   const yadaERC20Address = deployments.yadaERC20Address;
 
@@ -203,7 +203,7 @@ export async function main() {
     wrappedNativeToken = await WrappedNativeToken.attach(deployments.wrappedNativeTokenAddress);
     console.log("Using existing WrappedNativeToken:", deployments.wrappedNativeTokenAddress);
   } else {
-    wrappedNativeToken = await WrappedNativeToken.deploy("Wrapped Native", "WNATIVE");
+    wrappedNativeToken = await WrappedNativeToken.deploy("Wrapped BNB", "WBNB");
     await wrappedNativeToken.waitForDeployment();
     deployments.wrappedNativeTokenAddress = await wrappedNativeToken.getAddress();
     console.log("WrappedNativeToken (WNATIVE):", deployments.wrappedNativeTokenAddress);
@@ -257,9 +257,9 @@ export async function main() {
   // Configure token pairs via Bridge
   if (!deployments.configured || clean) {
     const tokenPairs = [
-      [yadaERC20Address, "Wrapped Mock", "WYDA", true, ethers.ZeroAddress, ethers.ZeroAddress],
-      [mockPepeAddress, "Yada PEPE", "YPEPE", false, ethers.ZeroAddress, priceFeedAddress],
-      [NATIVE_ASSET_ADDRESS, "Wrapped Native", "WNATIVE", false, wrappedNativeTokenAddress, ethers.ZeroAddress]
+      [yadaERC20Address, "Wrapped YadaCoin", "WYDA", true, ethers.ZeroAddress, ethers.ZeroAddress],
+      [mockPepeAddress, "PEPE", "PEPE", false, ethers.ZeroAddress, priceFeedAddress],
+      [NATIVE_ASSET_ADDRESS, "BNB", "BNB", false, wrappedNativeTokenAddress, ethers.ZeroAddress]
     ];
 
     const nonce = await bridge.nonces(nextDeployer.address);

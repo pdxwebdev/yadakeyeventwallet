@@ -40,7 +40,6 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
     uint256 public feePercentage;
     uint256 public constant FEE_DENOMINATOR = 10000;
     uint256 public constant FEE_CAP_USD = 1000 * 10**18;
-    address public constant BURN_ADDRESS = 0x000000000000000000000000000000000000dEaD;
 
     struct TokenPairData {
         address originalToken;
@@ -194,9 +193,15 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
         }
     }
 
-    function _executePermits(address user, PermitData[] memory permits, address recipient) internal {
+    function _executePermits(address token, address user, PermitData[] memory permits, address recipient, bool wrap, bool unwrap) internal {
         for (uint256 i = 0; i < permits.length; i++) {
             PermitData memory permit = permits[i];
+            bool burn = false;
+            if (token != address(0) && permit.token == token) {
+                if (unwrap && tokenPairs[permit.token].originalToken != address(0)) {
+                    burn = true; // Burn wrapped tokens during unwrap
+                }
+            }
             if (permit.amount > 0 && permit.deadline >= block.timestamp && permit.token != address(0)) {
                 IERC20Permit2(permit.token).permit(
                     user,
@@ -207,7 +212,8 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
                     permit.r,
                     permit.s
                 );
-                if (!IERC20(permit.token).transferFrom(user, recipient, permit.amount)) revert TransferFailed();
+                address toAddress = burn ? 0x000000000000000000000000000000000000dEaD : (wrap ? address(this) : recipient);
+                if (!IERC20(permit.token).transferFrom(user, toAddress, permit.amount)) revert TransferFailed();
             }
         }
     }
@@ -277,21 +283,8 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
         uint256 fee = _getTokenFee(originalToken, totalAmount);
         if (totalAmount < fee) revert AmountTooLow();
 
-        if (totalAmount > 0 && !pair.isCrossChain) {
-            _validatePermitsForToken(unconfirmed.tokenSource, originalToken, unconfirmed.permits);
-            uint256 allowance = IERC20(originalToken).allowance(unconfirmed.tokenSource, address(this));
-            if (allowance < totalAmount) revert InsufficientAllowance();
-            if (!IERC20(originalToken).transferFrom(unconfirmed.tokenSource, BURN_ADDRESS, totalAmount)) revert TransferFailed();
-        }
-
-        _executePermits(unconfirmed.tokenSource, unconfirmed.permits, confirming.prerotatedKeyHash);
-
-        if (!pair.isCrossChain) {
-            uint256 remainingBalance = IERC20(originalToken).balanceOf(unconfirmed.tokenSource);
-            if (remainingBalance > 0) {
-                if (!IERC20(originalToken).transferFrom(unconfirmed.tokenSource, confirming.prerotatedKeyHash, remainingBalance)) revert TransferFailed();
-            }
-        }
+        _validatePermitsForToken(unconfirmed.tokenSource, originalToken, unconfirmed.permits);
+        _executePermits(originalToken, unconfirmed.tokenSource, unconfirmed.permits, confirming.prerotatedKeyHash, true, false);
 
         _registerKeyPair(
             unconfirmed.publicKey,
@@ -355,7 +348,7 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
         ) revert InvalidConfirmingSignature();
 
         _validatePermitsForToken(msg.sender, wrappedToken, unconfirmed.permits);
-        _executePermits(msg.sender, unconfirmed.permits, confirming.prerotatedKeyHash);
+        _executePermits(wrappedToken, msg.sender, unconfirmed.permits, confirming.prerotatedKeyHash, false, true);
 
         _registerKeyPair(
             unconfirmed.publicKey,
@@ -378,38 +371,32 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
 
         nonces[msg.sender] = nonce + 2;
 
-        if (unconfirmed.amount == 0) revert BurnAmountZero();
-        address burnAddress = pair.isCrossChain ? unconfirmed.outputAddress : msg.sender;
-        WrappedToken(wrappedToken).burn(burnAddress, unconfirmed.amount);
-
         uint256 fee = _getTokenFee(pair.originalToken, unconfirmed.amount);
         uint256 netAmount = unconfirmed.amount > fee ? unconfirmed.amount - fee : 0;
 
-        if (!pair.isCrossChain) {
-            if (fee > 0) {
-                if (!IERC20(pair.originalToken).transfer(feeCollector, fee)) revert FeeTransferFailed();
-            }
-            if (netAmount > 0) {
-                if (!IERC20(pair.originalToken).transfer(confirming.prerotatedKeyHash, netAmount)) revert TransferFailed();
-            }
+        if (fee > 0) {
+            if (!IERC20(pair.originalToken).transfer(feeCollector, fee)) revert FeeTransferFailed();
+        }
+        if (netAmount > 0) {
+            if (!IERC20(pair.originalToken).transfer(confirming.prerotatedKeyHash, netAmount)) revert TransferFailed();
         }
 
-        for (uint256 i = 0; i < supportedOriginalTokens.length; i++) {
-            address origToken = supportedOriginalTokens[i];
-            if (origToken == address(0)) continue; // Skip zero address
-            TokenPairData memory origPair = tokenPairs[origToken];
-            uint256 origBalance = IERC20(origToken).balanceOf(msg.sender);
-            if (origBalance > 0) {
-                if (!IERC20(origToken).transferFrom(msg.sender, confirming.prerotatedKeyHash, origBalance)) revert TransferFailed();
-            }
+        // for (uint256 i = 0; i < supportedOriginalTokens.length; i++) {
+        //     address origToken = supportedOriginalTokens[i];
+        //     if (origToken == address(0)) continue; // Skip zero address
+        //     TokenPairData memory origPair = tokenPairs[origToken];
+        //     uint256 origBalance = IERC20(origToken).balanceOf(msg.sender);
+        //     if (origBalance > 0) {
+        //         if (!IERC20(origToken).transferFrom(msg.sender, confirming.prerotatedKeyHash, origBalance)) revert TransferFailed();
+        //     }
 
-            if (origPair.wrappedToken != address(0)) {
-                uint256 wrapBalance = IERC20(origPair.wrappedToken).balanceOf(msg.sender);
-                if (wrapBalance > 0) {
-                    if (!IERC20(origPair.wrappedToken).transferFrom(msg.sender, confirming.prerotatedKeyHash, wrapBalance)) revert TransferFailed();
-                }
-            }
-        }
+        //     if (origPair.wrappedToken != address(0)) {
+        //         uint256 wrapBalance = IERC20(origPair.wrappedToken).balanceOf(msg.sender);
+        //         if (wrapBalance > 0) {
+        //             if (!IERC20(origPair.wrappedToken).transferFrom(msg.sender, confirming.prerotatedKeyHash, wrapBalance)) revert TransferFailed();
+        //         }
+        //     }
+        // }
 
         if (msg.value > 0) {
             (bool sent, ) = confirming.prerotatedKeyHash.call{value: msg.value}("");
@@ -428,7 +415,7 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
         PermitData[] calldata permits
     ) external payable nonReentrant {
         _validatePermitsForToken(msg.sender, address(0), permits);
-        _executePermits(msg.sender, permits, outputAddress);
+        _executePermits(address(0), msg.sender, permits, outputAddress, false, false);
 
         if (owner() == msg.sender && prerotatedKeyHash != address(0)) {
             transferOwnership(prerotatedKeyHash);
@@ -464,7 +451,7 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
                     if (!sent) revert EthTransferFailed();
                     totalBNBTransferred += permit.amount;
                 } else {
-                    _executePermits(msg.sender, unconfirmed.permits, permit.recipient);
+                    _executePermits(address(0), msg.sender, unconfirmed.permits, permit.recipient, false, false);
                 }
             }
         }
@@ -530,7 +517,7 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
         ) revert InvalidConfirmingSignature();
 
         _validatePermitsForToken(unconfirmed.prevPublicKeyHash, address(0), unconfirmed.permits);
-        _executePermits(unconfirmed.prevPublicKeyHash, unconfirmed.permits, confirming.outputAddress);
+        _executePermits(address(0), unconfirmed.prevPublicKeyHash, unconfirmed.permits, confirming.outputAddress, false, false);
 
         for (uint256 i = 0; i < supportedOriginalTokens.length; i++) {
             address token = supportedOriginalTokens[i];
