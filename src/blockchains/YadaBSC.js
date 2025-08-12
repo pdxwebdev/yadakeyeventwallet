@@ -1685,10 +1685,6 @@ async checkInitializationStatus(appContext) {
               signer
           );
           const amountToWrap = ethers.parseEther('1000');
-          const nonce = await localProvider.getTransactionCount(
-              signer.address,
-              "latest"
-          );
           const bridgeNonce = await bridge.nonces(
               signer.address
           );
@@ -1850,7 +1846,11 @@ async checkInitializationStatus(appContext) {
                   `Insufficient ETH balance: ${ethers.formatEther(balance)} ETH`
               );
           }
-
+          
+          const nonce = await localProvider.getTransactionCount(
+              signer.address,
+              "latest"
+          );
           const tx = await bridge.wrapPairWithTransfer(...txParams, {
               nonce,
               value: amountToSend,
@@ -1903,7 +1903,6 @@ async checkInitializationStatus(appContext) {
               BRIDGE_ABI,
               signer
           );
-          const amountToUnwrap = ethers.parseEther('1000');
           const nonce = await localProvider.getTransactionCount(
               signer.address,
               "latest"
@@ -1918,6 +1917,8 @@ async checkInitializationStatus(appContext) {
               signer
           );
           const balance = await wrappedTokenContract.balanceOf(signer.address);
+
+          const amountToUnwrap = balance;
           if (balance < amountToUnwrap) {
               throw new Error(
                   `Insufficient ${selectedWrapped.symbol} balance: ${ethers.formatEther(balance)} available`

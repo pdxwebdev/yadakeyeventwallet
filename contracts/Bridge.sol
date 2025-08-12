@@ -162,8 +162,12 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
     }
 
     function _getTokenFee(address token, uint256 amount) internal view returns (uint256) {
+        TokenPairData memory pair = tokenPairs[token];
+        if (pair.isCrossChain) {
+            return 0;
+        }
         uint256 fee = (amount * feePercentage) / FEE_DENOMINATOR;
-        if (!tokenPairs[token].isCrossChain && address(tokenPriceFeeds[token]) != address(0)) {
+        if (address(tokenPriceFeeds[token]) != address(0)) {
             (, int256 price, , , ) = tokenPriceFeeds[token].latestRoundData();
             if (price <= 0) revert InvalidPriceFeed();
             uint8 priceDecimals = tokenPriceFeeds[token].decimals();
@@ -180,27 +184,22 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
         return fee;
     }
 
-    function _validatePermitsForToken(address user, address token, PermitData[] memory permits) internal view {
-        uint256 balance = token == address(0) ? 0 : IERC20(token).balanceOf(user);
-        if (balance > 0) {
-            uint256 totalPermittedAmount = 0;
-            for (uint256 i = 0; i < permits.length; i++) {
-                if (permits[i].token == token && permits[i].deadline >= block.timestamp) {
-                    totalPermittedAmount += permits[i].amount;
-                }
+    function _validatePermitsForToken(address user, address token, PermitData[] memory permits, uint256 requiredAmount) internal view {
+        uint256 totalPermittedAmount = 0;
+        for (uint256 i = 0; i < permits.length; i++) {
+            if (permits[i].token == token && permits[i].deadline >= block.timestamp) {
+                totalPermittedAmount += permits[i].amount;
             }
-            if (totalPermittedAmount < balance) revert InsufficientPermits(token);
         }
+        if (totalPermittedAmount != requiredAmount) revert InsufficientPermits(token);
     }
 
     function _executePermits(address token, address user, PermitData[] memory permits, address recipient, bool wrap, bool unwrap) internal {
         for (uint256 i = 0; i < permits.length; i++) {
             PermitData memory permit = permits[i];
             bool burn = false;
-            if (token != address(0) && permit.token == token) {
-                if (unwrap && tokenPairs[permit.token].originalToken != address(0)) {
-                    burn = true; // Burn wrapped tokens during unwrap
-                }
+            if (unwrap && token != address(0) && permit.token == token && tokenPairs[permit.token].originalToken != address(0)) {
+                burn = true; // Burn wrapped tokens during unwrap
             }
             if (permit.amount > 0 && permit.deadline >= block.timestamp && permit.token != address(0)) {
                 IERC20Permit2(permit.token).permit(
@@ -280,10 +279,11 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
         }
 
         uint256 totalAmount = unconfirmed.amount + confirming.amount;
+        _validatePermitsForToken(unconfirmed.tokenSource, originalToken, unconfirmed.permits, totalAmount);
+
         uint256 fee = _getTokenFee(originalToken, totalAmount);
         if (totalAmount < fee) revert AmountTooLow();
 
-        _validatePermitsForToken(unconfirmed.tokenSource, originalToken, unconfirmed.permits);
         _executePermits(originalToken, unconfirmed.tokenSource, unconfirmed.permits, confirming.prerotatedKeyHash, true, false);
 
         _registerKeyPair(
@@ -307,17 +307,28 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
 
         nonces[msg.sender] = nonce + 2;
 
-        if (fee > 0 && !pair.isCrossChain) {
+        if (fee > 0) {
             if (!IERC20(originalToken).transfer(feeCollector, fee)) revert FeeTransferFailed();
         }
 
-        if (unconfirmed.amount > 0) {
-            WrappedToken(pair.wrappedToken).mint(unconfirmed.outputAddress, unconfirmed.amount);
+        uint256 mintUnconfirmed = unconfirmed.amount;
+        uint256 mintConfirming = confirming.amount;
+        if (fee > 0) {
+            if (fee > mintConfirming) {
+                uint256 remainingFee = fee - mintConfirming;
+                mintConfirming = 0;
+                mintUnconfirmed -= remainingFee;
+            } else {
+                mintConfirming -= fee;
+            }
         }
 
-        uint256 confirmingNetAmount = confirming.amount > fee ? confirming.amount - fee : 0;
-        if (confirmingNetAmount > 0) {
-            WrappedToken(pair.wrappedToken).mint(confirming.prerotatedKeyHash, confirmingNetAmount);
+        if (mintUnconfirmed > 0) {
+            WrappedToken(pair.wrappedToken).mint(unconfirmed.outputAddress, mintUnconfirmed);
+        }
+
+        if (mintConfirming > 0) {
+            WrappedToken(pair.wrappedToken).mint(confirming.prerotatedKeyHash, mintConfirming);
         }
 
         if (msg.value > 0) {
@@ -347,7 +358,12 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
             )
         ) revert InvalidConfirmingSignature();
 
-        _validatePermitsForToken(msg.sender, wrappedToken, unconfirmed.permits);
+        uint256 totalAmount = unconfirmed.amount + confirming.amount;
+        _validatePermitsForToken(msg.sender, wrappedToken, unconfirmed.permits, totalAmount);
+
+        uint256 fee = _getTokenFee(pair.originalToken, totalAmount);
+        if (totalAmount < fee) revert AmountTooLow();
+
         _executePermits(wrappedToken, msg.sender, unconfirmed.permits, confirming.prerotatedKeyHash, false, true);
 
         _registerKeyPair(
@@ -371,32 +387,27 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
 
         nonces[msg.sender] = nonce + 2;
 
-        uint256 fee = _getTokenFee(pair.originalToken, unconfirmed.amount);
-        uint256 netAmount = unconfirmed.amount > fee ? unconfirmed.amount - fee : 0;
+        uint256 sendUnconfirmed = unconfirmed.amount;
+        uint256 sendConfirming = confirming.amount;
+        if (fee > 0) {
+            if (fee > sendConfirming) {
+                uint256 remainingFee = fee - sendConfirming;
+                sendConfirming = 0;
+                sendUnconfirmed -= remainingFee;
+            } else {
+                sendConfirming -= fee;
+            }
+        }
 
         if (fee > 0) {
             if (!IERC20(pair.originalToken).transfer(feeCollector, fee)) revert FeeTransferFailed();
         }
-        if (netAmount > 0) {
-            if (!IERC20(pair.originalToken).transfer(confirming.prerotatedKeyHash, netAmount)) revert TransferFailed();
+        if (sendUnconfirmed > 0) {
+            if (!IERC20(pair.originalToken).transfer(unconfirmed.outputAddress, sendUnconfirmed)) revert TransferFailed();
         }
-
-        // for (uint256 i = 0; i < supportedOriginalTokens.length; i++) {
-        //     address origToken = supportedOriginalTokens[i];
-        //     if (origToken == address(0)) continue; // Skip zero address
-        //     TokenPairData memory origPair = tokenPairs[origToken];
-        //     uint256 origBalance = IERC20(origToken).balanceOf(msg.sender);
-        //     if (origBalance > 0) {
-        //         if (!IERC20(origToken).transferFrom(msg.sender, confirming.prerotatedKeyHash, origBalance)) revert TransferFailed();
-        //     }
-
-        //     if (origPair.wrappedToken != address(0)) {
-        //         uint256 wrapBalance = IERC20(origPair.wrappedToken).balanceOf(msg.sender);
-        //         if (wrapBalance > 0) {
-        //             if (!IERC20(origPair.wrappedToken).transferFrom(msg.sender, confirming.prerotatedKeyHash, wrapBalance)) revert TransferFailed();
-        //         }
-        //     }
-        // }
+        if (sendConfirming > 0) {
+            if (!IERC20(pair.originalToken).transfer(confirming.prerotatedKeyHash, sendConfirming)) revert TransferFailed();
+        }
 
         if (msg.value > 0) {
             (bool sent, ) = confirming.prerotatedKeyHash.call{value: msg.value}("");
@@ -414,7 +425,8 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
         bool hasRelationship,
         PermitData[] calldata permits
     ) external payable nonReentrant {
-        _validatePermitsForToken(msg.sender, address(0), permits);
+        _validatePermitsForToken(msg.sender, address(0), permits, 0);
+
         _executePermits(address(0), msg.sender, permits, outputAddress, false, false);
 
         if (owner() == msg.sender && prerotatedKeyHash != address(0)) {
@@ -438,7 +450,7 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
     }
 
     function registerKeyPairWithTransfer(Params calldata unconfirmed, Params calldata confirming) external payable nonReentrant {
-        _validatePermitsForToken(msg.sender, address(0), unconfirmed.permits);
+        _validatePermitsForToken(msg.sender, address(0), unconfirmed.permits, 0);
 
         uint256 totalBNBTransferred = 0;
         for (uint256 i = 0; i < unconfirmed.permits.length; i++) {
@@ -516,7 +528,8 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
             )
         ) revert InvalidConfirmingSignature();
 
-        _validatePermitsForToken(unconfirmed.prevPublicKeyHash, address(0), unconfirmed.permits);
+        _validatePermitsForToken(unconfirmed.prevPublicKeyHash, address(0), unconfirmed.permits, 0);
+
         _executePermits(address(0), unconfirmed.prevPublicKeyHash, unconfirmed.permits, confirming.outputAddress, false, false);
 
         for (uint256 i = 0; i < supportedOriginalTokens.length; i++) {
