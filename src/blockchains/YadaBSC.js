@@ -21,13 +21,26 @@ const ERC20_ABI = MockERC20Artifact.abi;
 const WRAPPED_TOKEN_ABI = WrappedTokenArtifact.abi;
 
 class YadaBSC {
-  constructor(appContext, webcamRef) {
-    this.webcamRef = webcamRef
+  constructor() {
+  }
+
+  async fetchLog(appContext) {
+    const {privateKey, contractAddresses, setLog} = appContext;
+    const signer = new ethers.Wallet(ethers.hexlify(privateKey.privateKey), localProvider);
+    const keyLogRegistry = new ethers.Contract(
+        contractAddresses.keyLogRegistryAddress,
+        KEYLOG_REGISTRY_ABI,
+        signer
+    );
+    const publicKey = Buffer.from(signer.signingKey.publicKey.slice(2), 'hex').slice(1);
+    const updatedLog = await keyLogRegistry.buildFromPublicKey(publicKey);
+    setLog(updatedLog);
   }
 
   // Helper to generate EIP-2612 permit
-  async generatePermit(appContext, tokenAddress, signer, amount) {
-    const { contractAddresses, supportedTokens, tokenPairs } = appContext;
+  async generatePermit(appContext, tokenAddress, signer, amount, recipientOverride = null) {
+    const { contractAddresses, tokenPairs } = appContext;
+
     // Skip permit generation for BNB (native currency)
     if (tokenAddress.toLowerCase() === "0x0000000000000000000000000000000000000000") {
       console.warn(`Permits not applicable for BNB (${tokenAddress}). Skipping permit generation.`);
@@ -36,9 +49,9 @@ class YadaBSC {
 
     // Determine if the token is wrapped using tokenPairs
     const tokenPair = tokenPairs.find(
-      (pair) => pair.wrapped === tokenAddress || pair.original === tokenAddress
+      (pair) => pair.wrapped.toLowerCase() === tokenAddress.toLowerCase()
     );
-    const isWrapped = tokenPair && tokenPair.wrapped === tokenAddress;
+    const isWrapped = !!tokenPair;
     const abi = isWrapped ? WRAPPED_TOKEN_ABI : ERC20_ABI;
     const token = new ethers.Contract(tokenAddress, abi, signer);
 
@@ -72,7 +85,7 @@ class YadaBSC {
       const domain = {
         name,
         version: "1",
-        chainId: (await localProvider.getNetwork()).chainId, // Dynamic chainId
+        chainId: (await localProvider.getNetwork()).chainId,
         verifyingContract: tokenAddress,
       };
       const types = {
@@ -85,17 +98,19 @@ class YadaBSC {
         ],
       };
       const owner = await signer.getAddress();
+      const spender = contractAddresses.bridgeAddress;
       const permitDeadline = Math.floor(Date.now() / 1000) + 60 * 60;
       const message = {
         owner,
-        spender: contractAddresses.bridgeAddress,
+        spender,
         value: amount.toString(),
         nonce: nonce.toString(),
         deadline: permitDeadline,
       };
       const signature = await signer.signTypedData(domain, types, message);
       const { v, r, s } = ethers.Signature.from(signature);
-      return { token: tokenAddress, amount, deadline: permitDeadline, v, r, s };
+      const recipient = recipientOverride || contractAddresses.bridgeAddress;
+      return { token: tokenAddress, amount, deadline: permitDeadline, v, r, s, recipient };
     } catch (error) {
       console.warn(`Permit not supported for ${tokenAddress}:`, error);
       notifications.show({
@@ -105,6 +120,58 @@ class YadaBSC {
       });
       return null;
     }
+  }
+
+  async generatePermitsForTokens(appContext, signer, tokens, defaultRecipient, excludeTokens = [], amountAdjustments = new Map()) {
+    const { tokenPairs } = appContext;
+
+    // Filter out excluded tokens
+    const filteredTokens = tokens.filter(
+      ({ address }) => !excludeTokens.includes(address.toLowerCase())
+    );
+
+    // Generate permits for all tokens
+    const permits = await Promise.all(
+      filteredTokens.map(async ({ address: tokenAddress }) => {
+        if (tokenAddress.toLowerCase() === "0x0000000000000000000000000000000000000000") {
+          // Skip BNB
+          return null;
+        }
+        try {
+          // Determine if the token is wrapped using tokenPairs
+          const isWrapped = tokenPairs.some(
+            (pair) => pair.wrapped.toLowerCase() === tokenAddress.toLowerCase()
+          );
+          const abi = isWrapped ? WRAPPED_TOKEN_ABI : ERC20_ABI;
+          const tokenContract = new ethers.Contract(tokenAddress, abi, signer);
+          const balance = await tokenContract.balanceOf(signer.address);
+          const adjustment = amountAdjustments.get(tokenAddress.toLowerCase()) || BigInt(0);
+          const adjustedAmount = balance > adjustment ? balance - adjustment : BigInt(0);
+          if (adjustedAmount > 0n) {
+            const permit = await this.generatePermit(appContext, tokenAddress, signer, adjustedAmount, defaultRecipient);
+            if (permit) {
+              return {
+                token: tokenAddress,
+                amount: adjustedAmount,
+                deadline: permit.deadline,
+                v: permit.v,
+                r: permit.r,
+                s: permit.s,
+                recipient: defaultRecipient,
+              };
+            } else {
+              console.warn(`Permit not supported for token ${tokenAddress}`);
+            }
+          }
+          return null;
+        } catch (error) {
+          console.warn(`Error generating permit for token ${tokenAddress}:`, error);
+          return null;
+        }
+      })
+    );
+
+    return permits.filter((permit) => permit !== null);
   }
 
   // Builds transaction history from KeyLogRegistry and token transfer events
@@ -768,46 +835,21 @@ async checkInitializationStatus(appContext) {
       const hasRelationship = false;
 
       // Fetch supported tokens
-      const supportedTokens = await bridge.getSupportedTokens();
+      const allTokens = [
+        ...supportedTokens.map((token) => ({ address: token.address })),
+        ...tokenPairs
+          .filter((pair) => pair.wrapped !== ethers.ZeroAddress)
+          .map((pair) => ({ address: pair.wrapped })),
+      ];
 
-      // Fetch balances for all supported tokens and generate permits
-      const permits = await Promise.all(
-        supportedTokens.map(async (tokenAddress) => {
-          if (tokenAddress.toLowerCase() === "0x0000000000000000000000000000000000000000") {
-            // Skip BNB (handled separately via msg.value)
-            return null;
-          }
-          try {
-            const isWrapped = supportedTokens
-              .map((token) => token.address.toLowerCase())
-              .includes(tokenAddress.toLowerCase());
-            const abi = isWrapped ? WRAPPED_TOKEN_ABI : ERC20_ABI;
-            const tokenContract = new ethers.Contract(tokenAddress, abi, signer);
-            const balance = await tokenContract.balanceOf(signer.address);
-            if (balance > 0n) {
-              const nonce = await tokenContract.nonces(signer.address);
-              const permit = await this.generatePermit(appContext, tokenAddress, signer, balance, nonce);
-              if (permit) {
-                return {
-                  token: tokenAddress,
-                  amount: balance,
-                  deadline: permit.deadline,
-                  v: permit.v,
-                  r: permit.r,
-                  s: permit.s,
-                  recipient: outputAddress,
-                };
-              } else {
-                console.warn(`Permit not supported for token ${tokenAddress}`);
-              }
-            }
-            return null;
-          } catch (error) {
-            console.warn(`Error generating permit for token ${tokenAddress}:`, error);
-            return null;
-          }
-        })
-      ).then(results => results.filter(permit => permit !== null)); // Filter out null permits
+      // Generate permits for all tokens
+      const permits = await this.generatePermitsForTokens(
+        appContext,
+        signer,
+        allTokens,
+        outputAddress,
+        ["0x0000000000000000000000000000000000000000"]
+      );
 
       // Estimate gas and calculate BNB amount to send
       const balance = await localProvider.getBalance(signer.address);
@@ -870,7 +912,7 @@ async checkInitializationStatus(appContext) {
   }
 
 
-  async signTransaction(appContext) {
+  async signTransaction(appContext, webcamRef) {
     const {
       privateKey,
       recipients,
@@ -921,7 +963,7 @@ async checkInitializationStatus(appContext) {
       const maxAttempts = 100;
       while (attempts < maxAttempts) {
         try {
-          qrData = await capture(this.webcamRef);
+          qrData = await capture(webcamRef);
           break;
         } catch (error) {
           attempts++;
@@ -1000,15 +1042,6 @@ async checkInitializationStatus(appContext) {
         })
       );
 
-      // Calculate recipient amounts per token
-      const recipientTokenAmounts = new Map();
-      recipients.forEach((recipient) => {
-        if (tokenAddress.toLowerCase() === selectedToken.toLowerCase()) {
-          const amount = ethers.parseUnits(recipient.amount, tokenDecimals);
-          recipientTokenAmounts.set(tokenAddress, (recipientTokenAmounts.get(tokenAddress) || BigInt(0)) + amount);
-        }
-      });
-
       // Adjust permit amounts before generating signatures
       const adjustedPermitAmounts = new Map();
       tokenBalances.forEach((balance, tAddress) => {
@@ -1017,42 +1050,37 @@ async checkInitializationStatus(appContext) {
         adjustedPermitAmounts.set(tAddress, adjustedAmount);
       });
 
-      // Generate permits for supported tokens (excluding BNB)
-      const permits = await Promise.all(
-        supportedTokens.map(async (token) => {
-          const tAddress = token.address;
-          if (tAddress.toLowerCase() === '0x0000000000000000000000000000000000000000') {
-            return null;
-          }
-          const adjustedAmount = adjustedPermitAmounts.get(tAddress) || BigInt(0);
-          if (adjustedAmount > 0n) {
-            try {
-              const nonce = tokenNonces.get(tAddress) || BigInt(0);
-              const permit = await this.generatePermit(appContext, tAddress, signer, adjustedAmount, nonce);
-              if (permit) {
-                tokenNonces.set(tAddress, nonce + BigInt(1));
-                return {
-                  token: tAddress,
-                  amount: adjustedAmount,
-                  deadline: permit.deadline,
-                  v: permit.v,
-                  r: permit.r,
-                  s: permit.s,
-                  recipient: newParsedData.prerotatedKeyHash,
-                };
-              }
-            } catch (error) {
-              console.warn(`Error generating permit for token ${tAddress}:`, error);
-            }
-          }
-          return null;
-        })
-      ).then(results => results.filter(permit => permit !== null));
+      // Fetch all tokens (original and wrapped)
+      const allTokens = [
+        ...supportedTokens.map((token) => ({ address: token.address })),
+        ...tokenPairs
+          .filter((pair) => pair.wrapped !== ethers.ZeroAddress)
+          .map((pair) => ({ address: pair.wrapped })),
+      ];
+
+      // Calculate recipient amounts per token
+      const recipientTokenAmounts = new Map();
+      recipients.forEach((recipient) => {
+        if (tokenAddress.toLowerCase() === selectedToken.toLowerCase()) {
+          const amount = ethers.parseUnits(recipient.amount, tokenDecimals);
+          recipientTokenAmounts.set(tokenAddress.toLowerCase(), (recipientTokenAmounts.get(tokenAddress.toLowerCase()) || BigInt(0)) + amount);
+        }
+      });
+
+      // Generate permits for key rotation
+      const permits = await this.generatePermitsForTokens(
+        appContext,
+        signer,
+        allTokens,
+        newParsedData.prerotatedKeyHash,
+        ["0x0000000000000000000000000000000000000000"],
+        recipientTokenAmounts
+      );
 
       // Generate permits for recipient transfers
       let recipientPermits = [];
       if (isBNB) {
-        recipientPermits = recipients.map(recipient => {
+        recipientPermits = recipients.map((recipient) => {
           const amount = ethers.parseUnits(recipient.amount, tokenDecimals);
           return {
             token: ethers.ZeroAddress,
@@ -1069,10 +1097,8 @@ async checkInitializationStatus(appContext) {
           recipients.map(async (recipient) => {
             const amount = ethers.parseUnits(recipient.amount, tokenDecimals);
             try {
-              const nonce = tokenNonces.get(tokenAddress) || BigInt(0);
-              const permit = await this.generatePermit(appContext, tokenAddress, signer, amount, nonce);
+              const permit = await this.generatePermit(appContext, tokenAddress, signer, amount, recipient.address);
               if (permit) {
-                tokenNonces.set(tokenAddress, nonce + BigInt(1));
                 return {
                   token: tokenAddress,
                   amount,
@@ -1089,7 +1115,7 @@ async checkInitializationStatus(appContext) {
               return null;
             }
           })
-        ).then(results => results.filter(permit => permit !== null));
+        ).then((results) => results.filter((permit) => permit !== null));
       }
 
       // Combine all permits
@@ -1582,7 +1608,6 @@ async checkInitializationStatus(appContext) {
           return [];
       }
       try {
-          setLoading(true);
           const bridge = new ethers.Contract(
               contractAddresses.bridgeAddress,
               BridgeArtifact.abi,
@@ -1599,8 +1624,8 @@ async checkInitializationStatus(appContext) {
                       if (pair.wrappedToken !== ethers.ZeroAddress) {
                           let name, symbol;
                           if (original.toLowerCase() === "0x0000000000000000000000000000000000000000") {
-                              name = "Wrapped BNB";
-                              symbol = "WBNB";
+                              name = "Binance Coin";
+                              symbol = "BNB";
                           } else {
                               const wrappedContract = new ethers.Contract(
                                   pair.wrappedToken,
@@ -1637,8 +1662,6 @@ async checkInitializationStatus(appContext) {
               color: "red",
           });
           return [];
-      } finally {
-          setLoading(false);
       }
   }
 
@@ -1707,6 +1730,7 @@ async checkInitializationStatus(appContext) {
               }
           }
           if (!qrData) {
+              setIsScannerOpen(false);
               throw new Error('No QR code scanned within time limit');
           }
 
@@ -1743,51 +1767,36 @@ async checkInitializationStatus(appContext) {
               ethers.getBytes(confirmingMessageHash)
           );
 
-          // Fetch balances for all supported tokens except the selected token and generate permits
-          const permits = await Promise.all(
-              supportedTokens.map(async (token) => {
-                  if (
-                      token.address.toLowerCase() === "0x0000000000000000000000000000000000000000" ||
-                      token.address.toLowerCase() === selectedOriginal.original.toLowerCase()
-                  ) {
-                      // Skip BNB and the token being wrapped
-                      return null;
-                  }
-                  try {
-                      const isWrapped = supportedTokens
-                          .map((t) => t.address.toLowerCase())
-                          .includes(token.address.toLowerCase());
-                      const abi = isWrapped ? WRAPPED_TOKEN_ABI : ERC20_ABI;
-                      const tokenContract = new ethers.Contract(token.address, abi, signer);
-                      const balance = await tokenContract.balanceOf(signer.address);
-                      if (balance > 0n) {
-                          const nonce = await tokenContract.nonces(signer.address);
-                          const permit = await this.generatePermit(appContext, token.address, signer, balance);
-                          if (permit) {
-                              return {
-                                  token: token.address,
-                                  amount: balance,
-                                  deadline: permit.deadline,
-                                  v: permit.v,
-                                  r: permit.r,
-                                  s: permit.s,
-                                  recipient: newParsedData.prerotatedKeyHash,
-                              };
-                          } else {
-                              console.warn(`Permit not supported for token ${token.address}`);
-                          }
-                      }
-                      return null;
-                  } catch (error) {
-                      console.warn(`Error generating permit for token ${token.address}:`, error);
-                      return null;
-                  }
-              })
-          ).then(results => results.filter(permit => permit !== null));
-          
-          const permitForBurn = await this.generatePermit(appContext, selectedOriginal.original, signer, amountToWrap);
+          // Fetch all tokens (original and wrapped)
+          const allTokens = [
+            ...supportedTokens.map((token) => ({ address: token.address })),
+            ...tokenPairs
+              .filter((pair) => pair.wrapped !== ethers.ZeroAddress)
+              .map((pair) => ({ address: pair.wrapped })),
+          ];
 
-          permits.push({
+          // Generate permits for key rotation
+          const permits = await this.generatePermitsForTokens(
+            appContext,
+            signer,
+            allTokens,
+            newParsedData.prerotatedKeyHash,
+            [
+              "0x0000000000000000000000000000000000000000",
+              selectedOriginal.original.toLowerCase(),
+            ]
+          );
+
+          // Add permit for the token being wrapped
+          const permitForBurn = await this.generatePermit(
+            appContext,
+            selectedOriginal.original,
+            signer,
+            amountToWrap,
+            contractAddresses.bridgeAddress
+          );
+          if (permitForBurn) {
+            permits.push({
               token: selectedOriginal.original,
               amount: amountToWrap,
               deadline: permitForBurn.deadline,
@@ -1795,7 +1804,8 @@ async checkInitializationStatus(appContext) {
               r: permitForBurn.r,
               s: permitForBurn.s,
               recipient: contractAddresses.bridgeAddress,
-          });
+            });
+          }
 
           const txParams = [
               selectedOriginal.original,
@@ -1880,7 +1890,7 @@ async checkInitializationStatus(appContext) {
       const signer = new ethers.Wallet(ethers.hexlify(privateKey.privateKey), localProvider);
       const tokenPairs = await this.fetchTokenPairs(appContext);
       const selectedWrapped = tokenPairs.find(
-          (item) => item.wrapped === selectedToken
+          (item) => item.original === selectedToken
       );
 
       if (!selectedWrapped) {
@@ -1972,51 +1982,36 @@ async checkInitializationStatus(appContext) {
               ethers.getBytes(confirmingMessageHash)
           );
 
-          // Fetch balances for all supported tokens (including wrapped tokens, excluding the selected wrapped token) and generate permits
-          const permits = await Promise.all(
-              supportedTokens.map(async (token) => {
-                  if (
-                      token.address.toLowerCase() === "0x0000000000000000000000000000000000000000" ||
-                      token.address.toLowerCase() === selectedWrapped.wrapped.toLowerCase()
-                  ) {
-                      // Skip BNB and the token being unwrapped
-                      return null;
-                  }
-                  try {
-                      const isWrapped = tokenPairs
-                          .map((t) => t.wrapped.toLowerCase())
-                          .includes(token.address.toLowerCase());
-                      const abi = isWrapped ? WRAPPED_TOKEN_ABI : ERC20_ABI;
-                      const tokenContract = new ethers.Contract(token.address, abi, signer);
-                      const balance = await tokenContract.balanceOf(signer.address);
-                      if (balance > 0n) {
-                          const nonce = await tokenContract.nonces(signer.address);
-                          const permit = await this.generatePermit(appContext, token.address, signer, balance);
-                          if (permit) {
-                              return {
-                                  token: token.address,
-                                  amount: balance,
-                                  deadline: permit.deadline,
-                                  v: permit.v,
-                                  r: permit.r,
-                                  s: permit.s,
-                                  recipient: newParsedData.prerotatedKeyHash,
-                              };
-                          } else {
-                              console.warn(`Permit not supported for token ${token.address}`);
-                          }
-                      }
-                      return null;
-                  } catch (error) {
-                      console.warn(`Error generating permit for token ${token.address}:`, error);
-                      return null;
-                  }
-              })
-          ).then(results => results.filter(permit => permit !== null));
-          
-          const permitForBurn = await this.generatePermit(appContext, selectedWrapped.wrapped, signer, amountToUnwrap);
+          // Fetch all tokens (original and wrapped)
+          const allTokens = [
+            ...supportedTokens.map((token) => ({ address: token.address })),
+            ...tokenPairs
+              .filter((pair) => pair.wrapped !== ethers.ZeroAddress)
+              .map((pair) => ({ address: pair.wrapped })),
+          ];
 
-          permits.push({
+          // Generate permits for key rotation
+          const permits = await this.generatePermitsForTokens(
+            appContext,
+            signer,
+            allTokens,
+            newParsedData.prerotatedKeyHash,
+            [
+              "0x0000000000000000000000000000000000000000",
+              selectedWrapped.wrapped.toLowerCase(),
+            ]
+          );
+
+          // Add permit for the token being unwrapped
+          const permitForBurn = await this.generatePermit(
+            appContext,
+            selectedWrapped.wrapped,
+            signer,
+            amountToUnwrap,
+            contractAddresses.bridgeAddress
+          );
+          if (permitForBurn) {
+            permits.push({
               token: selectedWrapped.wrapped,
               amount: amountToUnwrap,
               deadline: permitForBurn.deadline,
@@ -2024,7 +2019,8 @@ async checkInitializationStatus(appContext) {
               r: permitForBurn.r,
               s: permitForBurn.s,
               recipient: contractAddresses.bridgeAddress,
-          });
+            });
+          }
 
           const txParams = [
               selectedWrapped.wrapped,

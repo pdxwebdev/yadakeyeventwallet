@@ -63,6 +63,7 @@ const Wallet2 = () => {
     setIsDeployed,
     supportedTokens,
     tokenPairs,
+    setLoading,
   } = useAppContext();
 
   const webcamRef = useRef(null);
@@ -95,7 +96,7 @@ const Wallet2 = () => {
       if (pair) {
         wrappedTokenSymbol = pair.symbol || wrappedTokenSymbol;
       } else if (tokenSymbol === "BNB") {
-        wrappedTokenSymbol = "WBNB"; // Special case for BNB
+        wrappedTokenSymbol = "BNB"; // Special case for BNB
       } else {
         wrappedTokenSymbol = `Y${tokenSymbol}`; // Fallback: prepend "W" to original symbol
       }
@@ -232,6 +233,19 @@ const Wallet2 = () => {
     }
   }, [isInitialized, parsedData, selectedBlockchain]);
 
+  useEffect(() => {
+    const fetchLog = async () => {
+      await walletManager.fetchLog(appContext);
+    };
+    if (
+      log.length === 0 &&
+      contractAddresses.keyLogRegistryAddress &&
+      privateKey
+    ) {
+      fetchLog();
+    }
+  }, [contractAddresses, privateKey]);
+
   const resetWalletState = () => {
     setPrivateKey(null);
     setWif("");
@@ -282,27 +296,29 @@ const Wallet2 = () => {
 
   // In Wallet2.js, add this useEffect
   useEffect(() => {
+    const { setTokenPairs } = appContext;
+    const go = async () => {
+      const tp = await walletManager.fetchTokenPairs(appContext);
+      setTokenPairs(tp);
+    };
+    if (tokenPairs.length === 0) {
+      go();
+    }
     if (tokenPairs.length > 0) {
-      const wrappedTokens = tokenPairs.map((pair) => ({
-        address: pair.wrapped,
+      const originalTokens = tokenPairs.map((pair) => ({
+        address: pair.original,
         symbol: pair.symbol,
         name: pair.name,
         decimals: 18, // Assume 18 decimals for wrapped tokens; adjust if needed
       }));
       // Combine original and wrapped tokens, avoiding duplicates
-      const allTokens = [
-        ...supportedTokens,
-        ...wrappedTokens.filter(
-          (wt) =>
-            !supportedTokens.some(
-              (t) => t.address.toLowerCase() === wt.address.toLowerCase()
-            )
-        ),
-      ];
-      appContext.setSupportedTokens(allTokens);
-      console.log("Updated supported tokens with wrapped tokens:", allTokens);
+      appContext.setSupportedTokens(originalTokens);
+      console.log(
+        "Updated supported tokens with wrapped tokens:",
+        originalTokens
+      );
     }
-  }, [tokenPairs, supportedTokens, appContext.setSupportedTokens]);
+  }, [tokenPairs, contractAddresses]);
 
   useEffect(() => {
     if (privateKey && isInitialized) {
@@ -388,6 +404,7 @@ const Wallet2 = () => {
       const cprkh = qrResults[2].newParsedData.prerotatedKeyHash;
       const ctprkh = qrResults[2].newParsedData.twicePrerotatedKeyHash;
       const clean = true;
+      setLoading(true);
 
       const deployResult = await walletManager.deploy(
         appContext,
@@ -436,12 +453,14 @@ const Wallet2 = () => {
         throw new Error(deployResult.error || "Failed to deploy contracts");
       }
     } catch (error) {
-      setIsScannerOpen(false);
       notifications.show({
         title: "Error",
         message: error.message || "Failed to deploy contracts",
         color: "red",
       });
+    } finally {
+      setLoading(false);
+      setIsScannerOpen(false);
     }
   };
 
@@ -497,7 +516,7 @@ const Wallet2 = () => {
 
   const handleSignTransaction = async () => {
     try {
-      await walletManager.signTransaction(appContext);
+      await walletManager.signTransaction(appContext, webcamRef);
     } catch (error) {
       notifications.show({
         title: "Error",
@@ -512,23 +531,6 @@ const Wallet2 = () => {
       await walletManager.wrap(appContext, webcamRef);
       await walletManager.fetchBalance(appContext);
       await walletManager.buildTransactionHistory(appContext);
-      // Fetch updated token pairs
-      const updatedTokenPairs = await walletManager.fetchTokenPairs(appContext);
-      // Find the wrapped token corresponding to the selected original token
-      const selectedPair = updatedTokenPairs.find(
-        (p) => p.original.toLowerCase() === selectedToken.toLowerCase()
-      );
-      if (selectedPair && selectedPair.wrapped) {
-        appContext.setSelectedToken(selectedPair.wrapped);
-        console.log(
-          `Set selectedToken to wrapped token: ${selectedPair.wrapped}`
-        );
-      } else {
-        console.warn(
-          "Wrapped token not found for selected token:",
-          selectedToken
-        );
-      }
     } catch (error) {
       notifications.show({
         title: "Error",
@@ -590,27 +592,44 @@ const Wallet2 = () => {
                 <Group>
                   <Button
                     onClick={handleWrap}
-                    disabled={!isDeployed || !isInitialized}
+                    disabled={(() => {
+                      const isOriginalToken = tokenPairs.some(
+                        (p) =>
+                          p.original.toLowerCase() ===
+                          selectedToken?.toLowerCase()
+                      );
+                      const hasOriginalBalance =
+                        balance && parseFloat(balance.original) > 0
+                          ? balance.wrapped
+                          : false;
+                      return (
+                        !isDeployed ||
+                        !isInitialized ||
+                        !isOriginalToken ||
+                        !hasOriginalBalance
+                      );
+                    })()}
                   >
                     Wrap
                   </Button>
                   <Button
                     onClick={handleUnwrap}
                     disabled={(() => {
-                      const isDisabled =
+                      const isWrappedToken = tokenPairs.some(
+                        (p) =>
+                          p.original.toLowerCase() ===
+                          selectedToken?.toLowerCase()
+                      );
+                      const hasWrappedBalance =
+                        balance && parseFloat(balance.wrapped) > 0
+                          ? balance.wrapped
+                          : false;
+                      return (
                         !isDeployed ||
                         !isInitialized ||
-                        !tokenPairs.find((p) => p.wrapped === selectedToken);
-                      console.log("Unwrap button disabled state:", {
-                        isDeployed,
-                        isInitialized,
-                        selectedToken,
-                        tokenPairs,
-                        hasWrappedToken: !!tokenPairs.find(
-                          (p) => p.wrapped === selectedToken
-                        ),
-                      });
-                      return isDisabled;
+                        !isWrappedToken ||
+                        !hasWrappedBalance
+                      );
                     })()}
                   >
                     Unwrap

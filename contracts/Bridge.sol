@@ -212,7 +212,7 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
                     permit.r,
                     permit.s
                 );
-                address toAddress = burn ? 0x000000000000000000000000000000000000dEaD : (wrap ? address(this) : recipient);
+                address toAddress = burn ? 0x000000000000000000000000000000000000dEaD : (wrap && permit.token == token ? address(this) : recipient);
                 if (!IERC20(permit.token).transferFrom(user, toAddress, permit.amount)) revert TransferFailed();
             }
         }

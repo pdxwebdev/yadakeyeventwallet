@@ -33,71 +33,6 @@ const TokenSelector = () => {
 
   const walletManager = walletManagerFactory(selectedBlockchain);
 
-  // Fetch supported tokens and add native coin
-  useEffect(() => {
-    const fetchTokens = async () => {
-      try {
-        const bridge = new ethers.Contract(
-          contractAddresses.bridgeAddress,
-          BRIDGE_ABI,
-          localProvider
-        );
-        const tokens = await bridge.getSupportedTokens();
-        const tokenData = await Promise.all(
-          tokens.map(async (tokenAddress) => {
-            let name, symbol;
-            if (tokenAddress === "0x0000000000000000000000000000000000000000") {
-              name = "Binance Coin"; // Or 'Wrapped ETH' depending on the chain
-              symbol = "BNB"; // Or 'WETH'
-            } else {
-              const tokenContract = new ethers.Contract(
-                tokenAddress,
-                ERC20_ABI,
-                localProvider
-              );
-              name = await tokenContract.name();
-              symbol = await tokenContract.symbol();
-            }
-            return { address: tokenAddress, name, symbol, value: tokenAddress };
-          })
-        );
-        setSupportedTokens(tokenData || []);
-        if (tokenData.length > 0 && !selectedToken) {
-          setSelectedToken(tokenData[0].address); // Default to first token (BNB)
-        }
-      } catch (error) {
-        console.error("Error fetching supported tokens:", error);
-        setSupportedTokens([
-          {
-            address: ethers.ZeroAddress,
-            name: "Binance Coin",
-            symbol: "BNB",
-            value: ethers.ZeroAddress,
-          },
-        ]); // Fallback to only native coin on error
-        notifications.show({
-          title: "Error",
-          message: "Failed to load supported tokens, showing native coin only",
-          color: "red",
-        });
-      }
-    };
-
-    if (contractAddresses.bridgeAddress) fetchTokens();
-  }, [
-    selectedBlockchain,
-    setSupportedTokens,
-    setSelectedToken,
-    contractAddresses,
-  ]);
-
-  // Fetch balance when token or private key changes
-  useEffect(() => {
-    if (selectedToken && privateKey) {
-      walletManager.fetchBalance(appContext);
-    }
-  }, [selectedToken, privateKey]);
-
   // Guard against undefined supportedTokens
   const tokenOptions = (supportedTokens || []).map((token) => ({
     value: token.address,
@@ -110,10 +45,7 @@ const TokenSelector = () => {
       <Select
         data={tokenOptions}
         value={selectedToken}
-        onChange={(value) => {
-          setSelectedToken(value);
-          setBalance(null); // Reset balance to trigger refresh
-        }}
+        onChange={appContext.setSelectedToken}
         placeholder={
           supportedTokens?.length > 0 ? "Select a token" : "No tokens available"
         }
