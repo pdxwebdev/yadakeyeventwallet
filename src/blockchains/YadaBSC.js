@@ -1666,7 +1666,7 @@ async checkInitializationStatus(appContext) {
   }
 
   async wrap(appContext, webcamRef) {
-      const { selectedToken, setLoading, log, contractAddresses, privateKey, setIsScannerOpen, parsedData, supportedTokens, setLog, tokenPairs } = appContext;
+      const { selectedToken, setLoading, log, contractAddresses, privateKey, setIsScannerOpen, setIsTransactionFlow, parsedData, supportedTokens, setLog, tokenPairs } = appContext;
       const signer = new ethers.Wallet(ethers.hexlify(privateKey.privateKey), localProvider);
 
       // Ensure tokenPairs is up-to-date
@@ -1723,6 +1723,7 @@ async checkInitializationStatus(appContext) {
               await approveTx.wait();
           }
 
+          setIsTransactionFlow(true);
           setIsScannerOpen(true);
 
           let qrData;
@@ -1906,6 +1907,7 @@ async checkInitializationStatus(appContext) {
       contractAddresses,
       privateKey,
       setIsScannerOpen,
+      setIsTransactionFlow,
       parsedData,
       supportedTokens,
       setLog,
@@ -1959,6 +1961,8 @@ async checkInitializationStatus(appContext) {
       );
       await approveTx.wait();
 
+      
+      setIsTransactionFlow(true);
       setIsScannerOpen(true);
 
       let qrData;
