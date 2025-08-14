@@ -952,7 +952,7 @@ async checkInitializationStatus(appContext) {
       setLoading(true);
       notifications.show({
         title: 'Key Rotation Required',
-        message: `Please scan the QR code for the next key (rotation ${log.length + 1}) to proceed.`,
+        message: `Please scan the QR code for the next key (rotation ${log.length+1}) to proceed.`,
         color: 'yellow',
       });
       setIsTransactionFlow(true);
@@ -1335,7 +1335,7 @@ async checkInitializationStatus(appContext) {
     try {
       notifications.show({
         title: "Key Rotation Required",
-        message: `Please scan the QR code for the next key (rotation ${log.length + 1}).`,
+        message: `Please scan the QR code for the next key (rotation ${log.length}).`,
         color: "yellow",
       });
       setIsScannerOpen(true);
@@ -1715,12 +1715,6 @@ async checkInitializationStatus(appContext) {
                       `Insufficient ${selectedOriginal.name} balance: ${ethers.formatEther(balance)} available`
                   );
               }
-              // Approve the bridge contract to spend ERC20 tokens
-              const approveTx = await originalTokenContract.approve(
-                  contractAddresses.bridgeAddress,
-                  amountToWrap
-              );
-              await approveTx.wait();
           }
 
           setIsTransactionFlow(true);
@@ -1743,6 +1737,7 @@ async checkInitializationStatus(appContext) {
               throw new Error('No QR code scanned within time limit');
           }
 
+          setIsTransactionFlow(false);
           setIsScannerOpen(false);
           setLoading(true);
 
@@ -1954,12 +1949,6 @@ async checkInitializationStatus(appContext) {
         );
       }
 
-      // Approve the bridge contract to burn the wrapped tokens
-      const approveTx = await wrappedTokenContract.approve(
-        contractAddresses.bridgeAddress,
-        amountToUnwrap
-      );
-      await approveTx.wait();
 
       
       setIsTransactionFlow(true);
@@ -1982,6 +1971,7 @@ async checkInitializationStatus(appContext) {
         throw new Error('No QR code scanned within time limit');
       }
 
+      setIsTransactionFlow(false);
       setIsScannerOpen(false);
       setLoading(true);
 

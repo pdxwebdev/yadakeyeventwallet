@@ -9,12 +9,18 @@ const QRScannerModal = ({
   log,
   styles,
   isTransactionFlow,
+  isDeployed,
+  currentScanIndex, // New prop
 }) => (
   <Modal
     opened={isOpen}
     onClose={onClose}
     title={`Scan QR Code for rotation ${
-      isTransactionFlow ? log.length + 1 : log.length
+      isTransactionFlow
+        ? log.length + 1
+        : !isDeployed
+        ? currentScanIndex
+        : log.length
     }`}
     size="lg"
     styles={{ modal: styles.modal, title: styles.title }}

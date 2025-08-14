@@ -70,6 +70,8 @@ const Wallet2 = () => {
   const appContext = useAppContext();
   const isDeploymentChecked = useRef(false);
 
+  const [currentScanIndex, setCurrentScanIndex] = useState(0);
+
   const walletManager = useMemo(
     () => walletManagerFactory(selectedBlockchain, webcamRef),
     [selectedBlockchain, webcamRef]
@@ -299,6 +301,7 @@ const Wallet2 = () => {
     const { setTokenPairs } = appContext;
     const go = async () => {
       const tp = await walletManager.fetchTokenPairs(appContext);
+      if (tp.length === 0) return;
       setTokenPairs(tp);
     };
     if (tokenPairs.length === 0) {
@@ -333,13 +336,14 @@ const Wallet2 = () => {
 
       for (let i = 0; i < maxScans; i++) {
         notifications.show({
-          title: `Scan QR Code ${i + 1}`,
-          message: `Please scan QR code ${
-            i + 1
-          } of ${maxScans} for deployment.`,
+          title: `Scan QR Code for rotation ${i}`,
+          message: `Please scan QR code for rotation ${i}. The ${
+            i === 0 ? "first" : i === 1 ? "second" : "third"
+          } of three for deployment.`,
           color: "blue",
         });
 
+        setCurrentScanIndex(i); // Set the current scan index
         setIsScannerOpen(true);
         let qrData;
         let attempts = 0;
@@ -461,6 +465,7 @@ const Wallet2 = () => {
     } finally {
       setLoading(false);
       setIsScannerOpen(false);
+      setCurrentScanIndex(0); // Reset after deployment
     }
   };
 
@@ -649,7 +654,7 @@ const Wallet2 = () => {
               isDeployed={isDeployed}
               styles={styles}
             />
-            {privateKey && isDeployed && (
+            {privateKey && isDeployed && log.length === parsedData.rotation && (
               <>
                 <WalletBalance
                   balance={balance}
@@ -718,6 +723,7 @@ const Wallet2 = () => {
               log={log}
               styles={styles}
               isTransactionFlow={isTransactionFlow}
+              currentScanIndex={currentScanIndex} // Pass the new prop
             />
             <QRDisplayModal
               isOpen={isQRModalOpen}
