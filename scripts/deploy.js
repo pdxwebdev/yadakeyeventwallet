@@ -7,13 +7,11 @@ import MockERC20Artifact from "../src/utils/abis/MockERC20.json" assert { type: 
 import WrappedTokenArtifact from "../src/utils/abis/WrappedToken.json" assert { type: "json" };
 const { ethers, upgrades } = pkg;
 
-
 const ERC20_ABI = MockERC20Artifact.abi;
 const WRAPPED_TOKEN_ABI = WrappedTokenArtifact.abi;
 
 const NATIVE_ASSET_ADDRESS = "0x0000000000000000000000000000000000000000";
 
-// Function to read and parse WIF key from a file
 const readWIFKeyFromFile = (filePath) => {
   try {
     const wif = fs.readFileSync(filePath, 'utf8').trim();
@@ -31,7 +29,6 @@ const readWIFKeyFromFile = (filePath) => {
   }
 };
 
-// Function to create a wallet from WIF
 const createWalletFromWIF = (wif) => {
   const decoded = bs58.decode(wif);
   if (decoded.length !== 34 && decoded.length !== 38) {
@@ -41,20 +38,17 @@ const createWalletFromWIF = (wif) => {
   return new ethers.Wallet(ethers.hexlify(privateKey), ethers.provider);
 };
 
-// Function to check if a contract is deployed at a given address
 async function isContractDeployed(address) {
   if (!address || address === ethers.ZeroAddress) return false;
   const code = await ethers.provider.getCode(address);
   return code !== '0x';
 }
 
-// Function to generate key data for addTokenPairAtomic
 async function generateKeyData(deployer, nextDeployer, nextNextDeployer) {
   const currentWallet = deployer;
   const nextWallet = nextDeployer;
   const nextNextWallet = nextNextDeployer;
 
-  // Generate uncompressed public keys (65 bytes) and remove the 0x04 prefix to get 64 bytes
   currentWallet.uncompressedPublicKey = ethers.hexlify(tinysecp256k1.pointFromScalar(Buffer.from(currentWallet.privateKey.slice(2), 'hex'), false).slice(1));
   nextWallet.uncompressedPublicKey = ethers.hexlify(tinysecp256k1.pointFromScalar(Buffer.from(nextWallet.privateKey.slice(2), 'hex'), false).slice(1));
   nextNextWallet.uncompressedPublicKey = ethers.hexlify(tinysecp256k1.pointFromScalar(Buffer.from(nextNextWallet.privateKey.slice(2), 'hex'), false).slice(1));
@@ -105,7 +99,7 @@ export async function main() {
     value: ethers.parseEther("1000.0"),
   });
   await tx.wait();
-  console.log(`Funded ${deployer.address} with 1000 ETH`);
+  console.log(`Funded ${deployer.address} with 1000 ETH/BNB`);
 
   // Deploy KeyLogRegistry
   const KeyLogRegistry = await ethers.getContractFactory("KeyLogRegistry", deployer);
@@ -121,6 +115,20 @@ export async function main() {
   }
   const keyLogRegistryAddress = deployments.keyLogRegistryAddress;
 
+  // Deploy Mock BNB/USD Price Feed
+  const PriceFeedAggregatorV3 = await ethers.getContractFactory("PriceFeedAggregatorV3", deployer);
+  let bnbPriceFeed;
+  if (deployments.bnbPriceFeedAddress && !clean) {
+    bnbPriceFeed = await PriceFeedAggregatorV3.attach(deployments.bnbPriceFeedAddress);
+    console.log("Using existing BNB/USD Price Feed:", deployments.bnbPriceFeedAddress);
+  } else {
+    bnbPriceFeed = await PriceFeedAggregatorV3.deploy(ethers.parseUnits("500.0", 8)); // Mock BNB price: $500, 8 decimals
+    await bnbPriceFeed.waitForDeployment();
+    deployments.bnbPriceFeedAddress = await bnbPriceFeed.getAddress();
+    console.log("BNB/USD Price Feed:", deployments.bnbPriceFeedAddress);
+  }
+  const bnbPriceFeedAddress = deployments.bnbPriceFeedAddress;
+
   // Deploy Bridge
   const Bridge = await ethers.getContractFactory("Bridge", deployer);
   let bridge;
@@ -130,7 +138,7 @@ export async function main() {
   } else {
     bridge = await upgrades.deployProxy(
       Bridge,
-      [keyLogRegistryAddress],
+      [keyLogRegistryAddress, bnbPriceFeedAddress], // Pass _keyLogRegistry and _ethPriceFeed
       {
         initializer: "initialize",
         kind: "uups",
@@ -152,12 +160,9 @@ export async function main() {
 
   // Generate key data
   const keyData = await generateKeyData(deployer, nextDeployer, nextNextDeployer);
-  const balance = await ethers.provider.getBalance(
-    keyData.currentSigner.address
-  );
-  // Register initial key log entry
+  const balance = await ethers.provider.getBalance(keyData.currentSigner.address);
   console.log("Registering initial key log entry...");
-  console.log(balance)
+  console.log("Deployer balance:", ethers.formatEther(balance));
   await bridge.connect(deployer).registerKeyWithTransfer(
     keyData.currentSigner.uncompressedPublicKey,
     keyData.currentSigner.address,
@@ -167,7 +172,7 @@ export async function main() {
     keyData.nextSigner.address,
     false,
     [],
-    { value: balance - 5285124941591474n}
+    { value: balance - 5285124941591474n }
   );
   console.log(`Initial key log entry registered with publicKeyHash: ${keyData.currentSigner.address}, outputAddress: ${keyData.nextSigner.address}`);
 
@@ -197,20 +202,6 @@ export async function main() {
   }
   const mockPepeAddress = deployments.mockPepeAddress;
 
-  const WrappedNativeToken = await ethers.getContractFactory("WrappedNativeToken", deployer);
-  let wrappedNativeToken;
-  if (deployments.wrappedNativeTokenAddress && !clean) {
-    wrappedNativeToken = await WrappedNativeToken.attach(deployments.wrappedNativeTokenAddress);
-    console.log("Using existing WrappedNativeToken:", deployments.wrappedNativeTokenAddress);
-  } else {
-    wrappedNativeToken = await WrappedNativeToken.deploy("Wrapped BNB", "WBNB");
-    await wrappedNativeToken.waitForDeployment();
-    deployments.wrappedNativeTokenAddress = await wrappedNativeToken.getAddress();
-    console.log("WrappedNativeToken (WNATIVE):", deployments.wrappedNativeTokenAddress);
-  }
-  const wrappedNativeTokenAddress = deployments.wrappedNativeTokenAddress;
-
-  const PriceFeedAggregatorV3 = await ethers.getContractFactory("PriceFeedAggregatorV3", deployer);
   let priceFeed;
   if (deployments.mockPriceFeedAddress && !clean) {
     priceFeed = await PriceFeedAggregatorV3.attach(deployments.mockPriceFeedAddress);
@@ -243,7 +234,7 @@ export async function main() {
     const deadline = Math.floor(Date.now() / 1000) + 60 * 60; // 1 hour from now
     const values = {
       owner: signer.address,
-      spender: bridgeAddress, // Bridge contract as spender
+      spender: bridgeAddress,
       value: amount,
       nonce: nonce,
       deadline: deadline,
@@ -253,29 +244,25 @@ export async function main() {
     return { v, r, s, deadline };
   }
 
-  // Modified section in main() for addMultipleTokenPairsAtomic
   // Configure token pairs via Bridge
   if (!deployments.configured || clean) {
     const tokenPairs = [
       [yadaERC20Address, "Wrapped YadaCoin", "WYDA", true, ethers.ZeroAddress, ethers.ZeroAddress],
       [mockPepeAddress, "PEPE", "PEPE", false, ethers.ZeroAddress, priceFeedAddress],
-      [NATIVE_ASSET_ADDRESS, "BNB", "BNB", false, wrappedNativeTokenAddress, ethers.ZeroAddress]
+      [NATIVE_ASSET_ADDRESS, "BNB", "BNB", false, ethers.ZeroAddress, bnbPriceFeedAddress] // Use BNB/USD price feed
     ];
 
     const nonce = await bridge.nonces(nextDeployer.address);
     console.log("Nonce:", nonce.toString());
 
-    // Generate permits for deployer's token balances
-    const supportedTokens = [yadaERC20Address, mockPepeAddress, wrappedNativeTokenAddress];
+    const supportedTokens = [yadaERC20Address, mockPepeAddress, NATIVE_ASSET_ADDRESS];
     const permits = await Promise.all(
       supportedTokens.map(async (tokenAddress) => {
         if (tokenAddress.toLowerCase() === NATIVE_ASSET_ADDRESS.toLowerCase()) {
-          // Skip native token (handled via msg.value)
           return null;
         }
         try {
-          const isWrapped = [wrappedNativeTokenAddress].map(t => t.toLowerCase()).includes(tokenAddress.toLowerCase());
-          const abi = isWrapped ? WRAPPED_TOKEN_ABI : ERC20_ABI;
+          const abi = ERC20_ABI;
           const tokenContract = new ethers.Contract(tokenAddress, abi, deployer);
           const balance = await tokenContract.balanceOf(deployer.address);
           if (balance > 0n) {
@@ -289,7 +276,7 @@ export async function main() {
                 v: permit.v,
                 r: permit.r,
                 s: permit.s,
-                recipient: nextDeployer.address, // Transfer to nextDeployer
+                recipient: nextDeployer.address,
               };
             } else {
               console.warn(`Permit not supported for token ${tokenAddress}`);
@@ -303,7 +290,6 @@ export async function main() {
       })
     ).then(results => results.filter(permit => permit !== null));
 
-    // Generate unconfirmed signature
     const unconfirmedMessageHash = ethers.keccak256(
       ethers.AbiCoder.defaultAbiCoder().encode(
         ["tuple(address,string,string,bool,address,address)[]", "address", "uint256"],
@@ -312,7 +298,6 @@ export async function main() {
     );
     const unconfirmedSignature = await nextDeployer.signMessage(ethers.getBytes(unconfirmedMessageHash));
 
-    // Generate confirming signature
     const confirmingMessageHash = ethers.keccak256(
       ethers.AbiCoder.defaultAbiCoder().encode(
         ["tuple(address,string,string,bool,address,address)[]", "address", "uint256"],
@@ -321,7 +306,6 @@ export async function main() {
     );
     const confirmingSignature = await nextNextDeployer.signMessage(ethers.getBytes(confirmingMessageHash));
 
-    // Structure unconfirmed and confirming KeyData with permits
     const unconfirmedKeyData = {
       signature: unconfirmedSignature,
       publicKey: keyData.nextSigner.uncompressedPublicKey,
@@ -331,7 +315,7 @@ export async function main() {
       prevPublicKeyHash: keyData.currentSigner.address,
       outputAddress: keyData.nextNextSigner.address,
       hasRelationship: false,
-      permits: permits, // Add permits
+      permits: permits,
     };
 
     const confirmingKeyData = {
@@ -343,19 +327,17 @@ export async function main() {
       prevPublicKeyHash: keyData.nextSigner.address,
       outputAddress: confirmingPrerotatedKeyHash,
       hasRelationship: false,
-      permits: [], // No permits for confirming
+      permits: [],
     };
 
-    // Add token pairs via Bridge with permits
     await bridge.connect(nextDeployer).addMultipleTokenPairsAtomic(
       tokenPairs,
       unconfirmedKeyData,
       confirmingKeyData,
       { value: ethers.parseEther("999") }
     );
-    console.log("Added all token pairs: $YDA, $PEPE, Native");
+    console.log("Added all token pairs: $YDA, $PEPE, BNB");
 
-    // Retrieve WrappedToken addresses
     deployments.wrappedTokenWMOCKAddress = await bridge.originalToWrapped(yadaERC20Address);
     deployments.wrappedTokenYMOCKAddress = await bridge.originalToWrapped(mockPepeAddress);
     deployments.wrappedNativeTokenAddress = await bridge.originalToWrapped(NATIVE_ASSET_ADDRESS);
@@ -363,11 +345,11 @@ export async function main() {
     deployments.configured = true;
   }
 
-  // Save deployments
   fs.writeFileSync(deploymentsFile, JSON.stringify(deployments, null, 2));
 
   return deployments;
 }
+
 main().then((output) => {
   console.log(output);
 }).catch((error) => {

@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "copy-abis": "cp artifacts/contracts/Bridge.sol/Bridge.json src/utils/abis/ && cp artifacts/contracts/KeyLogRegistry.sol/KeyLogRegistry.json src/utils/abis/ && cp artifacts/contracts/WrappedToken.sol/WrappedToken.json src/utils/abis/ && cp artifacts/contracts/MockERC20.sol/MockERC20.json src/utils/abis/ && cp artifacts/contracts/PriceFeedAggregatorV3.sol/PriceFeedAggregatorV3.json src/utils/abis/ && cp artifacts/contracts/TokenPairWrapper.sol/TokenPairWrapper.json src/utils/abis/ && cp artifacts/contracts/WrappedNativeToken.sol/WrappedNativeToken.json src/utils/abis/",
+    "copy-abis": "cp artifacts/contracts/Bridge.sol/Bridge.json src/utils/abis/ && cp artifacts/contracts/KeyLogRegistry.sol/KeyLogRegistry.json src/utils/abis/ && cp artifacts/contracts/WrappedToken.sol/WrappedToken.json src/utils/abis/ && cp artifacts/contracts/MockERC20.sol/MockERC20.json src/utils/abis/ && cp artifacts/contracts/PriceFeedAggregatorV3.sol/PriceFeedAggregatorV3.json src/utils/abis/ && cp artifacts/contracts/TokenPairWrapper.sol/TokenPairWrapper.json src/utils/abis/",
     "refresh": "rm -rf artifacts/ && npx hardhat compile && npm run copy-abis",
     "node": "rm -f deployments.json && npx hardhat node",
     "deploy": "npx hardhat run ./scripts/deploy.js --network localhost",

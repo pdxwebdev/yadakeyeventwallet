@@ -1665,18 +1665,24 @@ async checkInitializationStatus(appContext) {
       }
   }
 
-  // Wrap tokens with key rotation
   async wrap(appContext, webcamRef) {
-      const { selectedToken, setLoading, log, contractAddresses, privateKey, setIsScannerOpen, parsedData, supportedTokens, setLog } = appContext;
+      const { selectedToken, setLoading, log, contractAddresses, privateKey, setIsScannerOpen, parsedData, supportedTokens, setLog, tokenPairs } = appContext;
       const signer = new ethers.Wallet(ethers.hexlify(privateKey.privateKey), localProvider);
-      const tokenPairs = await this.fetchTokenPairs(appContext);
+
+      // Ensure tokenPairs is up-to-date
+      if (!tokenPairs || tokenPairs.length === 0) {
+          await this.fetchTokenPairs(appContext);
+      }
+
       const selectedOriginal = tokenPairs.find(
-          (item) => item.original === selectedToken
+          (item) => item.original.toLowerCase() === selectedToken.toLowerCase()
       );
 
       if (!selectedOriginal) {
           throw new Error('Selected token not supported');
       }
+
+      const isBNB = selectedToken.toLowerCase() === "0x0000000000000000000000000000000000000000";
 
       try {
           const bridge = new ethers.Contract(
@@ -1684,26 +1690,32 @@ async checkInitializationStatus(appContext) {
               BRIDGE_ABI,
               signer
           );
-          const amountToWrap = ethers.parseEther('1000');
-          const bridgeNonce = await bridge.nonces(
-              signer.address
-          );
+          const bridgeNonce = await bridge.nonces(signer.address);
+          let amountToWrap;
+          // Check balance
+          if (isBNB) {
+              const balance = await localProvider.getBalance(signer.address);
 
-          if (!selectedOriginal.isCrossChain) {
+              amountToWrap = balance-2000000000000000000n; // Hardcoded for simplicity; adjust as needed
+              if (balance < amountToWrap) {
+                  throw new Error(
+                      `Insufficient BNB balance: ${ethers.formatEther(balance)} available`
+                  );
+              }
+          } else {
               const originalTokenContract = new ethers.Contract(
                   selectedOriginal.original,
                   ERC20_ABI,
                   signer
               );
-              const balance = await originalTokenContract.balanceOf(
-                  signer.address
-              );
+              const balance = await originalTokenContract.balanceOf(signer.address);
+              amountToWrap = balance; // Hardcoded for simplicity; adjust as needed
               if (balance < amountToWrap) {
                   throw new Error(
                       `Insufficient ${selectedOriginal.name} balance: ${ethers.formatEther(balance)} available`
                   );
               }
-              // Approve the bridge contract to spend the tokens
+              // Approve the bridge contract to spend ERC20 tokens
               const approveTx = await originalTokenContract.approve(
                   contractAddresses.bridgeAddress,
                   amountToWrap
@@ -1739,7 +1751,7 @@ async checkInitializationStatus(appContext) {
 
           const unconfirmedMessage = ethers.AbiCoder.defaultAbiCoder().encode(
               ["address", "uint256", "address", "uint256"],
-              [selectedOriginal.original, amountToWrap, newParsedData.prerotatedKeyHash, bridgeNonce]
+              [selectedOriginal.original, isBNB ? 0 : amountToWrap, newParsedData.prerotatedKeyHash, bridgeNonce]
           );
           const unconfirmedMessageHash = ethers.keccak256(unconfirmedMessage);
           const unconfirmedSignature = await signer.signMessage(
@@ -1765,48 +1777,50 @@ async checkInitializationStatus(appContext) {
 
           // Fetch all tokens (original and wrapped)
           const allTokens = [
-            ...supportedTokens.map((token) => ({ address: token.address })),
-            ...tokenPairs
-              .filter((pair) => pair.wrapped !== ethers.ZeroAddress)
-              .map((pair) => ({ address: pair.wrapped })),
+              ...supportedTokens.map((token) => ({ address: token.address })),
+              ...tokenPairs
+                  .filter((pair) => pair.wrapped !== ethers.ZeroAddress)
+                  .map((pair) => ({ address: pair.wrapped })),
           ];
 
           // Generate permits for key rotation
           const permits = await this.generatePermitsForTokens(
-            appContext,
-            signer,
-            allTokens,
-            newParsedData.prerotatedKeyHash,
-            [
-              "0x0000000000000000000000000000000000000000",
-              selectedOriginal.original.toLowerCase(),
-            ]
+              appContext,
+              signer,
+              allTokens,
+              newParsedData.prerotatedKeyHash,
+              [
+                  "0x0000000000000000000000000000000000000000",
+                  selectedOriginal.original.toLowerCase(),
+              ]
           );
 
-          // Add permit for the token being wrapped
-          const permitForBurn = await this.generatePermit(
-            appContext,
-            selectedOriginal.original,
-            signer,
-            amountToWrap,
-            contractAddresses.bridgeAddress
-          );
-          if (permitForBurn) {
-            permits.push({
-              token: selectedOriginal.original,
-              amount: amountToWrap,
-              deadline: permitForBurn.deadline,
-              v: permitForBurn.v,
-              r: permitForBurn.r,
-              s: permitForBurn.s,
-              recipient: contractAddresses.bridgeAddress,
-            });
+          // Add permit for the token being wrapped (only for ERC20 tokens)
+          if (!isBNB) {
+              const permitForBurn = await this.generatePermit(
+                  appContext,
+                  selectedOriginal.original,
+                  signer,
+                  amountToWrap,
+                  contractAddresses.bridgeAddress
+              );
+              if (permitForBurn) {
+                  permits.push({
+                      token: selectedOriginal.original,
+                      amount: amountToWrap,
+                      deadline: permitForBurn.deadline,
+                      v: permitForBurn.v,
+                      r: permitForBurn.r,
+                      s: permitForBurn.s,
+                      recipient: contractAddresses.bridgeAddress,
+                  });
+              }
           }
 
           const txParams = [
               selectedOriginal.original,
               {
-                  amount: amountToWrap,
+                  amount: isBNB ? BigInt(0) : amountToWrap ,
                   signature: unconfirmedSignature,
                   publicKey,
                   prerotatedKeyHash: parsedData.prerotatedKeyHash,
@@ -1834,26 +1848,25 @@ async checkInitializationStatus(appContext) {
           const balance = await localProvider.getBalance(signer.address);
           const feeData = await localProvider.getFeeData();
           const gasPrice = feeData.gasPrice;
-          const gasEstimate = await bridge.wrapPairWithTransfer.estimateGas(
+          const gasEstimate = await bridge.wrap.estimateGas(
               ...txParams,
-              { value: 0n }
+              { value: isBNB ? amountToWrap : balance-2000000000000000000n }
           );
           const gasCost = gasEstimate * gasPrice * 2n;
-          const amountToSend = balance > gasCost ? balance - gasCost : 0n;
-
-          if (amountToSend <= 0n) {
+          const amountToSend = isBNB ? amountToWrap + gasCost : gasCost;
+          if (balance < amountToSend) {
               throw new Error(
-                  `Insufficient ETH balance: ${ethers.formatEther(balance)} ETH`
+                  `Insufficient BNB balance: ${ethers.formatEther(balance)} available, need ${ethers.formatEther(amountToSend)}`
               );
           }
-          
+
           const nonce = await localProvider.getTransactionCount(
               signer.address,
               "latest"
           );
-          const tx = await bridge.wrapPairWithTransfer(...txParams, {
+          const tx = await bridge.wrap(...txParams, {
               nonce,
-              value: amountToSend,
+              value: isBNB ? amountToWrap : balance-2000000000000000000n,
               gasLimit: (gasEstimate * 150n) / 100n,
               gasPrice,
           });
@@ -1869,7 +1882,7 @@ async checkInitializationStatus(appContext) {
 
           notifications.show({
               title: "Success",
-              message: `Successfully wrapped ${ethers.formatEther(amountToWrap)} ${selectedOriginal.symbol}`,
+              message: `Successfully wrapped ${ethers.formatEther(amountToWrap)} ${isBNB ? "BNB" : selectedOriginal.symbol}`,
               color: "green",
           });
       } catch (error) {
@@ -1886,220 +1899,238 @@ async checkInitializationStatus(appContext) {
 
   // Unwrap tokens with key rotation
   async unwrap(appContext, webcamRef) {
-      const { selectedToken, setLoading, log, contractAddresses, privateKey, setIsScannerOpen, parsedData, supportedTokens, setLog } = appContext;
-      const signer = new ethers.Wallet(ethers.hexlify(privateKey.privateKey), localProvider);
-      const tokenPairs = await this.fetchTokenPairs(appContext);
-      const selectedWrapped = tokenPairs.find(
-          (item) => item.original === selectedToken
-      );
+    const {
+      selectedToken,
+      setLoading,
+      log,
+      contractAddresses,
+      privateKey,
+      setIsScannerOpen,
+      parsedData,
+      supportedTokens,
+      setLog,
+      tokenPairs,
+    } = appContext;
+    const signer = new ethers.Wallet(ethers.hexlify(privateKey.privateKey), localProvider);
+    const isBNB = selectedToken.toLowerCase() === "0x0000000000000000000000000000000000000000";
 
-      if (!selectedWrapped) {
-          throw new Error('Selected token is not a wrapped token');
+    // Ensure tokenPairs is up-to-date
+    if (!tokenPairs || tokenPairs.length === 0) {
+      await this.fetchTokenPairs(appContext);
+    }
+
+    // Find the token pair where the selectedToken is the wrapped token
+    const selectedWrapped = tokenPairs.find(
+      (item) => item.original.toLowerCase() === selectedToken.toLowerCase()
+    );
+
+    if (!selectedWrapped) {
+      throw new Error('Selected token is not a wrapped token');
+    }
+
+    try {
+      const bridge = new ethers.Contract(
+        contractAddresses.bridgeAddress,
+        BRIDGE_ABI,
+        signer
+      );
+      const bridgeNonce = await bridge.nonces(signer.address);
+
+      // Use the wrapped token contract to check balance (wBNB or other wrapped ERC20)
+      const wrappedTokenContract = new ethers.Contract(
+        selectedWrapped.wrapped,
+        WRAPPED_TOKEN_ABI,
+        signer
+      );
+      const balance = await wrappedTokenContract.balanceOf(signer.address);
+
+      // Hardcoded amount for simplicity; adjust as needed
+      const amountToUnwrap = balance; // Use full balance, consistent with wrap
+      if (balance < amountToUnwrap) {
+        throw new Error(
+          `Insufficient ${selectedWrapped.symbol} balance: ${ethers.formatEther(balance)} available`
+        );
       }
 
-      try {
-          const bridge = new ethers.Contract(
-              contractAddresses.bridgeAddress,
-              BRIDGE_ABI,
-              signer
-          );
-          const nonce = await localProvider.getTransactionCount(
-              signer.address,
-              "latest"
-          );
-          const bridgeNonce = await bridge.nonces(
-              signer.address
-          );
+      // Approve the bridge contract to burn the wrapped tokens
+      const approveTx = await wrappedTokenContract.approve(
+        contractAddresses.bridgeAddress,
+        amountToUnwrap
+      );
+      await approveTx.wait();
 
-          const wrappedTokenContract = new ethers.Contract(
-              selectedWrapped.wrapped,
-              WRAPPED_TOKEN_ABI,
-              signer
-          );
-          const balance = await wrappedTokenContract.balanceOf(signer.address);
+      setIsScannerOpen(true);
 
-          const amountToUnwrap = balance;
-          if (balance < amountToUnwrap) {
-              throw new Error(
-                  `Insufficient ${selectedWrapped.symbol} balance: ${ethers.formatEther(balance)} available`
-              );
-          }
+      let qrData;
+      let attempts = 0;
+      const maxAttempts = 100;
+      while (attempts < maxAttempts) {
+        try {
+          qrData = await capture(webcamRef);
+          break;
+        } catch (error) {
+          attempts++;
+          await new Promise((resolve) => setTimeout(resolve, 300));
+        }
+      }
+      if (!qrData) {
+        setIsScannerOpen(false);
+        throw new Error('No QR code scanned within time limit');
+      }
 
-          // Approve the bridge contract to burn the wrapped tokens
-          const approveTx = await wrappedTokenContract.approve(
-              contractAddresses.bridgeAddress,
-              amountToUnwrap
-          );
-          await approveTx.wait();
+      setIsScannerOpen(false);
+      setLoading(true);
 
-          setIsScannerOpen(true);
+      const { newPrivateKey, newParsedData } = await this.processScannedQR(appContext, qrData, true);
 
-          let qrData;
-          let attempts = 0;
-          const maxAttempts = 100;
-          while (attempts < maxAttempts) {
-              try {
-                  qrData = await capture(webcamRef);
-                  break;
-              } catch (error) {
-                  attempts++;
-                  await new Promise((resolve) => setTimeout(resolve, 300));
-              }
-          }
-          if (!qrData) {
-              throw new Error('No QR code scanned within time limit');
-          }
+      const publicKey = decompressPublicKey(Buffer.from(privateKey.publicKey)).slice(1);
 
-          setIsScannerOpen(false);
-          setLoading(true);
+      // Include amountToUnwrap in unconfirmed parameters for all tokens
+      const unconfirmedMessage = ethers.AbiCoder.defaultAbiCoder().encode(
+        ["address", "uint256", "address", "uint256"],
+        [selectedWrapped.wrapped, amountToUnwrap, newParsedData.prerotatedKeyHash, bridgeNonce]
+      );
+      const unconfirmedMessageHash = ethers.keccak256(unconfirmedMessage);
+      const unconfirmedSignature = await signer.signMessage(
+        ethers.getBytes(unconfirmedMessageHash)
+      );
 
-          const { newPrivateKey, newParsedData } = await this.processScannedQR(appContext, qrData, true);
+      const newPublicKey = decompressPublicKey(Buffer.from(newPrivateKey.publicKey)).slice(1);
+      const newSigner = new ethers.Wallet(ethers.hexlify(newPrivateKey.privateKey), localProvider);
 
-          const publicKey = decompressPublicKey(Buffer.from(privateKey.publicKey)).slice(1);
+      const confirmingMessage = ethers.AbiCoder.defaultAbiCoder().encode(
+        ["address", "uint256", "address", "uint256"],
+        [
+          selectedWrapped.wrapped,
+          '0',
+          newParsedData.prerotatedKeyHash,
+          bridgeNonce + 1n,
+        ]
+      );
+      const confirmingMessageHash = ethers.keccak256(confirmingMessage);
+      const confirmingSignature = await newSigner.signMessage(
+        ethers.getBytes(confirmingMessageHash)
+      );
 
-          const unconfirmedMessage = ethers.AbiCoder.defaultAbiCoder().encode(
-              ["address", "uint256", "address", "uint256"],
-              [selectedWrapped.wrapped, amountToUnwrap, newParsedData.prerotatedKeyHash, bridgeNonce]
-          );
-          const unconfirmedMessageHash = ethers.keccak256(unconfirmedMessage);
-          const unconfirmedSignature = await signer.signMessage(
-              ethers.getBytes(unconfirmedMessageHash)
-          );
+      // Fetch all tokens (original and wrapped)
+      const allTokens = [
+        ...supportedTokens.map((token) => ({ address: token.address })),
+        ...tokenPairs
+          .filter((pair) => pair.wrapped !== ethers.ZeroAddress)
+          .map((pair) => ({ address: pair.wrapped })),
+      ];
 
-          const newPublicKey = decompressPublicKey(Buffer.from(newPrivateKey.publicKey)).slice(1);
-          const newSigner = new ethers.Wallet(ethers.hexlify(newPrivateKey.privateKey), localProvider);
+      // Generate permits for key rotation, excluding BNB and the selected wrapped token
+      const permits = await this.generatePermitsForTokens(
+        appContext,
+        signer,
+        allTokens,
+        newParsedData.prerotatedKeyHash,
+        [
+          "0x0000000000000000000000000000000000000000", // Exclude BNB
+          selectedWrapped.wrapped.toLowerCase(), // Exclude the selected wrapped token
+        ]
+      );
 
-          const confirmingMessage = ethers.AbiCoder.defaultAbiCoder().encode(
-              ["address", "uint256", "address", "uint256"],
-              [
-                  selectedWrapped.wrapped,
-                  '0',
-                  newParsedData.prerotatedKeyHash,
-                  bridgeNonce + 1n,
-              ]
-          );
-          const confirmingMessageHash = ethers.keccak256(confirmingMessage);
-          const confirmingSignature = await newSigner.signMessage(
-              ethers.getBytes(confirmingMessageHash)
-          );
-
-          // Fetch all tokens (original and wrapped)
-          const allTokens = [
-            ...supportedTokens.map((token) => ({ address: token.address })),
-            ...tokenPairs
-              .filter((pair) => pair.wrapped !== ethers.ZeroAddress)
-              .map((pair) => ({ address: pair.wrapped })),
-          ];
-
-          // Generate permits for key rotation
-          const permits = await this.generatePermitsForTokens(
-            appContext,
-            signer,
-            allTokens,
-            newParsedData.prerotatedKeyHash,
-            [
-              "0x0000000000000000000000000000000000000000",
-              selectedWrapped.wrapped.toLowerCase(),
-            ]
-          );
-
-          // Add permit for the token being unwrapped
-          const permitForBurn = await this.generatePermit(
-            appContext,
-            selectedWrapped.wrapped,
-            signer,
-            amountToUnwrap,
-            contractAddresses.bridgeAddress
-          );
-          if (permitForBurn) {
-            permits.push({
-              token: selectedWrapped.wrapped,
-              amount: amountToUnwrap,
-              deadline: permitForBurn.deadline,
-              v: permitForBurn.v,
-              r: permitForBurn.r,
-              s: permitForBurn.s,
-              recipient: contractAddresses.bridgeAddress,
-            });
-          }
-
-          const txParams = [
-              selectedWrapped.wrapped,
-              {
-                  amount: amountToUnwrap,
-                  signature: unconfirmedSignature,
-                  publicKey,
-                  prerotatedKeyHash: parsedData.prerotatedKeyHash,
-                  twicePrerotatedKeyHash: parsedData.twicePrerotatedKeyHash,
-                  prevPublicKeyHash: parsedData.prevPublicKeyHash,
-                  outputAddress: newParsedData.prerotatedKeyHash,
-                  hasRelationship: false,
-                  tokenSource: signer.address,
-                  permits,
-              },
-              {
-                  amount: BigInt(0),
-                  signature: confirmingSignature,
-                  publicKey: newPublicKey,
-                  prerotatedKeyHash: newParsedData.prerotatedKeyHash,
-                  twicePrerotatedKeyHash: newParsedData.twicePrerotatedKeyHash,
-                  prevPublicKeyHash: newParsedData.prevPublicKeyHash,
-                  outputAddress: newParsedData.prerotatedKeyHash,
-                  hasRelationship: false,
-                  tokenSource: newSigner.address,
-                  permits: [],
-              },
-          ];
-
-          const balance2 = await localProvider.getBalance(signer.address);
-          const feeData = await localProvider.getFeeData();
-          const gasPrice = feeData.gasPrice;
-          const gasEstimate = await bridge.unwrapPairWithTransfer.estimateGas(
-              ...txParams,
-              { value: 0n }
-          );
-          const gasCost = gasEstimate * gasPrice * 2n;
-          const amountToSend = balance2 > gasCost ? balance2 - gasCost : 0n;
-
-          if (amountToSend <= 0n) {
-              throw new Error(
-                  `Insufficient ETH balance: ${ethers.formatEther(balance2)} ETH`
-              );
-          }
-
-          const tx = await bridge.unwrapPairWithTransfer(...txParams, {
-            nonce: nonce + 1,
-            value: amountToSend,
-            gasLimit: (gasEstimate * 150n) / 100n,
-            gasPrice,
+      // Add permit for the token being unwrapped
+      const permitForBurn = await this.generatePermit(
+        appContext,
+        selectedWrapped.wrapped,
+        signer,
+        amountToUnwrap,
+        contractAddresses.bridgeAddress
+      );
+      if (permitForBurn) {
+        permits.push({
+          token: selectedWrapped.wrapped,
+          amount: amountToUnwrap,
+          deadline: permitForBurn.deadline,
+          v: permitForBurn.v,
+          r: permitForBurn.r,
+          s: permitForBurn.s,
+          recipient: contractAddresses.bridgeAddress,
         });
-        await tx.wait();
+      }
 
-        const keyLogRegistry = new ethers.Contract(
-            contractAddresses.keyLogRegistryAddress,
-            KEYLOG_REGISTRY_ABI,
-            signer
+      const txParams = [
+        selectedWrapped.wrapped,
+        {
+          amount: amountToUnwrap, // Include amountToUnwrap for all tokens
+          signature: unconfirmedSignature,
+          publicKey,
+          prerotatedKeyHash: parsedData.prerotatedKeyHash,
+          twicePrerotatedKeyHash: parsedData.twicePrerotatedKeyHash,
+          prevPublicKeyHash: parsedData.prevPublicKeyHash,
+          outputAddress: newParsedData.prerotatedKeyHash,
+          hasRelationship: false,
+          tokenSource: signer.address,
+          permits,
+        },
+        {
+          amount: BigInt(0),
+          signature: confirmingSignature,
+          publicKey: newPublicKey,
+          prerotatedKeyHash: newParsedData.prerotatedKeyHash,
+          twicePrerotatedKeyHash: newParsedData.twicePrerotatedKeyHash,
+          prevPublicKeyHash: newParsedData.prevPublicKeyHash,
+          outputAddress: newParsedData.prerotatedKeyHash,
+          hasRelationship: false,
+          tokenSource: newSigner.address,
+          permits: [],
+        },
+      ];
+
+      const bnbbalance = await localProvider.getBalance(signer.address);
+      const feeData = await localProvider.getFeeData();
+      const gasPrice = feeData.gasPrice;
+      const gasEstimate = await bridge.unwrap.estimateGas(
+        ...txParams,
+        { value: 0n } // No value sent for any token
+      );
+      const gasCost = gasEstimate * gasPrice * 2n;
+      const amountToSend = gasCost;
+
+      if (bnbbalance < amountToSend) {
+        throw new Error(
+          `Insufficient BNB balance: ${ethers.formatEther(bnbbalance)} available, need ${ethers.formatEther(amountToSend)}`
         );
-        const updatedLog = await keyLogRegistry.buildFromPublicKey(publicKey);
-        setLog(updatedLog);
+      }
 
-        // Refresh token pairs after unwrapping
-        await this.fetchTokenPairs(appContext);
+      const nonce = await localProvider.getTransactionCount(signer.address, "latest");
+      const tx = await bridge.unwrap(...txParams, {
+        nonce,
+        value: bnbbalance - 20000000000000000n, // No value sent, as the Bridge contract handles native BNB return
+        gasLimit: (gasEstimate * 150n) / 100n,
+        gasPrice,
+      });
+      await tx.wait();
 
-        notifications.show({
-            title: "Success",
-            message: `Successfully unwrapped ${ethers.formatEther(amountToUnwrap)} ${selectedWrapped.symbol} to ${selectedWrapped.name}`,
-            color: "green",
-        });
+      const keyLogRegistry = new ethers.Contract(
+        contractAddresses.keyLogRegistryAddress,
+        KEYLOG_REGISTRY_ABI,
+        signer
+      );
+      const updatedLog = await keyLogRegistry.buildFromPublicKey(publicKey);
+      setLog(updatedLog);
+
+      // Refresh token pairs after unwrapping
+      await this.fetchTokenPairs(appContext);
+
+      notifications.show({
+        title: "Success",
+        message: `Successfully unwrapped ${ethers.formatEther(amountToUnwrap)} ${selectedWrapped.symbol} to ${selectedWrapped.name}`,
+        color: "green",
+      });
     } catch (error) {
-        console.error("Unwrap error:", error);
-        notifications.show({
-            title: "Error",
-            message: error.message || "Failed to unwrap tokens",
-            color: "red",
-        });
+      console.error("Unwrap error:", error);
+      notifications.show({
+        title: "Error",
+        message: error.message || "Failed to unwrap tokens",
+        color: "red",
+      });
     } finally {
-        setLoading(false);
+      setLoading(false);
+      setIsScannerOpen(false);
     }
   }
 }
