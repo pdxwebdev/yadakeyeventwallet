@@ -1949,8 +1949,6 @@ async checkInitializationStatus(appContext) {
         );
       }
 
-
-      
       setIsTransactionFlow(true);
       setIsScannerOpen(true);
 

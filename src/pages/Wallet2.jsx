@@ -723,6 +723,7 @@ const Wallet2 = () => {
               log={log}
               styles={styles}
               isTransactionFlow={isTransactionFlow}
+              isDeployed={isDeployed}
               currentScanIndex={currentScanIndex} // Pass the new prop
             />
             <QRDisplayModal
