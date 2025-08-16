@@ -1,6 +1,14 @@
 // src/pages/Wallet2.js
 import { useState, useEffect, useRef, useMemo } from "react";
-import { AppShell, Container, Card, Button, Text, Group } from "@mantine/core";
+import {
+  AppShell,
+  Container,
+  Card,
+  Button,
+  Text,
+  Group,
+  NumberInput,
+} from "@mantine/core";
 import { notifications, Notifications } from "@mantine/notifications";
 import { useAppContext } from "../context/AppContext";
 import { walletManagerFactory } from "../blockchains/WalletManagerFactory";
@@ -71,6 +79,8 @@ const Wallet2 = () => {
   const isDeploymentChecked = useRef(false);
 
   const [currentScanIndex, setCurrentScanIndex] = useState(0);
+  const [wrapAmount, setWrapAmount] = useState("");
+  const [unwrapAmount, setUnwrapAmount] = useState("");
 
   const walletManager = useMemo(
     () => walletManagerFactory(selectedBlockchain, webcamRef),
@@ -533,7 +543,7 @@ const Wallet2 = () => {
 
   const handleWrap = async () => {
     try {
-      await walletManager.wrap(appContext, webcamRef);
+      await walletManager.wrap(appContext, webcamRef, wrapAmount);
       await walletManager.fetchBalance(appContext);
       await walletManager.buildTransactionHistory(appContext);
     } catch (error) {
@@ -547,7 +557,7 @@ const Wallet2 = () => {
 
   const handleUnwrap = async () => {
     try {
-      await walletManager.unwrap(appContext, webcamRef);
+      await walletManager.unwrap(appContext, webcamRef, unwrapAmount);
       await walletManager.fetchBalance(appContext);
       await walletManager.buildTransactionHistory(appContext);
     } catch (error) {
@@ -594,51 +604,98 @@ const Wallet2 = () => {
             {selectedBlockchainObject.isBridge && (
               <>
                 <TokenSelector />
-                <Group>
-                  <Button
-                    onClick={handleWrap}
-                    disabled={(() => {
-                      const isOriginalToken = tokenPairs.some(
-                        (p) =>
-                          p.original.toLowerCase() ===
-                          selectedToken?.toLowerCase()
-                      );
-                      const hasOriginalBalance =
-                        balance && parseFloat(balance.original) > 0
-                          ? balance.wrapped
-                          : false;
-                      return (
+                <Group mt="md" align="flex-end">
+                  <div style={{ flex: 1 }}>
+                    <NumberInput
+                      label={`Wrap Amount (${tokenSymbol})`}
+                      value={wrapAmount}
+                      onChange={(value) =>
+                        setWrapAmount(
+                          value === undefined ? "" : value.toString()
+                        )
+                      }
+                      placeholder="Enter amount to wrap"
+                      min={0}
+                      step={0.01}
+                      decimalScale={6}
+                      allowNegative={false}
+                      disabled={
                         !isDeployed ||
                         !isInitialized ||
-                        !isOriginalToken ||
-                        !hasOriginalBalance
-                      );
-                    })()}
-                  >
-                    Wrap
-                  </Button>
-                  <Button
-                    onClick={handleUnwrap}
-                    disabled={(() => {
-                      const isWrappedToken = tokenPairs.some(
-                        (p) =>
-                          p.original.toLowerCase() ===
-                          selectedToken?.toLowerCase()
-                      );
-                      const hasWrappedBalance =
-                        balance && parseFloat(balance.wrapped) > 0
-                          ? balance.wrapped
-                          : false;
-                      return (
+                        !tokenPairs.some(
+                          (p) =>
+                            p.original.toLowerCase() ===
+                            selectedToken?.toLowerCase()
+                        )
+                      }
+                      styles={styles.input}
+                    />
+                    <Button
+                      onClick={handleWrap}
+                      disabled={
                         !isDeployed ||
                         !isInitialized ||
-                        !isWrappedToken ||
-                        !hasWrappedBalance
-                      );
-                    })()}
-                  >
-                    Unwrap
-                  </Button>
+                        !tokenPairs.some(
+                          (p) =>
+                            p.original.toLowerCase() ===
+                            selectedToken?.toLowerCase()
+                        ) ||
+                        !wrapAmount ||
+                        parseFloat(wrapAmount) <= 0 ||
+                        (balance &&
+                          parseFloat(wrapAmount) > parseFloat(balance.original))
+                      }
+                      mt="sm"
+                    >
+                      Wrap
+                    </Button>
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <NumberInput
+                      label={`Unwrap Amount (${wrappedTokenSymbol})`}
+                      value={unwrapAmount}
+                      onChange={(value) =>
+                        setUnwrapAmount(
+                          value === undefined ? "" : value.toString()
+                        )
+                      }
+                      placeholder="Enter amount to unwrap"
+                      min={0}
+                      step={0.01}
+                      decimalScale={6}
+                      allowNegative={false}
+                      disabled={
+                        !isDeployed ||
+                        !isInitialized ||
+                        !tokenPairs.some(
+                          (p) =>
+                            p.original.toLowerCase() ===
+                            selectedToken?.toLowerCase()
+                        )
+                      }
+                      styles={styles.input}
+                    />
+                    <Button
+                      onClick={handleUnwrap}
+                      disabled={
+                        !isDeployed ||
+                        !isInitialized ||
+                        !tokenPairs.some(
+                          (p) =>
+                            p.original.toLowerCase() ===
+                            selectedToken?.toLowerCase()
+                        ) ||
+                        !unwrapAmount ||
+                        parseFloat(unwrapAmount) <= 0 ||
+                        (balance &&
+                          parseFloat(unwrapAmount) >
+                            parseFloat(balance.wrapped))
+                      }
+                      mt="sm"
+                    >
+                      Unwrap
+                    </Button>
+                  </div>
                 </Group>
               </>
             )}
