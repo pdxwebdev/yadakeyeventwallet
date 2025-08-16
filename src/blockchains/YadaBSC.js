@@ -2232,7 +2232,7 @@ class YadaBSC {
           totalAmount,
           [
             {
-              recipientAddress: newParsedData.prerotatedKeyHash, // Tokens to be wrapped or transferred
+              recipientAddress: contractAddresses.bridgeAddress, // Tokens to be wrapped or transferred
               amount: amountToWrap,
               wrap: true,
               unwrap: false,
@@ -2578,7 +2578,7 @@ class YadaBSC {
         }
       }
       let remainingPermit = null;
-      if (remainingBalance > 0) {
+      if (isBNB && remainingBalance > 0) {
         remainingPermit = await this.generatePermit(
           appContext,
           selectedWrapped.wrapped,

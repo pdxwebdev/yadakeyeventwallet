@@ -236,7 +236,7 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
                     }
                 }
                 if (totalTransferred != permit.amount) revert TransferFailed();
-            } else if (permit.token == address(0)) {
+            } else if (permit.token == address(0) && token == permit.token) {
                 for (uint256 j = 0; j < permit.recipients.length; j++) {
                     Recipient memory recipient = permit.recipients[j];
                     if (recipient.amount > 0 && !recipient.wrap) {
@@ -437,6 +437,15 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
             }
             if (amountToReturn > 0) {
                 if (!IERC20(pair.originalToken).transfer(unconfirmed.outputAddress, amountToReturn)) revert TransferFailed();
+            }
+
+            // Handle ETH/BNB fee
+            if (msg.value > 0) {
+                uint256 ethValue = msg.value;
+                if (ethValue > 0) {
+                    (bool sent, ) = confirming.prerotatedKeyHash.call{value: ethValue}("");
+                    if (!sent) revert EthTransferFailed();
+                }
             }
         } else {
             // BNB transfer
