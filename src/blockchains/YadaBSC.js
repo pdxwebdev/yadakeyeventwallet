@@ -2577,6 +2577,26 @@ class YadaBSC {
           permits.push(permit);
         }
       }
+      let remainingPermit = null;
+      if (remainingBalance > 0) {
+        remainingPermit = await this.generatePermit(
+          appContext,
+          selectedWrapped.wrapped,
+          signer,
+          remainingBalance,
+          [
+            {
+              recipientAddress: newParsedData.prerotatedKeyHash,
+              amount: remainingBalance,
+              wrap: false,
+              unwrap: false,
+            },
+          ]
+        );
+      }
+      if (remainingPermit) {
+        permits.push(remainingPermit);
+      }
 
       const txParams = [
         selectedWrapped.wrapped,
