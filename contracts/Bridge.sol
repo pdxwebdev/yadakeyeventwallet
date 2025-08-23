@@ -497,7 +497,7 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
         );
     }
 
-    function registerKeyPairWithTransfer(Params calldata unconfirmed, Params calldata confirming) external payable nonReentrant {
+    function registerKeyPairWithTransfer(address token, Params calldata unconfirmed, Params calldata confirming) external payable nonReentrant {
 
         uint256 totalBNBTransferred = 0;
         for (uint256 i = 0; i < unconfirmed.permits.length; i++) {
@@ -517,7 +517,7 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
         }
 
         // Execute ERC20 permits after handling BNB transfers
-        _executePermits(address(0), msg.sender, unconfirmed.permits);
+        _executePermits(token, msg.sender, unconfirmed.permits);
 
         if (msg.value > totalBNBTransferred) {
             uint256 remainingBNB = msg.value - totalBNBTransferred;

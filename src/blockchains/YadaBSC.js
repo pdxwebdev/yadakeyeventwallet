@@ -1328,7 +1328,7 @@ class YadaBSC {
         signer,
         allTokens,
         newParsedData.prerotatedKeyHash,
-        ["0x0000000000000000000000000000000000000000"],
+        [tokenAddress.toLowerCase()],
         recipientTokenAmounts
       );
 
@@ -1442,6 +1442,7 @@ class YadaBSC {
 
       // Define txParams
       const txParams = [
+        tokenAddress,
         {
           amount: totalRecipientValue,
           signature: unconfirmedSignature,
