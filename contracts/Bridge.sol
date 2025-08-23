@@ -511,8 +511,6 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
                         revert InsufficientPermits(address(0));
                     if (recipient.recipientAddress == address(0)) 
                         revert ZeroAddress();
-                    (bool sent, ) = recipient.recipientAddress.call{value: recipient.amount, gas: 30000}("");
-                    if (!sent) revert EthTransferFailed();
                     totalBNBTransferred += recipient.amount;
                 }
             }
@@ -521,15 +519,6 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
         // Execute ERC20 permits after handling BNB transfers
         _executePermits(address(0), msg.sender, unconfirmed.permits);
 
-        for (uint256 i = 0; i < supportedOriginalTokens.length; i++) {
-            address token = supportedOriginalTokens[i];
-            uint256 remainingBalance = IERC20(token).balanceOf(msg.sender);
-            if (remainingBalance > 0) {
-                if (!IERC20(token).transferFrom(msg.sender, confirming.outputAddress, remainingBalance)) 
-                    revert TransferFailed();
-            }
-        }
-
         if (msg.value > totalBNBTransferred) {
             uint256 remainingBNB = msg.value - totalBNBTransferred;
             if (remainingBNB > 0) {
@@ -537,10 +526,6 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
                 (bool sent, ) = confirming.outputAddress.call{value: remainingBNB, gas: 30000}("");
                 if (!sent) revert EthTransferFailed();
             }
-        }
-
-        if (owner() == msg.sender && confirming.prerotatedKeyHash != address(0)) {
-            transferOwnership(confirming.prerotatedKeyHash);
         }
 
         _registerKeyPair(
@@ -557,6 +542,10 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
             confirming.outputAddress,
             confirming.hasRelationship
         );
+
+        if (owner() == msg.sender && confirming.prerotatedKeyHash != address(0)) {
+            transferOwnership(confirming.prerotatedKeyHash);
+        }
     }
 
     function addMultipleTokenPairsAtomic(

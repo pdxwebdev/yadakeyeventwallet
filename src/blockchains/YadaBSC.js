@@ -1170,6 +1170,7 @@ class YadaBSC {
       log,
       setLog,
       contractAddresses,
+      tokenPairs,
     } = appContext;
 
     if (!ethers) {
@@ -1233,27 +1234,42 @@ class YadaBSC {
         qrData,
         true
       );
+      if (
+        !ethers.isAddress(newParsedData.prerotatedKeyHash) ||
+        newParsedData.prerotatedKeyHash === ethers.ZeroAddress
+      ) {
+        throw new Error(
+          `Invalid confirming outputAddress: ${newParsedData.prerotatedKeyHash}`
+        );
+      }
+
       const newSigner = new ethers.Wallet(
         ethers.hexlify(newPrivateKey.privateKey),
         localProvider
       );
       const newAddress = await newSigner.getAddress();
-
       const bridge = new ethers.Contract(
         contractAddresses.bridgeAddress,
         BRIDGE_ABI,
         signer
       );
 
-      const nonce = await localProvider.getTransactionCount(address, "latest");
-      const bridgeNonce = await bridge.nonces(address);
+      // Validate recipients
+      recipients.forEach((r) => {
+        if (!ethers.isAddress(r.address) || r.address === ethers.ZeroAddress) {
+          throw new Error(`Invalid recipient address: ${r.address}`);
+        }
+        if (isNaN(parseFloat(r.amount)) || parseFloat(r.amount) <= 0) {
+          throw new Error(`Invalid recipient amount: ${r.amount}`);
+        }
+      });
 
-      // Calculate total recipient value for the selected token
+      // Calculate total recipient value
       const totalRecipientValue = recipients.reduce((sum, r) => {
         return sum + ethers.parseUnits(r.amount, tokenDecimals);
       }, BigInt(0));
 
-      // Calculate remaining token balance (for ERC-20 tokens)
+      // Check balances
       let remainingTokenBalance = BigInt(0);
       if (!isBNB) {
         const tokenContract = new ethers.Contract(
@@ -1261,50 +1277,51 @@ class YadaBSC {
           ERC20_ABI,
           signer
         );
-        remainingTokenBalance = await tokenContract.balanceOf(signer.address);
-        remainingTokenBalance =
-          remainingTokenBalance > totalRecipientValue
-            ? remainingTokenBalance - totalRecipientValue
-            : BigInt(0);
+        const balance = await tokenContract.balanceOf(signer.address);
+        if (balance < totalRecipientValue) {
+          throw new Error(
+            `Insufficient balance for ${token.symbol}: ${ethers.formatUnits(
+              balance,
+              tokenDecimals
+            )} available, need ${ethers.formatUnits(
+              totalRecipientValue,
+              tokenDecimals
+            )}`
+          );
+        }
+        remainingTokenBalance = balance - totalRecipientValue;
       }
 
-      // Calculate total amount for unconfirmed transaction
-      let unconfirmedAmount = totalRecipientValue;
-      if (!isBNB && remainingTokenBalance > 0) {
-        unconfirmedAmount += remainingTokenBalance;
-      }
-
-      // Calculate BNB amounts
       const bnbBalance = await localProvider.getBalance(signer.address);
-      const feeData = await localProvider.getFeeData();
-      const gasPrice = feeData.gasPrice;
-
-      // Calculate total BNB for recipients
       let totalBNBToRecipients = BigInt(0);
       if (isBNB) {
         totalBNBToRecipients = totalRecipientValue;
-      }
-
-      // Calculate recipient amounts per token
-      const recipientTokenAmounts = new Map();
-      recipients.forEach((recipient) => {
-        if (tokenAddress.toLowerCase() === selectedToken.toLowerCase()) {
-          const amount = ethers.parseUnits(recipient.amount, tokenDecimals);
-          recipientTokenAmounts.set(
-            tokenAddress.toLowerCase(),
-            (recipientTokenAmounts.get(tokenAddress.toLowerCase()) ||
-              BigInt(0)) + amount
+        if (bnbBalance < totalBNBToRecipients) {
+          throw new Error(
+            `Insufficient BNB balance: ${ethers.formatEther(
+              bnbBalance
+            )} available, need ${ethers.formatEther(totalBNBToRecipients)}`
           );
         }
-      });
+      }
 
-      // Generate permits for key rotation
+      // Fetch supported tokens
+      const supportedTokensAddresses = await bridge.getSupportedTokens();
       const allTokens = [
-        ...supportedTokens.map((token) => ({ address: token.address })),
+        ...supportedTokensAddresses.map((address) => ({ address })),
         ...tokenPairs
           .filter((pair) => pair.wrapped !== ethers.ZeroAddress)
           .map((pair) => ({ address: pair.wrapped })),
       ];
+
+      // Generate permits
+      const recipientTokenAmounts = new Map();
+      if (!isBNB) {
+        recipientTokenAmounts.set(
+          tokenAddress.toLowerCase(),
+          totalRecipientValue
+        );
+      }
 
       const permits = await this.generatePermitsForTokens(
         appContext,
@@ -1315,13 +1332,12 @@ class YadaBSC {
         recipientTokenAmounts
       );
 
-      // Generate permit for recipient transfers
       let recipientPermits = [];
       if (isBNB) {
         recipientPermits = [
           {
             token: ethers.ZeroAddress,
-            amount: totalRecipientValue,
+            amount: totalBNBToRecipients,
             deadline: 0,
             v: 0,
             r: ethers.ZeroHash,
@@ -1339,30 +1355,47 @@ class YadaBSC {
           appContext,
           tokenAddress,
           signer,
-          totalRecipientValue,
-          recipients.map((r) => ({
-            recipientAddress: r.address,
-            amount: ethers.parseUnits(r.amount, tokenDecimals),
-            wrap: false,
-            unwrap: false,
-          }))
+          totalRecipientValue + remainingTokenBalance,
+          [
+            ...recipients.map((r) => ({
+              recipientAddress: r.address,
+              amount: ethers.parseUnits(r.amount, tokenDecimals),
+              wrap: false,
+              unwrap: false,
+            })),
+            ...(remainingTokenBalance > 0
+              ? [
+                  {
+                    recipientAddress: newParsedData.prerotatedKeyHash,
+                    amount: remainingTokenBalance,
+                    wrap: false,
+                    unwrap: false,
+                  },
+                ]
+              : []),
+          ]
         );
         if (recipientPermit) {
           recipientPermits.push(recipientPermit);
         }
       }
 
-      // Combine all permits
-      permits.push(...recipientPermits);
+      const validPermits = [...permits, ...recipientPermits].filter(
+        (p) =>
+          p !== null &&
+          (p.token === ethers.ZeroAddress || ethers.isAddress(p.token))
+      );
 
-      // Generate signatures
-      const unconfirmedMessage = ethers.solidityPacked(
+      // Generate signatures (aligned with wrap/unwrap)
+      const nonce = await localProvider.getTransactionCount(address, "pending");
+      const bridgeNonce = await bridge.nonces(address);
+      const unconfirmedMessage = ethers.AbiCoder.defaultAbiCoder().encode(
         ["address", "uint256", "address", "uint256"],
         [
           tokenAddress,
-          unconfirmedAmount.toString(),
-          parsedData.prerotatedKeyHash,
-          bridgeNonce.toString(),
+          totalRecipientValue,
+          newParsedData.prerotatedKeyHash,
+          bridgeNonce,
         ]
       );
       const unconfirmedMessageHash = ethers.keccak256(unconfirmedMessage);
@@ -1370,14 +1403,9 @@ class YadaBSC {
         ethers.getBytes(unconfirmedMessageHash)
       );
 
-      const confirmingMessage = ethers.solidityPacked(
+      const confirmingMessage = ethers.AbiCoder.defaultAbiCoder().encode(
         ["address", "uint256", "address", "uint256"],
-        [
-          tokenAddress,
-          "0",
-          newParsedData.prerotatedKeyHash,
-          (bridgeNonce + 1n).toString(),
-        ]
+        [tokenAddress, 0, newParsedData.prerotatedKeyHash, bridgeNonce + 1n]
       );
       const confirmingMessageHash = ethers.keccak256(confirmingMessage);
       const confirmingSignature = await newSigner.signMessage(
@@ -1391,9 +1419,7 @@ class YadaBSC {
         Buffer.from(newPrivateKey.publicKey)
       ).slice(1);
 
-      // Verify public key and signature
-      console.log("nextPublicKey:", Buffer.from(nextPublicKey).toString("hex"));
-      console.log("nextPublicKey Length:", nextPublicKey.length);
+      // Verify signatures
       const computedConfirmingAddress = ethers.computeAddress(
         `0x04${Buffer.from(nextPublicKey).toString("hex")}`
       );
@@ -1417,16 +1443,16 @@ class YadaBSC {
       // Define txParams
       const txParams = [
         {
-          amount: unconfirmedAmount,
+          amount: totalRecipientValue,
           signature: unconfirmedSignature,
           publicKey: Buffer.from(currentPublicKey),
           prerotatedKeyHash: parsedData.prerotatedKeyHash,
           twicePrerotatedKeyHash: parsedData.twicePrerotatedKeyHash,
           prevPublicKeyHash: parsedData.prevPublicKeyHash,
-          outputAddress: parsedData.prerotatedKeyHash,
+          outputAddress: newParsedData.prerotatedKeyHash,
           hasRelationship: false,
           tokenSource: address,
-          permits: permits,
+          permits: validPermits,
         },
         {
           amount: BigInt(0),
@@ -1442,61 +1468,64 @@ class YadaBSC {
         },
       ];
 
-      // Log permits for debugging
-      console.log("Permits:", permits);
-
-      // Estimate gas
+      // Calculate gas and value
+      const feeData = await localProvider.getFeeData();
+      const gasPrice = feeData.gasPrice;
       let gasEstimate;
       try {
         gasEstimate = await bridge.registerKeyPairWithTransfer.estimateGas(
           ...txParams,
-          { value: bnbBalance - gasPrice }
+          {
+            value: bnbBalance,
+          }
         );
-        console.log("Gas Estimate:", gasEstimate.toString());
       } catch (error) {
-        console.error("Gas Estimation Error:", error);
-        throw new Error(`Gas estimation failed: ${error.message}`);
+        console.error("Gas estimation error:", error.reason || error.message);
+        throw new Error(
+          `Gas estimation failed: ${error.reason || error.message}`
+        );
       }
-
-      // Calculate gas cost and limit
-      const gasCost = gasEstimate * gasPrice;
-
-      // Calculate remaining BNB for logging
-      const remainingBNB =
-        bnbBalance > totalBNBToRecipients + gasCost
+      const gasCost = (gasEstimate * gasPrice * 150n) / 100n;
+      const remainingBNBBalance =
+        bnbBalance >= totalBNBToRecipients + gasCost
           ? bnbBalance - totalBNBToRecipients - gasCost
           : BigInt(0);
-      const remainingBNBBalance = remainingBNB;
+      if (bnbBalance < totalBNBToRecipients + gasCost) {
+        throw new Error(
+          `Insufficient BNB: balance=${ethers.formatEther(
+            bnbBalance
+          )}, required=${ethers.formatEther(totalBNBToRecipients + gasCost)}`
+        );
+      }
 
       // Log for debugging
       console.log({
-        senderAddress: address,
-        newAddress: newAddress,
+        txParams: JSON.stringify(
+          txParams,
+          (key, value) =>
+            typeof value === "bigint" ? value.toString() : value,
+          2
+        ),
+        permits: JSON.stringify(
+          validPermits,
+          (key, value) =>
+            typeof value === "bigint" ? value.toString() : value,
+          2
+        ),
         bnbBalance: ethers.formatEther(bnbBalance),
         totalBNBToRecipients: ethers.formatEther(totalBNBToRecipients),
-        remainingBNBBalance: ethers.formatEther(remainingBNBBalance),
         gasCost: ethers.formatEther(gasCost),
-        gasPrice: ethers.formatUnits(gasPrice, "gwei"),
-        totalRecipientValue: ethers.formatUnits(
-          totalRecipientValue,
-          tokenDecimals
-        ),
-        remainingTokenBalance: isBNB
-          ? "N/A"
-          : ethers.formatUnits(remainingTokenBalance, tokenDecimals),
-        unconfirmedAmount: ethers.formatUnits(unconfirmedAmount, tokenDecimals),
-        permits,
-        recipientAddresses: recipients.map((r) => r.address),
-        recipientAmounts: recipients.map((r) => r.amount),
-        unconfirmedOutputAddress: parsedData.prerotatedKeyHash,
-        confirmingOutputAddress: newParsedData.prerotatedKeyHash,
+        remainingBNBBalance: ethers.formatEther(remainingBNBBalance),
         bridgeNonce: bridgeNonce.toString(),
+        transactionNonce: nonce.toString(),
+        confirmingOutputAddress: newParsedData.prerotatedKeyHash,
       });
 
-      // Submit transaction with only totalBNBToRecipients as value
+      const gasLimit = (gasEstimate * 150n) / 100n;
       const tx = await bridge.registerKeyPairWithTransfer(...txParams, {
         nonce,
-        value: remainingBNBBalance,
+        value: bnbBalance - totalBNBToRecipients - gasCost,
+        gasLimit,
         gasPrice,
       });
       const receipt = await tx.wait();
@@ -1508,23 +1537,6 @@ class YadaBSC {
         to: receipt.to,
         from: receipt.from,
         gasUsed: receipt.gasUsed.toString(),
-        EthTransferredEvents: receipt.logs
-          .filter((log) => log.address === contractAddresses.bridgeAddress)
-          .map((log) => {
-            try {
-              const parsed = bridge.interface.parseLog(log);
-              return parsed.name === "EthTransferred"
-                ? {
-                    from: parsed.args.from,
-                    to: parsed.args.to,
-                    amount: ethers.formatEther(parsed.args.amount),
-                  }
-                : null;
-            } catch (e) {
-              return null;
-            }
-          })
-          .filter((event) => event),
       });
 
       // Update key log
@@ -1550,7 +1562,8 @@ class YadaBSC {
       console.error("Transaction error:", error);
       notifications.show({
         title: "Error",
-        message: error.message || "Failed to process transaction.",
+        message:
+          error.reason || error.message || "Failed to process transaction.",
         color: "red",
       });
       setIsScannerOpen(false);
