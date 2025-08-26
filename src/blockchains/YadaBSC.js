@@ -2367,16 +2367,16 @@ class YadaBSC {
         message: `Successfully wrapped ${amount} ${
           isBNB ? "BNB" : selectedOriginal.symbol
         }${
-          tokenRemainingBalance > 0
+          tokenRemainingBalance > 0n
             ? ` and transferred remaining ${ethers.formatUnits(
                 tokenRemainingBalance,
                 tokenDecimals
               )} ${isBNB ? "BNB" : selectedOriginal.symbol}`
             : ""
         }${
-          bnbBalance > (isBNB ? amountToWrap : 0)
+          bnbBalance > (isBNB ? amountToWrap : 0n)
             ? ` and transferred ${ethers.formatEther(
-                bnbBalance - (isBNB ? amountToWrap : 0)
+                bnbBalance - (isBNB ? amountToWrap : 0n)
               )} BNB to next key`
             : ""
         }`,
