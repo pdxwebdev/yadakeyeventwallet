@@ -1,29 +1,39 @@
-import express from 'express';
-import cors from 'cors';
-import { spawn, spawnSync } from 'child_process';
-import vm from 'vm';
-import fs from 'fs/promises';
-import path from 'path';
+import express from "express";
+import cors from "cors";
+import { spawn, spawnSync } from "child_process";
+import vm from "vm";
+import fs from "fs/promises";
+import path from "path";
 
 const app = express();
 const port = 3001;
 app.use(cors());
 app.use(express.json());
 
-app.post('/deploy', async (req, res) => {
+app.post("/deploy", async (req, res) => {
   try {
     const { wif1, wif2, wif3, cprkh, ctprkh, clean } = req.body;
 
     // Validate inputs
     if (!wif1 || !wif2 || !wif3) {
-      return res.status(400).json({ status: false, error: 'All WIF parameters (wif1, wif2, wif3) are required' });
+      return res
+        .status(400)
+        .json({
+          status: false,
+          error: "All WIF parameters (wif1, wif2, wif3) are required",
+        });
     }
     if (!cprkh || !ctprkh) {
-      return res.status(400).json({ status: false, error: 'cprkh and ctprkh parameters are required' });
+      return res
+        .status(400)
+        .json({
+          status: false,
+          error: "cprkh and ctprkh parameters are required",
+        });
     }
 
     // Prepare npm run deploy command with arguments
-    const args = ['run', 'deploy'];
+    const args = ["run", "deploytest"];
     const env = {
       ...process.env,
       WIF: wif1,
@@ -31,12 +41,12 @@ app.post('/deploy', async (req, res) => {
       WIF3: wif3,
       CPRKH: cprkh,
       CTPRKH: ctprkh,
-      CLEAN: clean ? 'true' : 'false',
+      CLEAN: clean ? "true" : "false",
     };
-    console.log(env)
+    console.log(env);
 
     // Spawn npm process
-    const npmProcess = spawnSync('npm', args, {
+    const npmProcess = spawnSync("npm", args, {
       env,
       shell: true,
       cwd: process.cwd(),
@@ -48,41 +58,47 @@ app.post('/deploy', async (req, res) => {
     let jsonObj = {};
 
     if (status !== 0) {
-      console.error('NPM command failed:', stderr);
-      return res.status(500).json({ status: false, error: stderr || 'NPM command failed' });
+      console.error("NPM command failed:", stderr);
+      return res
+        .status(500)
+        .json({ status: false, error: stderr || "NPM command failed" });
     }
 
-    console.log('NPM command succeeded:', stdout);
+    console.log("NPM command succeeded:", stdout);
     // Extract the JSON-like object using a regex
     const match = stdout.match(/\{[\s\S]*?\}/);
     if (match) {
       try {
         // Use Node's VM to safely evaluate the object-like string
         jsonObj = vm.runInNewContext(`(${match[0]})`);
-        console.log('Extracted JSON:', jsonObj);
+        console.log("Extracted JSON:", jsonObj);
       } catch (e) {
-        console.error('Failed to parse output:', e);
-        return res.status(500).json({ status: false, error: 'Failed to parse deployment output' });
+        console.error("Failed to parse output:", e);
+        return res
+          .status(500)
+          .json({ status: false, error: "Failed to parse deployment output" });
       }
     } else {
-      console.error('No JSON found in output');
-      return res.status(500).json({ status: false, error: 'No JSON found in deployment output' });
+      console.error("No JSON found in output");
+      return res
+        .status(500)
+        .json({ status: false, error: "No JSON found in deployment output" });
     }
 
     // Return the JSON response
     res.json({ status: true, addresses: jsonObj });
   } catch (err) {
-    console.error('Endpoint error:', err);
+    console.error("Endpoint error:", err);
     res.status(500).json({ status: false, error: err.message });
   }
 });
-const DEPLOYMENTS_FILE = path.join(process.cwd(), 'deployments.json');
+const DEPLOYMENTS_FILE = path.join(process.cwd(), "deployments.json");
 // New /check-deployment endpoint
-app.post('/check-deployment', async (req, res) => {
+app.post("/check-deployment", async (req, res) => {
   try {
     // Check if deployments.json file exists
     try {
-      const fileContent = await fs.readFile(DEPLOYMENTS_FILE, 'utf-8');
+      const fileContent = await fs.readFile(DEPLOYMENTS_FILE, "utf-8");
       const deployments = JSON.parse(fileContent);
 
       // Validate that the file contains expected contract addresses
@@ -91,32 +107,33 @@ app.post('/check-deployment', async (req, res) => {
           status: true,
           deployed: true,
           addresses: deployments,
-          message: 'Deployment found in deployments.json',
+          message: "Deployment found in deployments.json",
         });
       } else {
         return res.json({
           status: true,
           deployed: false,
-          message: 'deployments.json exists but does not contain valid contract addresses',
+          message:
+            "deployments.json exists but does not contain valid contract addresses",
         });
       }
     } catch (error) {
-      if (error.code === 'ENOENT') {
+      if (error.code === "ENOENT") {
         // File does not exist
         return res.json({
           status: true,
           deployed: false,
-          message: 'No deployment found (deployments.json does not exist)',
+          message: "No deployment found (deployments.json does not exist)",
         });
       }
-      console.error('Error reading deployments.json:', error);
+      console.error("Error reading deployments.json:", error);
       return res.status(500).json({
         status: false,
-        error: 'Failed to read deployments.json: ' + error.message,
+        error: "Failed to read deployments.json: " + error.message,
       });
     }
   } catch (err) {
-    console.error('Check-deployment error:', err);
+    console.error("Check-deployment error:", err);
     res.status(500).json({ status: false, error: err.message });
   }
 });

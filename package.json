@@ -11,6 +11,7 @@
     "refresh": "rm -rf artifacts/ && npx hardhat compile && npm run copy-abis",
     "node": "rm -f deployments.json && npx hardhat node",
     "deploy": "npx hardhat run ./scripts/deploy.js --network localhost",
+    "deploytest": "npx hardhat run ./scripts/deploy.js --network bscTestnet",
     "lint": "eslint .",
     "preview": "vite preview",
     "server": "node server.js"

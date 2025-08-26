@@ -6,7 +6,12 @@ import {
   fromWIF,
   decompressPublicKey,
 } from "../utils/hdWallet";
-import { HARDHAT_MNEMONIC, localProvider } from "../shared/constants";
+import {
+  HARDHAT_MNEMONIC,
+  localProvider,
+  addresses,
+  deployed,
+} from "../shared/constants";
 import BridgeArtifact from "../utils/abis/Bridge.json";
 import KeyLogRegistryArtifact from "../utils/abis/KeyLogRegistry.json";
 import MockERC20Artifact from "../utils/abis/MockERC20.json";
@@ -1577,11 +1582,11 @@ class YadaBSC {
   async checkDeployment(appContext) {
     const { setContractAddresses, setIsDeployed } = appContext;
     try {
-      const response = await axios.post(
-        "http://localhost:3001/check-deployment",
-        {}
-      );
-      const { deployed, addresses } = response.data;
+      // const response = await axios.post(
+      //   "http://localhost:3001/check-deployment",
+      //   {}
+      // );
+      // const { deployed, addresses } = response.data;
       if (deployed && addresses) {
         setContractAddresses(addresses);
         setIsDeployed(true);

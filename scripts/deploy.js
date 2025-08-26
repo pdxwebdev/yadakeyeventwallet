@@ -5,7 +5,7 @@ import * as shajs from "sha.js";
 import * as tinysecp256k1 from "tiny-secp256k1";
 import MockERC20Artifact from "../src/utils/abis/MockERC20.json" assert { type: "json" };
 import WrappedTokenArtifact from "../src/utils/abis/WrappedToken.json" assert { type: "json" };
-const { ethers, upgrades } = pkg;
+const { ethers, upgrades, network } = pkg;
 
 const ERC20_ABI = MockERC20Artifact.abi;
 const WRAPPED_TOKEN_ABI = WrappedTokenArtifact.abi;
@@ -111,18 +111,37 @@ export async function main() {
   const deployer = createWalletFromWIF(wif);
   const nextDeployer = createWalletFromWIF(wif2);
   const nextNextDeployer = createWalletFromWIF(wif3);
-  console.log("Deploying with:", deployer.address);
-  console.log("Next key wallet:", nextDeployer.address);
-  console.log("Next next key wallet:", nextNextDeployer.address);
 
-  // Fund deployer
-  const [hardhatAccount] = await ethers.getSigners();
-  const tx = await hardhatAccount.sendTransaction({
-    to: deployer.address,
-    value: ethers.parseEther("1000.0"),
-  });
-  await tx.wait();
-  console.log(`Funded ${deployer.address} with 1000 ETH/BNB`);
+  // Generate key data
+  const keyData = await generateKeyData(
+    deployer,
+    nextDeployer,
+    nextNextDeployer
+  );
+  console.log("Deploying with:", keyData.currentSigner.address);
+  console.log("Next key wallet:", keyData.nextSigner.address);
+  console.log("Next next key wallet:", keyData.nextNextSigner.address);
+  const balance = await ethers.provider.getBalance(
+    keyData.currentSigner.address
+  );
+
+  console.log("Deployer balance:", ethers.formatEther(balance));
+  if (network.name === "bscTestnet" && balance < ethers.parseEther("0.1")) {
+    throw new Error(
+      "Deployer wallet has insufficient BNB. Fund it using the BSC Testnet Faucet."
+    );
+  }
+
+  if (network.name === "hardhat") {
+    // Fund deployer
+    const [hardhatAccount] = await ethers.getSigners();
+    const tx = await hardhatAccount.sendTransaction({
+      to: deployer.address,
+      value: ethers.parseEther("1000.0"),
+    });
+    await tx.wait();
+    console.log(`Funded ${deployer.address} with 1000 ETH/BNB`);
+  }
 
   // Deploy KeyLogRegistry
   const KeyLogRegistry = await ethers.getContractFactory(
@@ -202,18 +221,9 @@ export async function main() {
     await keyLogRegistry.connect(deployer).setAuthorizedCaller(bridgeAddress);
     console.log("Set KeyLogRegistry authorized caller to:", bridgeAddress);
   }
-
-  // Generate key data
-  const keyData = await generateKeyData(
-    deployer,
-    nextDeployer,
-    nextNextDeployer
-  );
-  const balance = await ethers.provider.getBalance(
-    keyData.currentSigner.address
-  );
   console.log("Registering initial key log entry...");
   console.log("Deployer balance:", ethers.formatEther(balance));
+  const gasCost = ethers.parseEther("0.1");
   await bridge
     .connect(deployer)
     .registerKeyWithTransfer(
@@ -225,7 +235,7 @@ export async function main() {
       keyData.nextSigner.address,
       false,
       [],
-      { value: balance - 5285124941591474n }
+      { value: balance - gasCost }
     );
   console.log(
     `Initial key log entry registered with publicKeyHash: ${keyData.currentSigner.address}, outputAddress: ${keyData.nextSigner.address}`
@@ -494,7 +504,7 @@ export async function main() {
         tokenPairs,
         unconfirmedKeyData,
         confirmingKeyData,
-        { value: ethers.parseEther("999") }
+        { value: balance - gasCost }
       );
     console.log("Added all token pairs: $YDA, $PEPE, BNB");
 
