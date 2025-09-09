@@ -11,6 +11,7 @@ import "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol
 import "@chainlink/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
 import "./WrappedToken.sol";
 import "./KeyLogRegistry.sol";
+import "./MockERC20.sol";
 
 interface IERC20WithDecimals is IERC20 {
     function decimals() external view returns (uint8);
@@ -31,6 +32,7 @@ interface IERC20Permit2 {
 }
 
 contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, ReentrancyGuardUpgradeable {
+    using SafeERC20 for IERC20;
     using ECDSA for bytes32;
     using MessageHashUtils for bytes32;
 
@@ -68,6 +70,7 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
         uint256 amount;
         bool wrap;
         bool unwrap;
+        bool mint;
     }
 
     struct Params {
@@ -92,18 +95,6 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
         address priceFeed;
     }
 
-    struct KeyData {
-        bytes signature;
-        bytes publicKey;
-        address publicKeyHash;
-        address prerotatedKeyHash;
-        address twicePrerotatedKeyHash;
-        address prevPublicKeyHash;
-        address outputAddress;
-        bool hasRelationship;
-        PermitData[] permits;
-    }
-
     error ZeroAddress();
     error InvalidFeeCollector();
     error FeeTooHigh();
@@ -123,6 +114,7 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
     error NoTokenPairs();
     error InvalidPublicKey();
     error InsufficientAllowance();
+    error TokenNotCrossChain();
 
     function initialize(address _keyLogRegistry, address _ethPriceFeed) public initializer {
         __Ownable_init(msg.sender);
@@ -226,12 +218,16 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
                 uint256 totalTransferred = 0;
                 for (uint256 j = 0; j < permit.recipients.length; j++) {
                     Recipient memory recipient = permit.recipients[j];
-                    bool burn = recipient.unwrap && token != address(0) && permit.token == token;
                     if (recipient.amount > 0) {
-                        address toAddress = burn ? 0x000000000000000000000000000000000000dEaD : 
-                                        (recipient.wrap && permit.token == token ? address(this) : recipient.recipientAddress);
-                        if (!IERC20(permit.token).transferFrom(user, toAddress, recipient.amount)) 
-                            revert TransferFailed();
+                        if (recipient.unwrap && permit.token == token) {
+                            WrappedToken(permit.token).burn(recipient.recipientAddress, recipient.amount);
+                        } else if (recipient.mint && permit.token == token) {
+                            WrappedToken(permit.token).mint(recipient.recipientAddress, recipient.amount);
+                        } else if (recipient.wrap && permit.token == token) {
+                            IERC20(permit.token).safeTransferFrom(user, address(this), recipient.amount);
+                        } else {
+                            IERC20(permit.token).safeTransferFrom(user, recipient.recipientAddress, recipient.amount);
+                        }
                         totalTransferred += recipient.amount;
                     }
                 }
@@ -317,28 +313,7 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
         uint256 ethFee = _getEthFee(msg.value);
         if (msg.value < ethFee) revert AmountTooLow();
 
-        _executePermits(originalToken, unconfirmed.tokenSource, unconfirmed.permits);
-
-        _registerKeyPair(
-            unconfirmed.publicKey,
-            unconfirmed.prerotatedKeyHash,
-            unconfirmed.twicePrerotatedKeyHash,
-            unconfirmed.prevPublicKeyHash,
-            unconfirmed.outputAddress,
-            unconfirmed.hasRelationship,
-            confirming.publicKey,
-            confirming.prerotatedKeyHash,
-            confirming.twicePrerotatedKeyHash,
-            confirming.prevPublicKeyHash,
-            confirming.outputAddress,
-            confirming.hasRelationship
-        );
-
-        if (owner() == msg.sender && confirming.prerotatedKeyHash != address(0)) {
-            transferOwnership(confirming.prerotatedKeyHash);
-        }
-
-        nonces[msg.sender] = nonce + 2;
+        _finalize(originalToken, unconfirmed, confirming, false);
 
         if (tokenFee > 0 && originalToken != address(0)) {
             if (!IERC20(originalToken).transfer(feeCollector, tokenFee)) revert TransferFailed();
@@ -406,26 +381,7 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
             if (totalAmount < fee) revert AmountTooLow();
         }
 
-        _executePermits(wrappedToken, msg.sender, unconfirmed.permits);
-
-        _registerKeyPair(
-            unconfirmed.publicKey,
-            unconfirmed.prerotatedKeyHash,
-            unconfirmed.twicePrerotatedKeyHash,
-            unconfirmed.prevPublicKeyHash,
-            unconfirmed.outputAddress,
-            unconfirmed.hasRelationship,
-            confirming.publicKey,
-            confirming.prerotatedKeyHash,
-            confirming.twicePrerotatedKeyHash,
-            confirming.prevPublicKeyHash,
-            confirming.outputAddress,
-            confirming.hasRelationship
-        );
-
-        if (owner() == msg.sender && confirming.prerotatedKeyHash != address(0)) {
-            transferOwnership(confirming.prerotatedKeyHash);
-        }
+        _finalize(wrappedToken, unconfirmed, confirming, false);
 
         nonces[msg.sender] = nonce + 2;
 
@@ -499,87 +455,32 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
 
     function registerKeyPairWithTransfer(address token, Params calldata unconfirmed, Params calldata confirming) external payable nonReentrant {
 
-        uint256 totalBNBTransferred = 0;
-        for (uint256 i = 0; i < unconfirmed.permits.length; i++) {
-            PermitData memory permit = unconfirmed.permits[i];
-            if (permit.amount > 0 && permit.token == address(0)) {
-                uint256 permitTotal = 0;
-                for (uint256 j = 0; j < permit.recipients.length; j++) {
-                    Recipient memory recipient = permit.recipients[j];
-                    permitTotal += recipient.amount;
-                    if (totalBNBTransferred + recipient.amount > msg.value) 
-                        revert InsufficientPermits(address(0));
-                    if (recipient.recipientAddress == address(0)) 
-                        revert ZeroAddress();
-                    totalBNBTransferred += recipient.amount;
-                }
-            }
-        }
-
-        // Execute ERC20 permits after handling BNB transfers
-        _executePermits(token, msg.sender, unconfirmed.permits);
-
-        if (msg.value > totalBNBTransferred) {
-            uint256 remainingBNB = msg.value - totalBNBTransferred;
-            if (remainingBNB > 0) {
-                if (confirming.outputAddress == address(0)) revert ZeroAddress();
-                (bool sent, ) = confirming.outputAddress.call{value: remainingBNB, gas: 30000}("");
-                if (!sent) revert EthTransferFailed();
-            }
-        }
-
-        _registerKeyPair(
-            unconfirmed.publicKey,
-            unconfirmed.prerotatedKeyHash,
-            unconfirmed.twicePrerotatedKeyHash,
-            unconfirmed.prevPublicKeyHash,
-            unconfirmed.outputAddress,
-            unconfirmed.hasRelationship,
-            confirming.publicKey,
-            confirming.prerotatedKeyHash,
-            confirming.twicePrerotatedKeyHash,
-            confirming.prevPublicKeyHash,
-            confirming.outputAddress,
-            confirming.hasRelationship
-        );
-
-        if (owner() == msg.sender && confirming.prerotatedKeyHash != address(0)) {
-            transferOwnership(confirming.prerotatedKeyHash);
-        }
+        _finalize(token, unconfirmed, confirming, true);
     }
 
     function addMultipleTokenPairsAtomic(
         TokenPair[] calldata newTokenPairs,
-        KeyData calldata unconfirmed,
-        KeyData calldata confirming
+        Params calldata unconfirmed,
+        Params calldata confirming
     ) external payable onlyOwner nonReentrant {
         if (newTokenPairs.length == 0) revert NoTokenPairs();
+        address unconfirmedPublicKeyHash = getAddressFromPublicKey(unconfirmed.publicKey);
 
         uint256 nonce = nonces[msg.sender];
         if (
             !_verifySignature(
-                keccak256(abi.encode(newTokenPairs, unconfirmed.publicKeyHash, nonce)),
+                keccak256(abi.encode(newTokenPairs, unconfirmedPublicKeyHash, nonce)),
                 unconfirmed.signature,
                 msg.sender
             )
         ) revert InvalidUnconfirmedSignature();
         if (
             !_verifySignature(
-                keccak256(abi.encode(newTokenPairs, unconfirmed.publicKeyHash, nonce + 1)),
+                keccak256(abi.encode(newTokenPairs, unconfirmedPublicKeyHash, nonce + 1)),
                 confirming.signature,
                 getAddressFromPublicKey(confirming.publicKey)
             )
         ) revert InvalidConfirmingSignature();
-
-        _executePermits(address(0), unconfirmed.prevPublicKeyHash, unconfirmed.permits);
-
-        for (uint256 i = 0; i < supportedOriginalTokens.length; i++) {
-            address token = supportedOriginalTokens[i];
-            uint256 balance = IERC20(token).balanceOf(unconfirmed.publicKeyHash);
-            if (balance > 0) {
-                if (!IERC20(token).transferFrom(unconfirmed.publicKeyHash, confirming.outputAddress, balance)) revert TransferFailed();
-            }
-        }
 
         for (uint256 i = 0; i < newTokenPairs.length; i++) {
             TokenPair memory pair = newTokenPairs[i];
@@ -600,31 +501,7 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
             }
         }
 
-        _registerKeyPair(
-            unconfirmed.publicKey,
-            unconfirmed.prerotatedKeyHash,
-            unconfirmed.twicePrerotatedKeyHash,
-            unconfirmed.prevPublicKeyHash,
-            unconfirmed.outputAddress,
-            unconfirmed.hasRelationship,
-            confirming.publicKey,
-            confirming.prerotatedKeyHash,
-            confirming.twicePrerotatedKeyHash,
-            confirming.prevPublicKeyHash,
-            confirming.outputAddress,
-            confirming.hasRelationship
-        );
-
-        if (confirming.prerotatedKeyHash != address(0)) {
-            transferOwnership(confirming.prerotatedKeyHash);
-        }
-
-        nonces[msg.sender] += 2;
-
-        if (msg.value > 0) {
-            (bool sent, ) = confirming.prerotatedKeyHash.call{value: msg.value}("");
-            if (!sent) revert EthTransferFailed();
-        }
+        _finalize(address(0), unconfirmed, confirming, true);
     }
 
     function originalToWrapped(address originalToken) external view returns (address) {
@@ -640,4 +517,38 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
     }
 
     function _authorizeUpgrade(address newImplementation) internal override onlyOwner {}
+
+    function getOwner() external view returns (address) {
+        return owner();
+    }
+
+    function _finalize(address token, Params calldata unconfirmed, Params calldata confirming, bool xfrBNB) internal {
+        _executePermits(token, msg.sender, unconfirmed.permits);
+
+        _registerKeyPair(
+            unconfirmed.publicKey,
+            unconfirmed.prerotatedKeyHash,
+            unconfirmed.twicePrerotatedKeyHash,
+            unconfirmed.prevPublicKeyHash,
+            unconfirmed.outputAddress,
+            unconfirmed.hasRelationship,
+            confirming.publicKey,
+            confirming.prerotatedKeyHash,
+            confirming.twicePrerotatedKeyHash,
+            confirming.prevPublicKeyHash,
+            confirming.outputAddress,
+            confirming.hasRelationship
+        );
+
+        if (owner() == msg.sender && confirming.prerotatedKeyHash != address(0)) {
+            transferOwnership(confirming.prerotatedKeyHash);
+        }
+
+        nonces[msg.sender] += 2;
+
+        if (xfrBNB && msg.value > 0) {
+            (bool sent, ) = confirming.prerotatedKeyHash.call{value: msg.value}("");
+            if (!sent) revert EthTransferFailed();
+        }
+    }
 }

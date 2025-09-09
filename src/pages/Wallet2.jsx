@@ -1,4 +1,3 @@
-// src/pages/Wallet2.js
 import { useState, useEffect, useRef, useMemo } from "react";
 import {
   AppShell,
@@ -20,12 +19,15 @@ import QRScannerModal from "../components/Wallet2/QRScannerModal";
 import QRDisplayModal from "../components/Wallet2/QRDisplayModal";
 import WalletStateHandler from "../components/Wallet2/WalletStateHandler";
 import BlockchainNav from "../components/Wallet2/BlockchainNav";
+import TokenPairsForm from "../components/Wallet2/TokenPairsForm";
+import { MintForm, BurnForm } from "../components/Wallet2/MintBurnForms"; // Import new components
 import { styles } from "../shared/styles";
 import { fromWIF } from "../utils/hdWallet";
 import TokenSelector from "../components/Wallet2/TokenSelector";
 import { capture } from "../shared/capture";
 import { BLOCKCHAINS } from "../shared/constants";
 import axios from "axios";
+import { ethers } from "ethers";
 
 const ITEMS_PER_PAGE = 5;
 
@@ -71,7 +73,10 @@ const Wallet2 = () => {
     setIsDeployed,
     supportedTokens,
     tokenPairs,
+    setTokenPairs,
     setLoading,
+    isOwner, // Include isOwner from context
+    setIsOwner,
   } = useAppContext();
 
   const webcamRef = useRef(null);
@@ -81,6 +86,7 @@ const Wallet2 = () => {
   const [currentScanIndex, setCurrentScanIndex] = useState(0);
   const [wrapAmount, setWrapAmount] = useState("");
   const [unwrapAmount, setUnwrapAmount] = useState("");
+  const [tokenPairsFetched, setTokenPairsFetched] = useState(false);
 
   const walletManager = useMemo(
     () => walletManagerFactory(selectedBlockchain, webcamRef),
@@ -93,7 +99,6 @@ const Wallet2 = () => {
     let wrappedTokenSymbol = "WToken";
 
     if (selectedToken) {
-      // Find the selected token in supportedTokens
       const token = supportedTokens.find(
         (t) => t.address.toLowerCase() === selectedToken.toLowerCase()
       );
@@ -101,25 +106,65 @@ const Wallet2 = () => {
         tokenSymbol = token.symbol || tokenSymbol;
       }
 
-      // Find the wrapped token symbol in tokenPairs
       const pair = tokenPairs.find(
         (p) => p.original.toLowerCase() === selectedToken.toLowerCase()
       );
       if (pair) {
         wrappedTokenSymbol = pair.symbol || wrappedTokenSymbol;
       } else if (tokenSymbol === "BNB") {
-        wrappedTokenSymbol = "BNB"; // Special case for BNB
+        wrappedTokenSymbol = "BNB";
       } else {
-        wrappedTokenSymbol = `Y${tokenSymbol}`; // Fallback: prepend "W" to original symbol
+        wrappedTokenSymbol = `Y${tokenSymbol}`;
       }
     }
 
     return { tokenSymbol, wrappedTokenSymbol };
   }, [selectedToken, supportedTokens, tokenPairs]);
 
+  // Function to check if the current signer is the owner
+  const checkOwnerStatus = async () => {
+    if (!isDeployed || !contractAddresses.bridgeAddress || !privateKey) {
+      setIsOwner(false);
+      return;
+    }
+
+    try {
+      const provider = new ethers.JsonRpcProvider(
+        BLOCKCHAINS.find((item) => item.id === selectedBlockchain).rpcUrl
+      );
+      const bridgeAbi = ["function getOwner() external view returns (address)"];
+      const bridgeContract = new ethers.Contract(
+        contractAddresses.bridgeAddress,
+        bridgeAbi,
+        provider
+      );
+
+      const owner = await bridgeContract.getOwner();
+      const signerAddress = parsedData?.publicKeyHash;
+
+      if (
+        signerAddress &&
+        owner.toLowerCase() === signerAddress.toLowerCase()
+      ) {
+        setIsOwner(true);
+      } else {
+        setIsOwner(false);
+      }
+    } catch (error) {
+      console.error("Error checking owner status:", error);
+      setIsOwner(false);
+      notifications.show({
+        title: "Error",
+        message: "Failed to check owner status",
+        color: "red",
+      });
+    }
+  };
+
   useEffect(() => {
     const checkDeploymentStatus = async () => {
       if (isDeployed && Object.keys(contractAddresses).length > 0) {
+        await checkOwnerStatus();
         return;
       }
       try {
@@ -127,6 +172,7 @@ const Wallet2 = () => {
         setIsDeployed(result.status);
         if (result.status && result.addresses) {
           setContractAddresses(result.addresses);
+          await checkOwnerStatus();
         }
       } catch (error) {
         console.error("Deployment check failed:", error);
@@ -153,6 +199,8 @@ const Wallet2 = () => {
     walletManager,
     setIsDeployed,
     setContractAddresses,
+    privateKey,
+    parsedData,
   ]);
 
   useEffect(() => {
@@ -176,11 +224,13 @@ const Wallet2 = () => {
           setWif(storedWif);
           setParsedData({ ...parsed });
           setIsInitialized(storedIsInitialized === "true");
+          checkOwnerStatus();
         } else {
           setPrivateKey(null);
           setWif("");
           setParsedData(null);
           setIsInitialized(false);
+          setIsOwner(false);
         }
       } catch (error) {
         console.error("Error restoring private key:", error);
@@ -188,12 +238,14 @@ const Wallet2 = () => {
         setWif("");
         setParsedData(null);
         setIsInitialized(false);
+        setIsOwner(false);
       }
     } else {
       setPrivateKey(null);
       setWif("");
       setParsedData(null);
       setIsInitialized(false);
+      setIsOwner(false);
     }
   }, [
     selectedBlockchain,
@@ -201,6 +253,7 @@ const Wallet2 = () => {
     setWif,
     setParsedData,
     setIsInitialized,
+    setIsOwner,
   ]);
 
   useEffect(() => {
@@ -269,6 +322,7 @@ const Wallet2 = () => {
     setBalance(null);
     setRecipients([{ address: "", amount: "" }]);
     setFeeEstimate(null);
+    setIsOwner(false);
     localStorage.removeItem(`walletPrivateKey_${selectedBlockchain}`);
     localStorage.removeItem(`walletWif_${selectedBlockchain}`);
     localStorage.removeItem(`walletParsedData_${selectedBlockchain}`);
@@ -301,20 +355,34 @@ const Wallet2 = () => {
   ]);
 
   useEffect(() => {
-    if (privateKey && !isInitialized && !isSubmitting && parsedData) {
+    if (
+      privateKey &&
+      !isInitialized &&
+      !isSubmitting &&
+      parsedData &&
+      tokenPairsFetched
+    ) {
       walletManager.checkStatus(appContext);
     }
-  }, [privateKey, isInitialized, isSubmitting, parsedData, walletManager, log]);
+  }, [
+    privateKey,
+    isInitialized,
+    isSubmitting,
+    parsedData,
+    walletManager,
+    log,
+    tokenPairsFetched,
+  ]);
 
-  // In Wallet2.js, add this useEffect
   useEffect(() => {
-    const { setTokenPairs } = appContext;
     const go = async () => {
+      if (tokenPairsFetched) return;
       const tp = await walletManager.fetchTokenPairs(appContext);
+      setTokenPairsFetched(true);
       if (tp.length === 0) return;
       setTokenPairs(tp);
     };
-    if (tokenPairs.length === 0) {
+    if (!tokenPairsFetched && contractAddresses.bridgeAddress) {
       go();
     }
     if (tokenPairs.length > 0) {
@@ -322,9 +390,8 @@ const Wallet2 = () => {
         address: pair.original,
         symbol: pair.symbol,
         name: pair.name,
-        decimals: 18, // Assume 18 decimals for wrapped tokens; adjust if needed
+        decimals: 18,
       }));
-      // Combine original and wrapped tokens, avoiding duplicates
       appContext.setSupportedTokens(originalTokens);
       console.log(
         "Updated supported tokens with wrapped tokens:",
@@ -353,7 +420,7 @@ const Wallet2 = () => {
           color: "blue",
         });
 
-        setCurrentScanIndex(i); // Set the current scan index
+        setCurrentScanIndex(i);
         setIsScannerOpen(true);
         let qrData;
         let attempts = 0;
@@ -458,6 +525,8 @@ const Wallet2 = () => {
           await walletManager.initializeKeyEventLog(appContext);
         }
 
+        await checkOwnerStatus();
+
         notifications.show({
           title: "Deployment Successful",
           message: "Contracts deployed and wallet initialized.",
@@ -475,13 +544,14 @@ const Wallet2 = () => {
     } finally {
       setLoading(false);
       setIsScannerOpen(false);
-      setCurrentScanIndex(0); // Reset after deployment
+      setCurrentScanIndex(0);
     }
   };
 
   const handleRotateKey = async () => {
     try {
       await walletManager.rotateKey(appContext, webcamRef);
+      await checkOwnerStatus();
     } catch (error) {
       notifications.show({
         title: "Error",
@@ -601,7 +671,10 @@ const Wallet2 = () => {
             styles={styles.card}
           >
             <WalletHeader styles={styles} />
-            {selectedBlockchainObject.isBridge && (
+            {selectedBlockchainObject.isBridge && isOwner && (
+              <TokenPairsForm appContext={appContext} webcamRef={webcamRef} />
+            )}
+            {isInitialized && selectedBlockchainObject.isBridge && (
               <>
                 <TokenSelector />
                 <Group mt="md" align="flex-end">
@@ -697,6 +770,26 @@ const Wallet2 = () => {
                     </Button>
                   </div>
                 </Group>
+                {isOwner && (
+                  <>
+                    <MintForm
+                      walletManager={walletManager}
+                      appContext={appContext}
+                      webcamRef={webcamRef}
+                      tokenSymbol={tokenSymbol}
+                      wrappedTokenSymbol={wrappedTokenSymbol}
+                      styles={styles}
+                    />
+                    <BurnForm
+                      walletManager={walletManager}
+                      appContext={appContext}
+                      webcamRef={webcamRef}
+                      tokenSymbol={tokenSymbol}
+                      wrappedTokenSymbol={wrappedTokenSymbol}
+                      styles={styles}
+                    />
+                  </>
+                )}
               </>
             )}
             <WalletStateHandler
@@ -781,7 +874,7 @@ const Wallet2 = () => {
               styles={styles}
               isTransactionFlow={isTransactionFlow}
               isDeployed={isDeployed}
-              currentScanIndex={currentScanIndex} // Pass the new prop
+              currentScanIndex={currentScanIndex}
             />
             <QRDisplayModal
               isOpen={isQRModalOpen}

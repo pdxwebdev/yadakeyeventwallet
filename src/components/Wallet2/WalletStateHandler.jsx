@@ -107,7 +107,7 @@ const WalletStateHandler = ({
     );
   }
 
-  if (!isInitialized && log.length === parsedData.rotation) {
+  if (!isInitialized) {
     return (
       <Stack align="center" spacing="md">
         <Text>

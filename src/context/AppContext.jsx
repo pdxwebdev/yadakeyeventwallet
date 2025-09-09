@@ -23,6 +23,7 @@ export const AppProvider = ({ children }) => {
   const [isTransactionFlow, setIsTransactionFlow] = useState(false);
   const [feeEstimate, setFeeEstimate] = useState(null);
   const [balance, setBalance] = useState(null);
+  const [isOwner, setIsOwner] = useState(false); // Add isOwner state
   const [loading, setLoading] = useState(false);
   const [signer, setSigner] = useState(null);
   const [tokenPairs, setTokenPairs] = useState([]);
@@ -74,6 +75,8 @@ export const AppProvider = ({ children }) => {
       setSelectedToken,
       loading,
       setLoading,
+      isOwner,
+      setIsOwner,
       signer,
       setSigner,
       tokenPairs,

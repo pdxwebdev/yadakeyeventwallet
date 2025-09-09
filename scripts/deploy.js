@@ -121,9 +121,7 @@ export async function main() {
   console.log("Deploying with:", keyData.currentSigner.address);
   console.log("Next key wallet:", keyData.nextSigner.address);
   console.log("Next next key wallet:", keyData.nextNextSigner.address);
-  const balance = await ethers.provider.getBalance(
-    keyData.currentSigner.address
-  );
+  let balance = await ethers.provider.getBalance(keyData.currentSigner.address);
 
   console.log("Deployer balance:", ethers.formatEther(balance));
   if (network.name === "bscTestnet" && balance < ethers.parseEther("0.1")) {
@@ -132,7 +130,7 @@ export async function main() {
     );
   }
 
-  if (network.name === "hardhat") {
+  if (network.name === "localhost") {
     // Fund deployer
     const [hardhatAccount] = await ethers.getSigners();
     const tx = await hardhatAccount.sendTransaction({
@@ -140,6 +138,11 @@ export async function main() {
       value: ethers.parseEther("1000.0"),
     });
     await tx.wait();
+    const tx2 = await hardhatAccount.sendTransaction({
+      to: "0x3d4b9f693d3564fcc86b6bb27ea25ad33c1b1f2a",
+      value: ethers.parseEther("1000.0"),
+    });
+    await tx2.wait();
     console.log(`Funded ${deployer.address} with 1000 ETH/BNB`);
   }
 
@@ -224,6 +227,7 @@ export async function main() {
   console.log("Registering initial key log entry...");
   console.log("Deployer balance:", ethers.formatEther(balance));
   const gasCost = ethers.parseEther("0.1");
+  balance = await ethers.provider.getBalance(keyData.currentSigner.address);
   await bridge
     .connect(deployer)
     .registerKeyWithTransfer(
@@ -242,7 +246,7 @@ export async function main() {
   );
 
   // Deploy Mock Tokens and Price Feed
-  const MockERC20 = await ethers.getContractFactory("MockERC20", deployer);
+  const MockERC20 = await ethers.getContractFactory("MockERC20", nextDeployer);
   let yadaERC20;
   if (deployments.yadaERC20Address && !clean) {
     yadaERC20 = await MockERC20.attach(deployments.yadaERC20Address);
@@ -251,10 +255,11 @@ export async function main() {
       deployments.yadaERC20Address
     );
   } else {
-    yadaERC20 = await MockERC20.connect(deployer).deploy(
+    yadaERC20 = await MockERC20.connect(nextDeployer).deploy(
       "Wrapped YadaCoin",
       "WYDA",
-      ethers.parseEther("1000")
+      ethers.parseEther("1000"),
+      bridgeAddress // Pass bridgeAddress
     );
     await yadaERC20.waitForDeployment();
     deployments.yadaERC20Address = await yadaERC20.getAddress();
@@ -267,10 +272,11 @@ export async function main() {
     mockPepe = await MockERC20.attach(deployments.mockPepeAddress);
     console.log("Using existing Mock PEPE:", deployments.mockPepeAddress);
   } else {
-    mockPepe = await MockERC20.connect(deployer).deploy(
+    mockPepe = await MockERC20.connect(nextDeployer).deploy(
       "Pepe",
       "PEPE",
-      ethers.parseEther("1000")
+      ethers.parseEther("1000"),
+      bridgeAddress // Pass bridgeAddress
     );
     await mockPepe.waitForDeployment();
     deployments.mockPepeAddress = await mockPepe.getAddress();
@@ -313,6 +319,7 @@ export async function main() {
           amount: r.amount,
           wrap: r.wrap || false,
           unwrap: r.unwrap || false,
+          mint: r.mint || false,
         })),
         deadline: 0,
         v: 0,
@@ -355,6 +362,7 @@ export async function main() {
         amount: r.amount,
         wrap: r.wrap || false,
         unwrap: r.unwrap || false,
+        mint: r.mint || false,
       })),
       deadline: deadline,
       v: v,
@@ -410,14 +418,14 @@ export async function main() {
           const tokenContract = new ethers.Contract(
             tokenAddress,
             abi,
-            deployer
+            nextDeployer
           );
-          const balance = await tokenContract.balanceOf(deployer.address);
+          const balance = await tokenContract.balanceOf(nextDeployer.address);
           if (balance > 0n) {
-            const tokenNonce = await tokenContract.nonces(deployer.address);
+            const tokenNonce = await tokenContract.nonces(nextDeployer.address);
             const permit = await generatePermit(
               tokenAddress,
-              deployer,
+              nextDeployer,
               balance,
               [
                 {
@@ -425,6 +433,7 @@ export async function main() {
                   amount: balance,
                   wrap: false,
                   unwrap: false,
+                  mint: r.mint || false,
                 },
               ],
               tokenNonce
@@ -475,18 +484,20 @@ export async function main() {
     );
 
     const unconfirmedKeyData = {
+      amount: 0n,
       signature: unconfirmedSignature,
       publicKey: keyData.nextSigner.uncompressedPublicKey,
-      publicKeyHash: keyData.nextSigner.address,
       prerotatedKeyHash: keyData.nextNextSigner.address,
       twicePrerotatedKeyHash: confirmingPrerotatedKeyHash,
       prevPublicKeyHash: keyData.currentSigner.address,
       outputAddress: keyData.nextNextSigner.address,
       hasRelationship: false,
+      tokenSource: ethers.ZeroAddress,
       permits: permits,
     };
 
     const confirmingKeyData = {
+      amount: 0n,
       signature: confirmingSignature,
       publicKey: keyData.nextNextSigner.uncompressedPublicKey,
       publicKeyHash: keyData.nextNextSigner.address,
@@ -495,28 +506,30 @@ export async function main() {
       prevPublicKeyHash: keyData.nextSigner.address,
       outputAddress: confirmingPrerotatedKeyHash,
       hasRelationship: false,
+      tokenSource: ethers.ZeroAddress,
       permits: [],
     };
+    balance = await ethers.provider.getBalance(keyData.nextSigner.address);
 
     await bridge
       .connect(nextDeployer)
-      .addMultipleTokenPairsAtomic(
-        tokenPairs,
+      .registerKeyPairWithTransfer(
+        ethers.ZeroAddress,
         unconfirmedKeyData,
         confirmingKeyData,
         { value: balance - gasCost }
       );
     console.log("Added all token pairs: $YDA, $PEPE, BNB");
 
-    deployments.wrappedTokenWMOCKAddress = await bridge.originalToWrapped(
-      yadaERC20Address
-    );
-    deployments.wrappedTokenYMOCKAddress = await bridge.originalToWrapped(
-      mockPepeAddress
-    );
-    deployments.wrappedNativeTokenAddress = await bridge.originalToWrapped(
-      NATIVE_ASSET_ADDRESS
-    );
+    // deployments.wrappedTokenWMOCKAddress = await bridge.originalToWrapped(
+    //   yadaERC20Address
+    // );
+    // deployments.wrappedTokenYMOCKAddress = await bridge.originalToWrapped(
+    //   mockPepeAddress
+    // );
+    // deployments.wrappedNativeTokenAddress = await bridge.originalToWrapped(
+    //   NATIVE_ASSET_ADDRESS
+    // );
 
     deployments.configured = true;
   }

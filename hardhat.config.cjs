@@ -33,6 +33,9 @@ const config = {
         mnemonic: "test test test test test test test test test test test junk",
         count: 10,
       },
+      localhost: {
+        url: "http://127.0.0.1:8545",
+      },
     },
     bscTestnet: {
       url: "https://data-seed-prebsc-1-s1.binance.org:8545/", // BSC Testnet RPC

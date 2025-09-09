@@ -50,7 +50,7 @@ const TokenSelector = () => {
           supportedTokens?.length > 0 ? "Select a token" : "No tokens available"
         }
         disabled={!supportedTokens || supportedTokens.length === 0}
-        style={{ width: 200 }}
+        style={{ width: 400 }}
       />
     </Group>
   );

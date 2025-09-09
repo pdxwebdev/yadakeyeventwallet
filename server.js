@@ -16,24 +16,20 @@ app.post("/deploy", async (req, res) => {
 
     // Validate inputs
     if (!wif1 || !wif2 || !wif3) {
-      return res
-        .status(400)
-        .json({
-          status: false,
-          error: "All WIF parameters (wif1, wif2, wif3) are required",
-        });
+      return res.status(400).json({
+        status: false,
+        error: "All WIF parameters (wif1, wif2, wif3) are required",
+      });
     }
     if (!cprkh || !ctprkh) {
-      return res
-        .status(400)
-        .json({
-          status: false,
-          error: "cprkh and ctprkh parameters are required",
-        });
+      return res.status(400).json({
+        status: false,
+        error: "cprkh and ctprkh parameters are required",
+      });
     }
 
     // Prepare npm run deploy command with arguments
-    const args = ["run", "deploytest"];
+    const args = ["run", "deploy"];
     const env = {
       ...process.env,
       WIF: wif1,

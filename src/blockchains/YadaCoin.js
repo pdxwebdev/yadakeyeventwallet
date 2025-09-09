@@ -13,12 +13,21 @@ import { capture } from "../shared/capture";
 class YadaCoin {
   constructor(appContext, webcamRef) {
     this.appContext = appContext;
-    this.webcamRef = webcamRef
+    this.webcamRef = webcamRef;
   }
 
   async buildTransactionHistory() {
-    const { privateKey, isInitialized, setLog, parsedData, setLoading, setTransactions, setCombinedHistory, setCurrentPage } = this.appContext;
-    
+    const {
+      privateKey,
+      isInitialized,
+      setLog,
+      parsedData,
+      setLoading,
+      setTransactions,
+      setCombinedHistory,
+      setCurrentPage,
+    } = this.appContext;
+
     if (!privateKey || !isInitialized) return;
 
     try {
@@ -28,17 +37,20 @@ class YadaCoin {
 
       const keyEventTxIds = new Set(keyEventLog.map((entry) => entry.id));
       const currentAddress = getP2PKH(privateKey.publicKey);
-      const currentPublicKey = Buffer.from(privateKey.publicKey).toString("hex");
+      const currentPublicKey = Buffer.from(privateKey.publicKey).toString(
+        "hex"
+      );
       const currentRotation = parsedData.rotation;
 
       const keyLogWithTransactions = await Promise.all(
         keyEventLog.map(async (entry, index) => {
-          const { transactions, totalReceived, totalSent } = await this.fetchTransactionsForKey(
-            entry.public_key,
-            entry.public_key_hash,
-            index,
-            keyEventTxIds
-          );
+          const { transactions, totalReceived, totalSent } =
+            await this.fetchTransactionsForKey(
+              entry.public_key,
+              entry.public_key_hash,
+              index,
+              keyEventTxIds
+            );
 
           const keyEventTransaction = {
             id: entry.id,
@@ -101,8 +113,10 @@ class YadaCoin {
         if (a.rotation !== b.rotation) {
           return a.rotation - b.rotation;
         }
-        if (a.type.includes("Key Event") && !b.type.includes("Key Event")) return -1;
-        if (!a.type.includes("Key Event") && b.type.includes("Key Event")) return 1;
+        if (a.type.includes("Key Event") && !b.type.includes("Key Event"))
+          return -1;
+        if (!a.type.includes("Key Event") && b.type.includes("Key Event"))
+          return 1;
         return new Date(b.date) - new Date(a.date);
       });
 
@@ -153,10 +167,12 @@ class YadaCoin {
           (parsedData.rotation === 0 && !parsedData.prevPublicKeyHash) ||
           (parsedData.prevPublicKeyHash &&
             keyEventLog.some(
-              (e) => !e.mempool && e.public_key_hash === parsedData.prevPublicKeyHash
+              (e) =>
+                !e.mempool && e.public_key_hash === parsedData.prevPublicKeyHash
             ) &&
             logEntry.prerotated_key_hash === parsedData.prerotatedKeyHash &&
-            logEntry.twice_prerotated_key_hash === parsedData.twicePrerotatedKeyHash);
+            logEntry.twice_prerotated_key_hash ===
+              parsedData.twicePrerotatedKeyHash);
 
         if (!isValidContinuity) {
           return { status: "invalid_continuity" };
@@ -170,7 +186,8 @@ class YadaCoin {
           const isValidContinuity =
             lastLogEntry.public_key_hash === parsedData.prevPublicKeyHash &&
             lastLogEntry.prerotated_key_hash === address &&
-            lastLogEntry.twice_prerotated_key_hash === parsedData.prerotatedKeyHash;
+            lastLogEntry.twice_prerotated_key_hash ===
+              parsedData.prerotatedKeyHash;
 
           if (!isValidContinuity) {
             return { status: "invalid_continuity" };
@@ -196,7 +213,7 @@ class YadaCoin {
 
   async checkStatus() {
     const { setIsInitialized, parsedData, log } = this.appContext;
-    
+
     const initStatus = await this.checkInitializationStatus();
     if (initStatus.status === "pending_mempool") {
       notifications.show({
@@ -262,11 +279,12 @@ class YadaCoin {
         color: "red",
       });
     }
-  };
+  }
 
   async fetchBalance() {
-    const { privateKey, isInitialized, setLoading, setBalance, setSymbol } = this.appContext;
-    setSymbol('yda')
+    const { privateKey, isInitialized, setLoading, setBalance, setSymbol } =
+      this.appContext;
+    setSymbol("yda");
 
     if (privateKey && isInitialized) {
       try {
@@ -427,7 +445,10 @@ class YadaCoin {
       console.error(`Error fetching transactions for key ${publicKey}:`, error);
       notifications.show({
         title: "Error",
-        message: `Failed to load transactions for key ${publicKey.slice(0, 8)}...`,
+        message: `Failed to load transactions for key ${publicKey.slice(
+          0,
+          8
+        )}...`,
         color: "red",
       });
       return { transactions: [], totalReceived: "0", totalSent: "0" };
@@ -436,7 +457,7 @@ class YadaCoin {
 
   async getKeyLog(newPrivateKey) {
     const { privateKey } = this.appContext;
-    const privk = newPrivateKey || privateKey
+    const privk = newPrivateKey || privateKey;
     const pk = Buffer.from(privk.publicKey).toString("hex");
     try {
       const res = await axios.get(
@@ -457,14 +478,22 @@ class YadaCoin {
   }
 
   async initializeKeyEventLog() {
-    const { privateKey, isSubmitting, setIsSubmitting, parsedData, setLoading } = this.appContext;
+    const {
+      privateKey,
+      isSubmitting,
+      setIsSubmitting,
+      parsedData,
+      setLoading,
+    } = this.appContext;
 
     if (!privateKey || isSubmitting) return;
 
     setIsSubmitting(true);
     try {
       const address = getP2PKH(privateKey.publicKey);
-      const transactionOutputs = [{ to: parsedData.prerotatedKeyHash, value: 0 }];
+      const transactionOutputs = [
+        { to: parsedData.prerotatedKeyHash, value: 0 },
+      ];
 
       const txn = new Transaction({
         key: privateKey,
@@ -515,7 +544,13 @@ class YadaCoin {
     const { setLog } = this.appContext;
 
     try {
-      const [wifString, prerotatedKeyHash, twicePrerotatedKeyHash, prevPublicKeyHash, rotation] = qrData.split("|");
+      const [
+        wifString,
+        prerotatedKeyHash,
+        twicePrerotatedKeyHash,
+        prevPublicKeyHash,
+        rotation,
+      ] = qrData.split("|");
       const newPrivateKey = fromWIF(wifString);
       const publicKeyHash = getP2PKH(newPrivateKey.publicKey);
       const newParsedData = {
@@ -525,10 +560,12 @@ class YadaCoin {
         twicePrerotatedKeyHash,
         prevPublicKeyHash,
         rotation: parseInt(rotation, 10),
-        blockchain: 'yda',
+        blockchain: "yda",
       };
 
-      const { isValidKey, log: fetchedLog } = await this.getKeyLog(newPrivateKey);
+      const { isValidKey, log: fetchedLog } = await this.getKeyLog(
+        newPrivateKey
+      );
       if (!isValidKey) {
         throw new Error("Failed to fetch key event log");
       }
@@ -543,8 +580,20 @@ class YadaCoin {
   }
 
   async signTransaction() {
-    const { privateKey, recipients, parsedData, feeEstimate, balance, setIsTransactionFlow, 
-           setIsScannerOpen, setPrivateKey, setWif, setParsedData, setRecipients, setLoading } = this.appContext;
+    const {
+      privateKey,
+      recipients,
+      parsedData,
+      feeEstimate,
+      balance,
+      setIsTransactionFlow,
+      setIsScannerOpen,
+      setPrivateKey,
+      setWif,
+      setParsedData,
+      setRecipients,
+      setLoading,
+    } = this.appContext;
 
     if (!privateKey || recipients.length === 0) {
       notifications.show({
@@ -612,7 +661,10 @@ class YadaCoin {
       }
 
       setIsScannerOpen(false);
-      const { newPrivateKey, newParsedData } = await this.processScannedQR(qrData, true);
+      const { newPrivateKey, newParsedData } = await this.processScannedQR(
+        qrData,
+        true
+      );
 
       try {
         const res = await axios.get(
@@ -712,7 +764,8 @@ class YadaCoin {
 
           notifications.show({
             title: "Success",
-            message: "Transaction and key rotation confirmation submitted successfully.",
+            message:
+              "Transaction and key rotation confirmation submitted successfully.",
             color: "green",
           });
         } else {
@@ -724,7 +777,8 @@ class YadaCoin {
     } catch (error) {
       notifications.show({
         title: "Error",
-        message: error.message || "Failed to process QR code. Please try again.",
+        message:
+          error.message || "Failed to process QR code. Please try again.",
         color: "red",
       });
       setIsScannerOpen(false);
@@ -750,15 +804,16 @@ class YadaCoin {
         );
       }
 
-      
       const isValidContinuity =
         isTransactionFlow && isInitialized
           ? newParsedData.prevPublicKeyHash === parsedData.publicKeyHash &&
-            newParsedData.prerotatedKeyHash === parsedData.twicePrerotatedKeyHash &&
+            newParsedData.prerotatedKeyHash ===
+              parsedData.twicePrerotatedKeyHash &&
             (!newParsedData.prevPublicKeyHash ||
               parsedData.publicKeyHash === newParsedData.prevPublicKeyHash)
           : lastEntry.prerotated_key_hash === newPublicKeyHash &&
-            lastEntry.twice_prerotated_key_hash === newParsedData.prerotatedKeyHash &&
+            lastEntry.twice_prerotated_key_hash ===
+              newParsedData.prerotatedKeyHash &&
             (!newParsedData.prevPublicKeyHash ||
               lastEntry.public_key_hash === newParsedData.prevPublicKeyHash);
       if (!isValidContinuity) {

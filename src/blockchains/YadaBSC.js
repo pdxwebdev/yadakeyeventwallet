@@ -73,6 +73,7 @@ class YadaBSC {
           amount: r.amount,
           wrap: r.wrap || false,
           unwrap: r.unwrap || false,
+          mint: r.mint || false,
         })),
         deadline: 0,
         v: 0,
@@ -155,6 +156,7 @@ class YadaBSC {
           amount: r.amount,
           wrap: r.wrap || false,
           unwrap: r.unwrap || false,
+          mint: r.mint || false,
         })),
         deadline: permitDeadline,
         v,
@@ -221,6 +223,7 @@ class YadaBSC {
                   amount: adjustedAmount,
                   wrap: false,
                   unwrap: false,
+                  mint: false,
                 },
               ]
             );
@@ -772,19 +775,6 @@ class YadaBSC {
         const logEntry = uniqueLog.find(
           (entry) => !entry.mempool && entry.publicKeyHash === address
         );
-        const isValidContinuity =
-          (parsedData.rotation === 0 && !parsedData.prevPublicKeyHash) ||
-          (parsedData.prevPublicKeyHash &&
-            uniqueLog.some(
-              (e) =>
-                !e.mempool && e.publicKeyHash === parsedData.prevPublicKeyHash
-            ) &&
-            logEntry.prerotatedKeyHash === parsedData.publicKeyHash &&
-            logEntry.twicePrerotatedKeyHash === parsedData.prerotatedKeyHash);
-
-        if (!isValidContinuity) {
-          return { status: "invalid_continuity" };
-        }
         return { status: "revoked" };
       }
 
@@ -841,7 +831,7 @@ class YadaBSC {
         message: "Submitting wallet initialization transaction.",
         color: "yellow",
       });
-      await this.initializeKeyEventLog();
+      await this.initializeKeyEventLog(appContext);
     } else if (
       initStatus.status === "invalid_continuity" ||
       initStatus.status === "invalid_rotation"
@@ -1049,7 +1039,8 @@ class YadaBSC {
       setLoading,
       parsedData,
       contractAddresses,
-      supportedTokens,
+      tokenPairs,
+      setIsInitialized,
     } = appContext;
     if (!privateKey) return;
 
@@ -1082,6 +1073,14 @@ class YadaBSC {
       const prevPublicKeyHash = parsedData.prevPublicKeyHash;
       const outputAddress = prerotatedKeyHash;
       const hasRelationship = false;
+
+      const tokenPairs = await this.fetchTokenPairs(appContext);
+      const supportedTokens = tokenPairs.map((pair) => ({
+        address: pair.original,
+        symbol: pair.symbol,
+        name: pair.name,
+        decimals: 18,
+      }));
 
       // Fetch supported tokens
       const allTokens = [
@@ -1117,9 +1116,11 @@ class YadaBSC {
         { value: 0 }
       );
       const gasCost = gasEstimate * gasPrice * 2n;
-      const amountToSend = isBNB ? balance : gasCost + remainingBalance;
+
+      const amountToSend = balance - gasCost;
 
       if (amountToSend <= 0n) {
+        setIsInitialized(true);
         throw new Error(
           `Insufficient BNB balance: ${ethers.formatEther(balance)} BNB`
         );
@@ -1138,7 +1139,7 @@ class YadaBSC {
         {
           value: amountToSend,
           gasLimit: (gasEstimate * 150n) / 100n,
-          gasPrice,
+          gasCost,
         }
       );
       await tx.wait();
@@ -1352,6 +1353,7 @@ class YadaBSC {
               amount: ethers.parseUnits(r.amount, tokenDecimals),
               wrap: false,
               unwrap: false,
+              mint: false,
             })),
           },
         ];
@@ -1367,6 +1369,7 @@ class YadaBSC {
               amount: ethers.parseUnits(r.amount, tokenDecimals),
               wrap: false,
               unwrap: false,
+              mint: false,
             })),
             ...(remainingTokenBalance > 0
               ? [
@@ -1375,6 +1378,7 @@ class YadaBSC {
                     amount: remainingTokenBalance,
                     wrap: false,
                     unwrap: false,
+                    mint: false,
                   },
                 ]
               : []),
@@ -1582,11 +1586,11 @@ class YadaBSC {
   async checkDeployment(appContext) {
     const { setContractAddresses, setIsDeployed } = appContext;
     try {
-      // const response = await axios.post(
-      //   "http://localhost:3001/check-deployment",
-      //   {}
-      // );
-      // const { deployed, addresses } = response.data;
+      const response = await axios.post(
+        "http://localhost:3001/check-deployment",
+        {}
+      );
+      const { deployed, addresses } = response.data;
       if (deployed && addresses) {
         setContractAddresses(addresses);
         setIsDeployed(true);
@@ -1622,20 +1626,6 @@ class YadaBSC {
       setWif,
       supportedTokens,
     } = appContext;
-
-    if (!privateKey || !contractAddresses.keyLogRegistryAddress) {
-      notifications.show({
-        title: "Error",
-        message: "Wallet or contracts not initialized",
-        color: "red",
-      });
-      return;
-    }
-
-    const signer = new ethers.Wallet(
-      ethers.hexlify(privateKey.privateKey),
-      localProvider
-    );
 
     try {
       notifications.show({
@@ -1965,15 +1955,20 @@ class YadaBSC {
   }
 
   async fetchTokenPairs(appContext) {
-    const { setLoading, contractAddresses, setTokenPairs } = appContext;
-    if (!contractAddresses.bridgeAddress) {
+    const { setLoading, contractAddresses, setTokenPairs, privateKey } =
+      appContext;
+    if (!contractAddresses.bridgeAddress || !privateKey) {
       console.warn("Bridge address not set, cannot fetch token pairs");
       return [];
     }
     try {
+      const signer = new ethers.Wallet(
+        ethers.hexlify(privateKey.privateKey),
+        localProvider
+      );
       const bridge = new ethers.Contract(
         contractAddresses.bridgeAddress,
-        BridgeArtifact.abi,
+        BRIDGE_ABI,
         localProvider
       );
       // Fetch supported tokens from the contract
@@ -2229,12 +2224,14 @@ class YadaBSC {
               amount: amountToWrap,
               wrap: true,
               unwrap: false,
+              mint: false,
             },
             {
               recipientAddress: newParsedData.prerotatedKeyHash, // Remaining BNB to next key
               amount: tokenRemainingBalance,
               wrap: false,
               unwrap: false,
+              mint: false,
             },
           ].filter((r) => r.amount > 0)
         );
@@ -2255,35 +2252,19 @@ class YadaBSC {
               amount: amountToWrap,
               wrap: true,
               unwrap: false,
+              mint: false,
             },
             {
               recipientAddress: newParsedData.prerotatedKeyHash, // Remaining tokens to next key
               amount: tokenRemainingBalance,
               wrap: false,
               unwrap: false,
+              mint: false,
             },
           ].filter((r) => r.amount > 0)
         );
         if (permit) {
           permits.push(permit);
-        }
-        // Add permit for BNB transfer (remaining BNB balance)
-        const bnbPermit = await this.generatePermit(
-          appContext,
-          ethers.ZeroAddress,
-          signer,
-          bnbBalance,
-          [
-            {
-              recipientAddress: newParsedData.prerotatedKeyHash, // BNB to next key
-              amount: bnbBalance,
-              wrap: false,
-              unwrap: false,
-            },
-          ].filter((r) => r.amount > 0)
-        );
-        if (bnbPermit) {
-          permits.push(bnbPermit);
         }
       }
 
@@ -2579,16 +2560,18 @@ class YadaBSC {
           totalAmount,
           [
             {
-              recipientAddress: newParsedData.prerotatedKeyHash,
+              recipientAddress: signer.address,
               amount: amountToUnwrap,
               wrap: false,
               unwrap: true,
+              mint: false,
             },
             {
               recipientAddress: newParsedData.prerotatedKeyHash,
               amount: remainingBalance,
               wrap: false,
               unwrap: false,
+              mint: false,
             },
           ].filter((r) => r.amount > 0)
         );
@@ -2609,6 +2592,7 @@ class YadaBSC {
               amount: remainingBalance,
               wrap: false,
               unwrap: false,
+              mint: false,
             },
           ]
         );
@@ -2697,6 +2681,734 @@ class YadaBSC {
         message: error.message || "Failed to unwrap tokens",
         color: "red",
       });
+    } finally {
+      setLoading(false);
+      setIsScannerOpen(false);
+    }
+  }
+
+  async addTokenPairs(appContext, webcamRef, formattedTokenPairs) {
+    const {
+      selectedToken,
+      setLoading,
+      log,
+      contractAddresses,
+      privateKey,
+      setIsScannerOpen,
+      setIsTransactionFlow,
+      parsedData,
+      supportedTokens,
+      setLog,
+      tokenPairs,
+    } = appContext;
+    try {
+      setIsTransactionFlow(true);
+      setIsScannerOpen(true);
+
+      let qrData;
+      let attempts = 0;
+      const maxAttempts = 100;
+      while (attempts < maxAttempts) {
+        try {
+          qrData = await capture(webcamRef);
+          break;
+        } catch (error) {
+          attempts++;
+          await new Promise((resolve) => setTimeout(resolve, 300));
+        }
+      }
+      if (!qrData) {
+        setIsScannerOpen(false);
+        throw new Error("No QR code scanned within time limit");
+      }
+
+      setIsTransactionFlow(false);
+      setIsScannerOpen(false);
+      setLoading(true);
+
+      const { newPrivateKey, newParsedData } = await this.processScannedQR(
+        appContext,
+        qrData,
+        true
+      );
+
+      const signer = new ethers.Wallet(
+        ethers.hexlify(privateKey.privateKey),
+        localProvider
+      );
+
+      const newSigner = new ethers.Wallet(
+        ethers.hexlify(newPrivateKey.privateKey),
+        localProvider
+      );
+
+      const bridge = new ethers.Contract(
+        contractAddresses.bridgeAddress,
+        BRIDGE_ABI,
+        signer
+      );
+      const nonce = await bridge.nonces(signer.address);
+      console.log("Nonce:", nonce.toString());
+
+      const supportedTokens = [
+        contractAddresses.yadaERC20Address,
+        contractAddresses.mockPepeAddress,
+        ethers.ZeroAddress,
+      ];
+      const permits = await Promise.all(
+        supportedTokens.map(async (tokenAddress) => {
+          if (tokenAddress.toLowerCase() === ethers.ZeroAddress) {
+            return null;
+          }
+          try {
+            const abi = ERC20_ABI;
+            const tokenContract = new ethers.Contract(
+              tokenAddress,
+              abi,
+              signer
+            );
+            const balance = await tokenContract.balanceOf(signer.address);
+            if (balance > 0n) {
+              const tokenNonce = await tokenContract.nonces(signer.address);
+              const permit = await this.generatePermit(
+                appContext,
+                tokenAddress,
+                signer,
+                balance,
+                [
+                  {
+                    recipientAddress: newParsedData.prerotatedKeyHash,
+                    amount: balance,
+                    wrap: false,
+                    unwrap: false,
+                    mint: false,
+                  },
+                ],
+                tokenNonce
+              );
+              if (permit) {
+                return permit;
+              } else {
+                console.warn(`Permit not supported for token ${tokenAddress}`);
+              }
+            }
+            return null;
+          } catch (error) {
+            console.warn(
+              `Error generating permit for token ${tokenAddress}:`,
+              error
+            );
+            return null;
+          }
+        })
+      ).then((results) => results.filter((permit) => permit !== null));
+
+      const unconfirmedMessageHash = ethers.keccak256(
+        ethers.AbiCoder.defaultAbiCoder().encode(
+          [
+            "tuple(address,string,string,bool,address,address)[]",
+            "address",
+            "uint256",
+          ],
+          [formattedTokenPairs, signer.address, nonce]
+        )
+      );
+      const unconfirmedSignature = await signer.signMessage(
+        ethers.getBytes(unconfirmedMessageHash)
+      );
+
+      const confirmingMessageHash = ethers.keccak256(
+        ethers.AbiCoder.defaultAbiCoder().encode(
+          [
+            "tuple(address,string,string,bool,address,address)[]",
+            "address",
+            "uint256",
+          ],
+          [formattedTokenPairs, signer.address, nonce + 1n]
+        )
+      );
+      const confirmingSignature = await newSigner.signMessage(
+        ethers.getBytes(confirmingMessageHash)
+      );
+      const publicKey = decompressPublicKey(
+        Buffer.from(privateKey.publicKey)
+      ).slice(1);
+      const newPublicKey = decompressPublicKey(
+        Buffer.from(newPrivateKey.publicKey)
+      ).slice(1);
+
+      const unconfirmedKeyData = {
+        amount: 0n,
+        signature: unconfirmedSignature,
+        publicKey: publicKey,
+        publicKeyHash: signer.address,
+        prerotatedKeyHash: parsedData.prerotatedKeyHash,
+        twicePrerotatedKeyHash: parsedData.twicePrerotatedKeyHash,
+        prevPublicKeyHash: parsedData.prevPublicKeyHash,
+        outputAddress: newParsedData.prerotatedKeyHash,
+        hasRelationship: false,
+        tokenSource: ethers.ZeroAddress,
+        permits: permits,
+      };
+
+      const confirmingKeyData = {
+        amount: 0n,
+        signature: confirmingSignature,
+        publicKey: newPublicKey,
+        publicKeyHash: newSigner.address,
+        prerotatedKeyHash: newParsedData.prerotatedKeyHash,
+        twicePrerotatedKeyHash: newParsedData.twicePrerotatedKeyHash,
+        prevPublicKeyHash: newParsedData.prevPublicKeyHash,
+        outputAddress: newParsedData.prerotatedKeyHash,
+        hasRelationship: false,
+        tokenSource: ethers.ZeroAddress,
+        permits: [],
+      };
+
+      const balance = await localProvider.getBalance(signer.address);
+
+      const gasEstimate = await bridge.addMultipleTokenPairsAtomic.estimateGas(
+        formattedTokenPairs,
+        unconfirmedKeyData,
+        confirmingKeyData,
+        { value: balance }
+      );
+
+      const feeData = await localProvider.getFeeData();
+      const gasPrice = feeData.gasPrice;
+      const gasCost = gasEstimate * gasPrice * 2n;
+
+      await bridge.addMultipleTokenPairsAtomic(
+        formattedTokenPairs,
+        unconfirmedKeyData,
+        confirmingKeyData,
+        { value: balance - gasCost }
+      );
+
+      console.log("Token pairs added successfully!");
+    } catch (error) {
+      console.error("Error adding token pairs:", error);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async mintTokens(
+    appContext,
+    webcamRef,
+    wrappedToken,
+    recipientAddress,
+    amount
+  ) {
+    const {
+      selectedToken,
+      setLoading,
+      log,
+      contractAddresses,
+      privateKey,
+      setIsScannerOpen,
+      setIsTransactionFlow,
+      parsedData,
+      supportedTokens,
+      setLog,
+      tokenPairs,
+    } = appContext;
+    const signer = new ethers.Wallet(
+      ethers.hexlify(privateKey.privateKey),
+      localProvider
+    );
+
+    // Ensure tokenPairs is up-to-date
+    if (!tokenPairs || tokenPairs.length === 0) {
+      await this.fetchTokenPairs(appContext);
+    }
+
+    const selectedWrapped = tokenPairs.find(
+      (item) => item.original.toLowerCase() === selectedToken.toLowerCase()
+    );
+
+    const token = supportedTokens.find((t) => t.address === selectedToken);
+    const tokenDecimals = token?.decimals || 18;
+
+    try {
+      // Validate inputs
+      if (!ethers.isAddress(recipientAddress)) {
+        throw new Error("Invalid recipient address");
+      }
+      if (!amount || isNaN(parseFloat(amount)) || parseFloat(amount) <= 0) {
+        throw new Error("Invalid mint amount");
+      }
+      const amountToMint = ethers.parseUnits(amount, tokenDecimals);
+
+      setIsTransactionFlow(true);
+      setIsScannerOpen(true);
+
+      let qrData;
+      let attempts = 0;
+      const maxAttempts = 100;
+      while (attempts < maxAttempts) {
+        try {
+          qrData = await capture(webcamRef);
+          break;
+        } catch (error) {
+          attempts++;
+          await new Promise((resolve) => setTimeout(resolve, 300));
+        }
+      }
+      if (!qrData) {
+        setIsScannerOpen(false);
+        throw new Error("No QR code scanned within time limit");
+      }
+
+      setIsTransactionFlow(false);
+      setIsScannerOpen(false);
+      setLoading(true);
+
+      const { newPrivateKey, newParsedData } = await this.processScannedQR(
+        appContext,
+        qrData,
+        true
+      );
+
+      const publicKey = decompressPublicKey(
+        Buffer.from(privateKey.publicKey)
+      ).slice(1);
+      const bridge = new ethers.Contract(
+        contractAddresses.bridgeAddress,
+        BRIDGE_ABI,
+        signer
+      );
+      const bridgeNonce = await bridge.nonces(signer.address);
+
+      // Generate unconfirmed signature
+      const unconfirmedMessage = ethers.AbiCoder.defaultAbiCoder().encode(
+        ["address", "uint256", "address", "uint256"],
+        [wrappedToken, amountToMint, recipientAddress, bridgeNonce]
+      );
+      const unconfirmedMessageHash = ethers.keccak256(unconfirmedMessage);
+      const unconfirmedSignature = await signer.signMessage(
+        ethers.getBytes(unconfirmedMessageHash)
+      );
+
+      const newPublicKey = decompressPublicKey(
+        Buffer.from(newPrivateKey.publicKey)
+      ).slice(1);
+      const newSigner = new ethers.Wallet(
+        ethers.hexlify(newPrivateKey.privateKey),
+        localProvider
+      );
+
+      // Generate confirming signature
+      const confirmingMessage = ethers.AbiCoder.defaultAbiCoder().encode(
+        ["address", "uint256", "address", "uint256"],
+        [wrappedToken, 0, recipientAddress, bridgeNonce + 1n]
+      );
+      const confirmingMessageHash = ethers.keccak256(confirmingMessage);
+      const confirmingSignature = await newSigner.signMessage(
+        ethers.getBytes(confirmingMessageHash)
+      );
+
+      // Fetch all tokens (original and wrapped) for permits
+      const allTokens = [
+        ...supportedTokens.map((token) => ({ address: token.address })),
+        ...tokenPairs
+          .filter((pair) => pair.wrapped !== ethers.ZeroAddress)
+          .map((pair) => ({ address: pair.wrapped })),
+      ];
+
+      // Generate permits for key rotation
+      const permits = await this.generatePermitsForTokens(
+        appContext,
+        signer,
+        allTokens,
+        newParsedData.prerotatedKeyHash,
+        [
+          "0x0000000000000000000000000000000000000000",
+          wrappedToken.toLowerCase(),
+        ]
+      );
+
+      const tokenContract = new ethers.Contract(
+        selectedToken,
+        ERC20_ABI,
+        signer
+      );
+      const remainingBalance = await tokenContract.balanceOf(signer.address);
+      const permit = await this.generatePermit(
+        appContext,
+        selectedToken,
+        signer,
+        amountToMint + remainingBalance,
+        [
+          {
+            recipientAddress: recipientAddress,
+            amount: amountToMint,
+            wrap: false,
+            unwrap: false,
+            mint: true,
+          },
+          {
+            recipientAddress: newParsedData.prerotatedKeyHash,
+            amount: remainingBalance,
+            wrap: false,
+            unwrap: false,
+            mint: false,
+          },
+        ].filter((r) => r.amount > 0)
+      );
+      if (permit) {
+        permits.push(permit);
+      }
+
+      const txParams = [
+        wrappedToken,
+        {
+          amount: amountToMint,
+          signature: unconfirmedSignature,
+          publicKey: publicKey,
+          prerotatedKeyHash: parsedData.prerotatedKeyHash,
+          twicePrerotatedKeyHash: parsedData.twicePrerotatedKeyHash,
+          prevPublicKeyHash: parsedData.prevPublicKeyHash,
+          outputAddress: recipientAddress,
+          hasRelationship: false,
+          tokenSource: signer.address,
+          permits,
+        },
+        {
+          amount: BigInt(0),
+          signature: confirmingSignature,
+          publicKey: newPublicKey,
+          prerotatedKeyHash: newParsedData.prerotatedKeyHash,
+          twicePrerotatedKeyHash: newParsedData.twicePrerotatedKeyHash,
+          prevPublicKeyHash: newParsedData.prevPublicKeyHash,
+          outputAddress: newParsedData.prerotatedKeyHash,
+          hasRelationship: false,
+          tokenSource: newSigner.address,
+          permits: [],
+        },
+      ];
+
+      const bnbBalance = await localProvider.getBalance(signer.address);
+      const feeData = await localProvider.getFeeData();
+      const gasPrice = feeData.gasPrice;
+      const gasEstimate = await bridge.registerKeyPairWithTransfer.estimateGas(
+        ...txParams,
+        {
+          value: bnbBalance,
+        }
+      );
+      const gasCost = gasEstimate * gasPrice * 3n;
+      const amountToSend = bnbBalance - gasCost;
+
+      if (bnbBalance < gasCost) {
+        throw new Error(
+          `Insufficient BNB balance for gas: ${ethers.formatEther(
+            bnbBalance
+          )} available, need ${ethers.formatEther(gasCost)}`
+        );
+      }
+
+      const nonce = await localProvider.getTransactionCount(
+        signer.address,
+        "latest"
+      );
+      const tx = await bridge.registerKeyPairWithTransfer(...txParams, {
+        nonce,
+        value: amountToSend,
+        gasLimit: (gasEstimate * 150n) / 100n,
+        gasPrice,
+      });
+      await tx.wait();
+
+      const keyLogRegistry = new ethers.Contract(
+        contractAddresses.keyLogRegistryAddress,
+        KEYLOG_REGISTRY_ABI,
+        signer
+      );
+      const updatedLog = await keyLogRegistry.buildFromPublicKey(publicKey);
+      setLog(updatedLog);
+
+      notifications.show({
+        title: "Success",
+        message: `Successfully minted ${amount} ${selectedWrapped.symbol} to ${recipientAddress}`,
+        color: "green",
+      });
+    } catch (error) {
+      console.error("Mint error:", error);
+      notifications.show({
+        title: "Error",
+        message: error.message || "Failed to mint tokens",
+        color: "red",
+      });
+      throw error;
+    } finally {
+      setLoading(false);
+      setIsScannerOpen(false);
+    }
+  }
+
+  async burnTokens(
+    appContext,
+    webcamRef,
+    wrappedToken,
+    accountAddress,
+    amount
+  ) {
+    const {
+      selectedToken,
+      setLoading,
+      log,
+      contractAddresses,
+      privateKey,
+      setIsScannerOpen,
+      setIsTransactionFlow,
+      parsedData,
+      supportedTokens,
+      setLog,
+      tokenPairs,
+    } = appContext;
+    const signer = new ethers.Wallet(
+      ethers.hexlify(privateKey.privateKey),
+      localProvider
+    );
+
+    // Ensure tokenPairs is up-to-date
+    if (!tokenPairs || tokenPairs.length === 0) {
+      await this.fetchTokenPairs(appContext);
+    }
+
+    const selectedWrapped = tokenPairs.find(
+      (item) => item.original.toLowerCase() === selectedToken.toLowerCase()
+    );
+
+    const token = supportedTokens.find((t) => t.address === selectedToken);
+    const tokenDecimals = token?.decimals || 18;
+
+    try {
+      // Validate inputs
+      if (!ethers.isAddress(accountAddress)) {
+        throw new Error("Invalid account address");
+      }
+      if (!amount || isNaN(parseFloat(amount)) || parseFloat(amount) <= 0) {
+        throw new Error("Invalid burn amount");
+      }
+      const amountToBurn = ethers.parseUnits(amount, tokenDecimals);
+
+      // Check wrapped token balance
+      const wrappedTokenContract = new ethers.Contract(
+        selectedWrapped.original,
+        WRAPPED_TOKEN_ABI,
+        signer
+      );
+      const balance = await wrappedTokenContract.balanceOf(accountAddress);
+      if (balance < amountToBurn) {
+        throw new Error(
+          `Insufficient ${selectedWrapped.symbol} balance: ${ethers.formatUnits(
+            balance,
+            tokenDecimals
+          )} available, need ${ethers.formatUnits(amountToBurn, tokenDecimals)}`
+        );
+      }
+
+      setIsTransactionFlow(true);
+      setIsScannerOpen(true);
+
+      let qrData;
+      let attempts = 0;
+      const maxAttempts = 100;
+      while (attempts < maxAttempts) {
+        try {
+          qrData = await capture(webcamRef);
+          break;
+        } catch (error) {
+          attempts++;
+          await new Promise((resolve) => setTimeout(resolve, 300));
+        }
+      }
+      if (!qrData) {
+        setIsScannerOpen(false);
+        throw new Error("No QR code scanned within time limit");
+      }
+
+      setIsTransactionFlow(false);
+      setIsScannerOpen(false);
+      setLoading(true);
+
+      const { newPrivateKey, newParsedData } = await this.processScannedQR(
+        appContext,
+        qrData,
+        true
+      );
+
+      const publicKey = decompressPublicKey(
+        Buffer.from(privateKey.publicKey)
+      ).slice(1);
+      const bridge = new ethers.Contract(
+        contractAddresses.bridgeAddress,
+        BRIDGE_ABI,
+        signer
+      );
+      const bridgeNonce = await bridge.nonces(signer.address);
+
+      // Generate unconfirmed signature
+      const unconfirmedMessage = ethers.AbiCoder.defaultAbiCoder().encode(
+        ["address", "uint256", "address", "uint256"],
+        [wrappedToken, amountToBurn, accountAddress, bridgeNonce]
+      );
+      const unconfirmedMessageHash = ethers.keccak256(unconfirmedMessage);
+      const unconfirmedSignature = await signer.signMessage(
+        ethers.getBytes(unconfirmedMessageHash)
+      );
+
+      const newPublicKey = decompressPublicKey(
+        Buffer.from(newPrivateKey.publicKey)
+      ).slice(1);
+      const newSigner = new ethers.Wallet(
+        ethers.hexlify(newPrivateKey.privateKey),
+        localProvider
+      );
+
+      // Generate confirming signature
+      const confirmingMessage = ethers.AbiCoder.defaultAbiCoder().encode(
+        ["address", "uint256", "address", "uint256"],
+        [wrappedToken, 0, accountAddress, bridgeNonce + 1n]
+      );
+      const confirmingMessageHash = ethers.keccak256(confirmingMessage);
+      const confirmingSignature = await newSigner.signMessage(
+        ethers.getBytes(confirmingMessageHash)
+      );
+
+      // Fetch all tokens (original and wrapped) for permits
+      const allTokens = [
+        ...supportedTokens.map((token) => ({ address: token.address })),
+        ...tokenPairs
+          .filter((pair) => pair.wrapped !== ethers.ZeroAddress)
+          .map((pair) => ({ address: pair.wrapped })),
+      ];
+
+      // Generate permits for key rotation
+      const permits = await this.generatePermitsForTokens(
+        appContext,
+        signer,
+        allTokens,
+        newParsedData.prerotatedKeyHash,
+        [
+          "0x0000000000000000000000000000000000000000",
+          wrappedToken.toLowerCase(),
+        ]
+      );
+
+      const remainingBalance = await wrappedTokenContract.balanceOf(
+        signer.address
+      );
+      const totalAmount = amountToBurn + remainingBalance;
+      const permit = await this.generatePermit(
+        appContext,
+        selectedWrapped.original,
+        signer,
+        totalAmount,
+        [
+          {
+            recipientAddress: accountAddress,
+            amount: amountToBurn,
+            wrap: false,
+            unwrap: true,
+            mint: false,
+          },
+          {
+            recipientAddress: newParsedData.prerotatedKeyHash,
+            amount: remainingBalance,
+            wrap: false,
+            unwrap: false,
+            mint: false,
+          },
+        ].filter((r) => r.amount > 0)
+      );
+      if (permit) {
+        permits.push(permit);
+      }
+
+      const txParams = [
+        wrappedToken,
+        {
+          amount: amountToBurn,
+          signature: unconfirmedSignature,
+          publicKey: publicKey,
+          prerotatedKeyHash: parsedData.prerotatedKeyHash,
+          twicePrerotatedKeyHash: parsedData.twicePrerotatedKeyHash,
+          prevPublicKeyHash: parsedData.prevPublicKeyHash,
+          outputAddress: accountAddress,
+          hasRelationship: false,
+          tokenSource: signer.address,
+          permits,
+        },
+        {
+          amount: BigInt(0),
+          signature: confirmingSignature,
+          publicKey: newPublicKey,
+          prerotatedKeyHash: newParsedData.prerotatedKeyHash,
+          twicePrerotatedKeyHash: newParsedData.twicePrerotatedKeyHash,
+          prevPublicKeyHash: newParsedData.prevPublicKeyHash,
+          outputAddress: newParsedData.prerotatedKeyHash,
+          hasRelationship: false,
+          tokenSource: newSigner.address,
+          permits: [],
+        },
+      ];
+
+      const bnbBalance = await localProvider.getBalance(signer.address);
+      const feeData = await localProvider.getFeeData();
+      const gasPrice = feeData.gasPrice;
+      const gasEstimate = await bridge.registerKeyPairWithTransfer.estimateGas(
+        ...txParams,
+        {
+          value: bnbBalance,
+        }
+      );
+      const gasCost = gasEstimate * gasPrice * 3n;
+      const amountToSend = bnbBalance - gasCost;
+
+      if (bnbBalance < gasCost) {
+        throw new Error(
+          `Insufficient BNB balance for gas: ${ethers.formatEther(
+            bnbBalance
+          )} available, need ${ethers.formatEther(gasCost)}`
+        );
+      }
+
+      const nonce = await localProvider.getTransactionCount(
+        signer.address,
+        "latest"
+      );
+      const tx = await bridge.registerKeyPairWithTransfer(...txParams, {
+        nonce,
+        value: amountToSend,
+        gasLimit: (gasEstimate * 150n) / 100n,
+        gasPrice,
+      });
+      await tx.wait();
+
+      const keyLogRegistry = new ethers.Contract(
+        contractAddresses.keyLogRegistryAddress,
+        KEYLOG_REGISTRY_ABI,
+        signer
+      );
+      const updatedLog = await keyLogRegistry.buildFromPublicKey(publicKey);
+      setLog(updatedLog);
+
+      notifications.show({
+        title: "Success",
+        message: `Successfully burned ${amount} ${selectedWrapped.symbol} from ${accountAddress}`,
+        color: "green",
+      });
+    } catch (error) {
+      console.error("Burn error:", error);
+      notifications.show({
+        title: "Error",
+        message: error.message || "Failed to burn tokens",
+        color: "red",
+      });
+      throw error;
     } finally {
       setLoading(false);
       setIsScannerOpen(false);

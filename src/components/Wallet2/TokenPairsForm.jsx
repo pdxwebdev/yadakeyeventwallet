@@ -1,0 +1,123 @@
+import React, { useState } from "react";
+import { Button, Group, TextInput, Switch, Stack } from "@mantine/core";
+import { useForm } from "@mantine/form";
+import { ethers } from "ethers";
+import { useAppContext } from "../../context/AppContext";
+import { walletManagerFactory } from "../../blockchains/WalletManagerFactory";
+
+const TokenPairsForm = ({ appContext, webcamRef }) => {
+  const { selectedBlockchain } = appContext;
+
+  const walletManager = walletManagerFactory(selectedBlockchain);
+  const [tokenPairs, setTokenPairs] = useState([]);
+  const [loading, setLoading] = useState(false);
+
+  const form = useForm({
+    initialValues: {
+      tokenPairs: [
+        {
+          tokenAddress: "",
+          tokenName: "",
+          tokenSymbol: "",
+          isWrapped: false,
+          wrappedAddress: ethers.ZeroAddress,
+          priceFeedAddress: ethers.ZeroAddress,
+        },
+      ],
+    },
+    validate: {
+      tokenPairs: {
+        tokenAddress: (value) =>
+          ethers.isAddress(value) ? null : "Invalid Ethereum address",
+        tokenName: (value) => (value.trim() ? null : "Token name is required"),
+        tokenSymbol: (value) =>
+          value.trim() ? null : "Token symbol is required",
+      },
+    },
+  });
+
+  const addTokenPair = () => {
+    form.insertListItem("tokenPairs", {
+      tokenAddress: "",
+      tokenName: "",
+      tokenSymbol: "",
+      isWrapped: false,
+      wrappedAddress: ethers.ZeroAddress,
+      priceFeedAddress: ethers.ZeroAddress,
+    });
+  };
+
+  const removeTokenPair = (index) => {
+    form.removeListItem("tokenPairs", index);
+  };
+
+  const handleSubmit = async (values) => {
+    const formattedTokenPairs = values.tokenPairs.map((pair) => [
+      pair.tokenAddress,
+      pair.tokenName,
+      pair.tokenSymbol,
+      pair.isWrapped,
+      ethers.ZeroAddress,
+      pair.priceFeedAddress,
+    ]);
+
+    setTokenPairs(formattedTokenPairs);
+    await walletManager.addTokenPairs(
+      appContext,
+      webcamRef,
+      formattedTokenPairs
+    );
+  };
+
+  return (
+    <form onSubmit={form.onSubmit(handleSubmit)}>
+      <Stack mb="md">
+        {form.values.tokenPairs.map((pair, index) => (
+          <Group key={index} mt="xs">
+            <TextInput
+              label="Token Address"
+              placeholder="0x..."
+              {...form.getInputProps(`tokenPairs.${index}.tokenAddress`)}
+            />
+            <TextInput
+              label="Token Name"
+              placeholder="Token Name"
+              {...form.getInputProps(`tokenPairs.${index}.tokenName`)}
+            />
+            <TextInput
+              label="Token Symbol"
+              placeholder="Symbol"
+              {...form.getInputProps(`tokenPairs.${index}.tokenSymbol`)}
+            />
+            <Switch
+              label="Is Wrapped"
+              {...form.getInputProps(`tokenPairs.${index}.isWrapped`, {
+                type: "checkbox",
+              })}
+            />
+            <TextInput
+              label="Price Feed Address"
+              placeholder="0x..."
+              {...form.getInputProps(`tokenPairs.${index}.priceFeedAddress`)}
+            />
+            <Button
+              color="red"
+              onClick={() => removeTokenPair(index)}
+              disabled={form.values.tokenPairs.length === 1}
+            >
+              Remove
+            </Button>
+          </Group>
+        ))}
+        <Group>
+          <Button onClick={addTokenPair}>Add Token Pair</Button>
+          <Button type="submit" loading={loading}>
+            Submit
+          </Button>
+        </Group>
+      </Stack>
+    </form>
+  );
+};
+
+export default TokenPairsForm;
