@@ -25,7 +25,7 @@ import { styles } from "../shared/styles";
 import { fromWIF } from "../utils/hdWallet";
 import TokenSelector from "../components/Wallet2/TokenSelector";
 import { capture } from "../shared/capture";
-import { BLOCKCHAINS } from "../shared/constants";
+import { BLOCKCHAINS, BRIDGE_ABI, localProvider } from "../shared/constants";
 import axios from "axios";
 import { ethers } from "ethers";
 
@@ -129,17 +129,14 @@ const Wallet2 = () => {
     }
 
     try {
-      const provider = new ethers.JsonRpcProvider(
-        BLOCKCHAINS.find((item) => item.id === selectedBlockchain).rpcUrl
-      );
-      const bridgeAbi = ["function getOwner() external view returns (address)"];
-      const bridgeContract = new ethers.Contract(
+      if (selectedBlockchain !== "bsc") return;
+      const bridge = new ethers.Contract(
         contractAddresses.bridgeAddress,
-        bridgeAbi,
-        provider
+        BRIDGE_ABI,
+        localProvider
       );
 
-      const owner = await bridgeContract.getOwner();
+      const owner = await bridge.getOwner();
       const signerAddress = parsedData?.publicKeyHash;
 
       if (
