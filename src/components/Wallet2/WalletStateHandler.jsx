@@ -25,7 +25,7 @@ const WalletStateHandler = ({
 }) => {
   const [opened, { toggle }] = useDisclosure(false);
 
-  if (privateKey) {
+  if (!privateKey) {
     return (
       <>
         <Title order={3} mb="md" fw="bold">
@@ -62,14 +62,8 @@ const WalletStateHandler = ({
           </Text>
         </Collapse>
         {isDeployed ? (
-          <Button
-            onClick={onRotateKey}
-            color="teal"
-            variant="outline"
-            mt="md"
-            disabled={log.length === parsedData.rotation}
-          >
-            Scan Key (Rotation: {log.length})
+          <Button onClick={onRotateKey} color="teal" variant="outline" mt="md">
+            Scan Key (Rotation: 0)
           </Button>
         ) : (
           <Button
@@ -107,17 +101,26 @@ const WalletStateHandler = ({
     );
   }
 
-  if (!isInitialized) {
+  if (isInitialized) {
     return (
-      <Stack align="center" spacing="md">
-        <Text>
-          Current key (rotation {log.length}) is not initialized. Please scan
-          the correct key (rotation {log.length}) to proceed.
-        </Text>
-        <Button onClick={onRotateKey} color="teal" variant="outline">
-          Scan Key (Rotation: {log.length})
-        </Button>
-      </Stack>
+      log.length !== parsedData.rotation && (
+        <Stack align="center" spacing="md">
+          {
+            <Text>
+              Current key (rotation {log.length}) is not initialized. Please
+              scan the correct key (rotation {log.length}) to proceed.
+            </Text>
+          }
+          <Button
+            onClick={onRotateKey}
+            color="teal"
+            variant="outline"
+            disabled={log.length === parsedData.rotation}
+          >
+            Scan Key (Rotation: {log.length})
+          </Button>
+        </Stack>
+      )
     );
   }
 

@@ -232,7 +232,7 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
                     }
                 }
                 if (totalTransferred != permit.amount) revert TransferFailed();
-            } else if (permit.token == address(0) && token == permit.token) {
+            } else if (permit.token == address(0)) {
                 for (uint256 j = 0; j < permit.recipients.length; j++) {
                     Recipient memory recipient = permit.recipients[j];
                     if (recipient.amount > 0 && !recipient.wrap) {
@@ -454,8 +454,7 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
     }
 
     function registerKeyPairWithTransfer(address token, Params calldata unconfirmed, Params calldata confirming) external payable nonReentrant {
-
-        _finalize(token, unconfirmed, confirming, true);
+        _finalize(token, unconfirmed, confirming, false);
     }
 
     function addMultipleTokenPairsAtomic(

@@ -1041,6 +1041,8 @@ class YadaBSC {
       contractAddresses,
       tokenPairs,
       setIsInitialized,
+      setIsSubmitting,
+      setLog,
     } = appContext;
     if (!privateKey) return;
 
@@ -1052,6 +1054,7 @@ class YadaBSC {
 
     try {
       setLoading(true);
+      setIsSubmitting(true);
       const bridge = new ethers.Contract(
         contractAddresses.bridgeAddress,
         BRIDGE_ABI,
@@ -1144,6 +1147,11 @@ class YadaBSC {
       );
       await tx.wait();
 
+      const updatedLog = await keyLogRegistry.buildFromPublicKey(
+        decompressPublicKey(Buffer.from(privateKey.publicKey)).slice(1)
+      );
+      setLog(updatedLog);
+
       notifications.show({
         title: "Success",
         message: "Key event log initialized and token balances transferred",
@@ -1158,6 +1166,7 @@ class YadaBSC {
       });
     } finally {
       setLoading(false);
+      setIsSubmitting(false);
     }
   }
 
@@ -1338,25 +1347,25 @@ class YadaBSC {
         recipientTokenAmounts
       );
 
-      let recipientPermits = [];
+      let recipientPermits = [
+        {
+          token: ethers.ZeroAddress,
+          amount: bnbBalance,
+          deadline: 0,
+          v: 0,
+          r: ethers.ZeroHash,
+          s: ethers.ZeroHash,
+          recipients: [],
+        },
+      ];
       if (isBNB) {
-        recipientPermits = [
-          {
-            token: ethers.ZeroAddress,
-            amount: totalBNBToRecipients,
-            deadline: 0,
-            v: 0,
-            r: ethers.ZeroHash,
-            s: ethers.ZeroHash,
-            recipients: recipients.map((r) => ({
-              recipientAddress: r.address,
-              amount: ethers.parseUnits(r.amount, tokenDecimals),
-              wrap: false,
-              unwrap: false,
-              mint: false,
-            })),
-          },
-        ];
+        recipientPermits[0].recipients = recipients.map((r) => ({
+          recipientAddress: r.address,
+          amount: ethers.parseUnits(r.amount, tokenDecimals),
+          wrap: false,
+          unwrap: false,
+          mint: false,
+        }));
       } else {
         const recipientPermit = await this.generatePermit(
           appContext,
@@ -1500,6 +1509,15 @@ class YadaBSC {
         bnbBalance >= totalBNBToRecipients + gasCost
           ? bnbBalance - totalBNBToRecipients - gasCost
           : BigInt(0);
+      txParams[1].permits
+        .find((item) => item.token === ethers.ZeroAddress)
+        .recipients.push({
+          recipientAddress: newParsedData.prerotatedKeyHash,
+          amount: remainingBNBBalance - gasCost,
+          wrap: false,
+          unwrap: false,
+          mint: false,
+        });
       if (bnbBalance < totalBNBToRecipients + gasCost) {
         throw new Error(
           `Insufficient BNB: balance=${ethers.formatEther(
@@ -1534,7 +1552,7 @@ class YadaBSC {
       const gasLimit = (gasEstimate * 150n) / 100n;
       const tx = await bridge.registerKeyPairWithTransfer(...txParams, {
         nonce,
-        value: bnbBalance - totalBNBToRecipients - gasCost,
+        value: bnbBalance - gasCost,
         gasLimit,
         gasPrice,
       });
@@ -3059,6 +3077,16 @@ class YadaBSC {
       if (permit) {
         permits.push(permit);
       }
+      const bnbBalance = await localProvider.getBalance(signer.address);
+      permits.push({
+        token: ethers.ZeroAddress,
+        amount: bnbBalance,
+        deadline: 0,
+        v: 0,
+        r: ethers.ZeroHash,
+        s: ethers.ZeroHash,
+        recipients: [],
+      });
 
       const txParams = [
         wrappedToken,
@@ -3088,7 +3116,6 @@ class YadaBSC {
         },
       ];
 
-      const bnbBalance = await localProvider.getBalance(signer.address);
       const feeData = await localProvider.getFeeData();
       const gasPrice = feeData.gasPrice;
       const gasEstimate = await bridge.registerKeyPairWithTransfer.estimateGas(
@@ -3107,6 +3134,15 @@ class YadaBSC {
           )} available, need ${ethers.formatEther(gasCost)}`
         );
       }
+      txParams[1].permits
+        .find((item) => item.token === ethers.ZeroAddress)
+        .recipients.push({
+          recipientAddress: newParsedData.prerotatedKeyHash,
+          amount: amountToSend,
+          wrap: false,
+          unwrap: false,
+          mint: false,
+        });
 
       const nonce = await localProvider.getTransactionCount(
         signer.address,
@@ -3327,7 +3363,16 @@ class YadaBSC {
       if (permit) {
         permits.push(permit);
       }
-
+      const bnbBalance = await localProvider.getBalance(signer.address);
+      permits.push({
+        token: ethers.ZeroAddress,
+        amount: bnbBalance,
+        deadline: 0,
+        v: 0,
+        r: ethers.ZeroHash,
+        s: ethers.ZeroHash,
+        recipients: [],
+      });
       const txParams = [
         wrappedToken,
         {
@@ -3356,7 +3401,6 @@ class YadaBSC {
         },
       ];
 
-      const bnbBalance = await localProvider.getBalance(signer.address);
       const feeData = await localProvider.getFeeData();
       const gasPrice = feeData.gasPrice;
       const gasEstimate = await bridge.registerKeyPairWithTransfer.estimateGas(
@@ -3375,6 +3419,16 @@ class YadaBSC {
           )} available, need ${ethers.formatEther(gasCost)}`
         );
       }
+
+      txParams[1].permits
+        .find((item) => item.token === ethers.ZeroAddress)
+        .recipients.push({
+          recipientAddress: newParsedData.prerotatedKeyHash,
+          amount: amountToSend,
+          wrap: false,
+          unwrap: false,
+          mint: false,
+        });
 
       const nonce = await localProvider.getTransactionCount(
         signer.address,

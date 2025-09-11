@@ -41,6 +41,13 @@ export const BLOCKCHAINS = [
     providerUrl: "http://localhost:8545", // BSC RPC URL
   },
   // {
+  //   id: "bsc",
+  //   name: "Binance Smart Chain (BSC)",
+  //   chainId: 97, // BSC mainnet
+  //   isBridge: true, // Replace with actual BSC bridge address
+  //   providerUrl: "https://data-seed-prebsc-1-s1.binance.org:8545", // BSC RPC URL
+  // },
+  // {
   //   id: 'eth',
   //   name: 'Ethereum',
   //   chainId: 1, // Ethereum mainnet
@@ -57,15 +64,13 @@ export const BLOCKCHAINS = [
 ];
 
 export const addresses = {
-  keyLogRegistryAddress: "0x004BC68e79049c8e0Aa280eBd42538636B67F3bC",
-  bnbPriceFeedAddress: "0xf88FE1FA514a6095Fb4aff38c62313881c4589EF",
-  bridgeAddress: "0x23A92A8723Fc5b7C0Cc65F3A9b605BBdF83d341F",
-  yadaERC20Address: "0x507ec961bcEB7d7B0a00cda59b00FF8b91098b9f",
-  mockPepeAddress: "0x0F0A32626372C1349bb904E5985eE231B7ea3b51",
-  mockPriceFeedAddress: "0x3aF5296884E38390c718a87410A7DF40c74b7c0C",
-  wrappedTokenWMOCKAddress: "0x2eE9302eeA46167204E152280B05ce6E9663e65D",
-  wrappedTokenYMOCKAddress: "0x4f92961233f648f54f5F7564c1b81D505437de57",
-  wrappedNativeTokenAddress: "0x658Fa987cD034B96fDeb32571195C88119E49496",
+  keyLogRegistryAddress: "0x044997d045B79646F8A5a01FE2DD2eEE8d4414b2",
+  bnbPriceFeedAddress: "0xA8C6A4791ef1a9DEE5369b545f3A0DdB793ae09C",
+  bridgeAddress: "0x6A74e17ABccc8fD428Ffc53D54D687BA79085ED6",
+  yadaERC20Address: "0x4535ad8254B68e9c6BD4Aa1566598Baa21E49172",
+  mockPepeAddress: "0xf3f79697D07330649410ccA61cCEB518522726C2",
+  mockPriceFeedAddress: "0xC4863aAFCe747cd4755393eBf3466C595c95b487",
+  configured: true,
 };
 
-export const deployed = true;
+export const deployed = false;

@@ -433,7 +433,7 @@ export async function main() {
                   amount: balance,
                   wrap: false,
                   unwrap: false,
-                  mint: r.mint || false,
+                  mint: false,
                 },
               ],
               tokenNonce
@@ -454,7 +454,25 @@ export async function main() {
         }
       })
     ).then((results) => results.filter((permit) => permit !== null));
-
+    balance = await ethers.provider.getBalance(keyData.nextSigner.address);
+    console.log("Balance for registerKeyPairWithTransfer: ", balance);
+    const permitbnb = await generatePermit(
+      ethers.ZeroAddress,
+      keyData.nextSigner,
+      balance,
+      [
+        {
+          recipientAddress: confirmingPrerotatedKeyHash,
+          amount: balance - gasCost,
+          wrap: false,
+          unwrap: false,
+          mint: false,
+        },
+      ].filter((r) => r.amount > 0)
+    );
+    if (permitbnb) {
+      permits.push(permitbnb);
+    }
     const unconfirmedMessageHash = ethers.keccak256(
       ethers.AbiCoder.defaultAbiCoder().encode(
         [
@@ -509,7 +527,6 @@ export async function main() {
       tokenSource: ethers.ZeroAddress,
       permits: [],
     };
-    balance = await ethers.provider.getBalance(keyData.nextSigner.address);
 
     await bridge
       .connect(nextDeployer)
