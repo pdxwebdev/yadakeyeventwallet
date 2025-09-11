@@ -27,7 +27,7 @@ const WalletBalance = ({
             Original Balance: {balance.original} {tokenSymbol || "Token"}
           </Text>
           <Text>
-            Wrapped Balance: {balance.wrapped} {wrappedTokenSymbol || "WToken"}
+            Wrapped Balance: {balance.wrapped} Y{wrappedTokenSymbol || "WToken"}
           </Text>
         </>
       ) : (
