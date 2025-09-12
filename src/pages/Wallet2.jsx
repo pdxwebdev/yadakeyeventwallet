@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import {
   AppShell,
   Container,
@@ -122,14 +122,18 @@ const Wallet2 = () => {
   }, [selectedToken, supportedTokens, tokenPairs]);
 
   // Function to check if the current signer is the owner
-  const checkOwnerStatus = async () => {
+  const checkOwnerStatus = async (appContext) => {
+    const { setIsOwner } = appContext;
     if (!isDeployed || !contractAddresses.bridgeAddress || !privateKey) {
       setIsOwner(false);
       return;
     }
 
     try {
-      if (selectedBlockchain !== "bsc") return;
+      if (selectedBlockchain !== "bsc") {
+        setIsOwner(false);
+        return;
+      }
       const bridge = new ethers.Contract(
         contractAddresses.bridgeAddress,
         BRIDGE_ABI,
@@ -143,13 +147,31 @@ const Wallet2 = () => {
         signerAddress &&
         owner.toLowerCase() === signerAddress.toLowerCase()
       ) {
-        setIsOwner(true);
+        setIsOwner((prev) => {
+          if (prev !== true) {
+            console.log("Setting isOwner to true"); // Debugging
+            return true;
+          }
+          return prev;
+        });
       } else {
-        setIsOwner(false);
+        setIsOwner((prev) => {
+          if (prev !== false) {
+            console.log("Setting isOwner to false"); // Debugging
+            return false;
+          }
+          return prev;
+        });
       }
     } catch (error) {
       console.error("Error checking owner status:", error);
-      setIsOwner(false);
+      setIsOwner((prev) => {
+        if (prev !== false) {
+          console.log("Setting isOwner to false due to error"); // Debugging
+          return false;
+        }
+        return prev;
+      });
       notifications.show({
         title: "Error",
         message: "Failed to check owner status",
@@ -159,9 +181,13 @@ const Wallet2 = () => {
   };
 
   useEffect(() => {
-    const checkDeploymentStatus = async () => {
+    console.log("isOwner changed:", isOwner);
+  }, [isOwner]);
+
+  useEffect(() => {
+    const checkDeploymentStatus = async (appContext) => {
       if (isDeployed && Object.keys(contractAddresses).length > 0) {
-        await checkOwnerStatus();
+        await checkOwnerStatus(appContext);
         return;
       }
       try {
@@ -169,7 +195,7 @@ const Wallet2 = () => {
         setIsDeployed(result.status);
         if (result.status && result.addresses) {
           setContractAddresses(result.addresses);
-          await checkOwnerStatus();
+          await checkOwnerStatus(appContext);
         }
       } catch (error) {
         console.error("Deployment check failed:", error);
@@ -182,7 +208,7 @@ const Wallet2 = () => {
     };
 
     if (!isDeploymentChecked.current) {
-      checkDeploymentStatus();
+      checkDeploymentStatus(appContext);
       isDeploymentChecked.current = true;
     }
 
@@ -221,7 +247,7 @@ const Wallet2 = () => {
           setWif(storedWif);
           setParsedData({ ...parsed });
           setIsInitialized(storedIsInitialized === "true");
-          checkOwnerStatus();
+          checkOwnerStatus(appContext);
         } else {
           setPrivateKey(null);
           setWif("");
@@ -522,7 +548,7 @@ const Wallet2 = () => {
           await walletManager.initializeKeyEventLog(appContext);
         }
 
-        await checkOwnerStatus();
+        await checkOwnerStatus(appContext);
 
         notifications.show({
           title: "Deployment Successful",
@@ -545,18 +571,21 @@ const Wallet2 = () => {
     }
   };
 
-  const handleRotateKey = async () => {
-    try {
-      await walletManager.rotateKey(appContext, webcamRef);
-      await checkOwnerStatus();
-    } catch (error) {
-      notifications.show({
-        title: "Error",
-        message: error.message || "Failed to rotate key",
-        color: "red",
-      });
-    }
-  };
+  const handleRotateKey = useCallback(
+    async (appContext) => {
+      try {
+        await walletManager.rotateKey(appContext, webcamRef);
+        await checkOwnerStatus(appContext);
+      } catch (error) {
+        notifications.show({
+          title: "Error",
+          message: error.message || "Failed to rotate key",
+          color: "red",
+        });
+      }
+    },
+    [setIsOwner]
+  );
 
   const addRecipient = () => {
     setRecipients([...recipients, { address: "", amount: "" }]);
@@ -796,7 +825,9 @@ const Wallet2 = () => {
               parsedData={parsedData}
               log={log}
               onDeployContracts={handleDeployContracts}
-              onRotateKey={handleRotateKey}
+              onRotateKey={() => {
+                handleRotateKey(appContext);
+              }}
               onReset={resetWalletState}
               isDeployed={isDeployed}
               styles={styles}
@@ -846,15 +877,6 @@ const Wallet2 = () => {
               </>
             )}
             <Group mt="xl">
-              {!isDeployed && (
-                <Button
-                  onClick={handleDeployContracts}
-                  color="blue"
-                  variant="filled"
-                >
-                  Deploy Contracts
-                </Button>
-              )}
               <Button onClick={resetWalletState} color="red" variant="outline">
                 Erase Wallet Cache
               </Button>

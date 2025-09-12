@@ -12,41 +12,40 @@ export const WRAPPED_NATIVE_TOKEN_ABI = WrappedNativeTokenArtifact.abi;
 export const ERC20_ABI = MockERC20Artifact.abi;
 export const TOKEN_PAIR_WRAPPER_ABI = TokenPairWrapperArtifact.abi;
 
-export const localProvider = new ethers.JsonRpcProvider(
-  "http://127.0.0.1:8545/",
-  {
-    chainId: 31337,
-    name: "hardhat",
-  }
-);
-
-// export const localProvider = new ethers.JsonRpcProvider(
-//   "https://data-seed-prebsc-1-s1.binance.org:8545/",
-//   {
-//     chainId: 97,
-//     name: "testnet",
-//   },
-//   { batchMaxCount: 1 }
-// );
+export let localProvider =
+  window.location.hostname === "localhost"
+    ? new ethers.JsonRpcProvider("http://127.0.0.1:8545/", {
+        chainId: 31337,
+        name: "hardhat",
+      })
+    : new ethers.JsonRpcProvider(
+        "https://data-seed-prebsc-1-s1.binance.org:8545/",
+        {
+          chainId: 97,
+          name: "testnet",
+        },
+        { batchMaxCount: 1 }
+      );
 
 export const HARDHAT_MNEMONIC =
   "test test test test test test test test test test test junk";
 
 export const BLOCKCHAINS = [
-  {
-    id: "bsc",
-    name: "Binance Smart Chain (BSC)",
-    chainId: 31337, // BSC mainnet
-    isBridge: true, // Replace with actual BSC bridge address
-    providerUrl: "http://localhost:8545", // BSC RPC URL
-  },
-  // {
-  //   id: "bsc",
-  //   name: "Binance Smart Chain (BSC)",
-  //   chainId: 97, // BSC mainnet
-  //   isBridge: true, // Replace with actual BSC bridge address
-  //   providerUrl: "https://data-seed-prebsc-1-s1.binance.org:8545", // BSC RPC URL
-  // },
+  window.location.hostname === "localhost"
+    ? {
+        id: "bsc",
+        name: "Binance Smart Chain (BSC)",
+        chainId: 31337, // BSC mainnet
+        isBridge: true, // Replace with actual BSC bridge address
+        providerUrl: "http://localhost:8545", // BSC RPC URL
+      }
+    : {
+        id: "bsc",
+        name: "Binance Smart Chain (BSC)",
+        chainId: 97, // BSC mainnet
+        isBridge: true, // Replace with actual BSC bridge address
+        providerUrl: "https://data-seed-prebsc-1-s1.binance.org:8545", // BSC RPC URL
+      },
   // {
   //   id: 'eth',
   //   name: 'Ethereum',

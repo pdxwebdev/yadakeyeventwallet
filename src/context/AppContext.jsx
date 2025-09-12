@@ -117,6 +117,7 @@ export const AppProvider = ({ children }) => {
       symbol,
       contractAddresses,
       isDeployed,
+      isOwner,
     ]
   );
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

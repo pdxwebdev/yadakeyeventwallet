@@ -1216,7 +1216,6 @@ class YadaBSC {
       "0x0000000000000000000000000000000000000000";
 
     try {
-      setLoading(true);
       notifications.show({
         title: "Key Rotation Required",
         message: `Please scan the QR code for the next key (rotation ${
@@ -1244,6 +1243,7 @@ class YadaBSC {
       }
 
       setIsScannerOpen(false);
+      setLoading(true);
       const { newPrivateKey, newParsedData } = await this.processScannedQR(
         appContext,
         qrData,
@@ -1604,15 +1604,22 @@ class YadaBSC {
   async checkDeployment(appContext) {
     const { setContractAddresses, setIsDeployed } = appContext;
     try {
-      const response = await axios.post(
-        "http://localhost:3001/check-deployment",
-        {}
-      );
-      const { deployed, addresses } = response.data;
-      if (deployed && addresses) {
-        setContractAddresses(addresses);
+      let deployedz, addressesz;
+      if (window.location.hostname === "localhost") {
+        const response = await axios.post(
+          "http://localhost:3001/check-deployment",
+          {}
+        );
+        deployedz = response.data.deployed;
+        addressesz = response.data.addresses;
+      } else {
+        deployedz = deployed;
+        addressesz = addresses;
+      }
+      if (deployedz && addressesz) {
+        setContractAddresses(addressesz);
         setIsDeployed(true);
-        return { status: true, addresses };
+        return { status: true, addressesz };
       } else {
         setIsDeployed(false);
         return { status: false };
@@ -2902,6 +2909,15 @@ class YadaBSC {
         confirmingKeyData,
         { value: balance - gasCost }
       );
+
+      const keyLogRegistry = new ethers.Contract(
+        contractAddresses.keyLogRegistryAddress,
+        KEYLOG_REGISTRY_ABI,
+        signer
+      );
+      const updatedLog = await keyLogRegistry.buildFromPublicKey(publicKey);
+      setLog(updatedLog);
+      await this.fetchTokenPairs(appContext);
 
       console.log("Token pairs added successfully!");
     } catch (error) {
