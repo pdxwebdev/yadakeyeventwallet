@@ -138,11 +138,6 @@ export async function main() {
       value: ethers.parseEther("1000.0"),
     });
     await tx.wait();
-    const tx2 = await hardhatAccount.sendTransaction({
-      to: "0x3d4b9f693d3564fcc86b6bb27ea25ad33c1b1f2a",
-      value: ethers.parseEther("1000.0"),
-    });
-    await tx2.wait();
     console.log(`Funded ${deployer.address} with 1000 ETH/BNB`);
   }
 

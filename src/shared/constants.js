@@ -12,8 +12,9 @@ export const WRAPPED_NATIVE_TOKEN_ABI = WrappedNativeTokenArtifact.abi;
 export const ERC20_ABI = MockERC20Artifact.abi;
 export const TOKEN_PAIR_WRAPPER_ABI = TokenPairWrapperArtifact.abi;
 
+export const DEPLOY_ENV = "testnet";
 export let localProvider =
-  window.location.hostname === "localhost"
+  DEPLOY_ENV === "localhost"
     ? new ethers.JsonRpcProvider("http://127.0.0.1:8545/", {
         chainId: 31337,
         name: "hardhat",
@@ -31,7 +32,7 @@ export const HARDHAT_MNEMONIC =
   "test test test test test test test test test test test junk";
 
 export const BLOCKCHAINS = [
-  window.location.hostname === "localhost"
+  DEPLOY_ENV === "localhost"
     ? {
         id: "bsc",
         name: "Binance Smart Chain (BSC)",
@@ -63,13 +64,13 @@ export const BLOCKCHAINS = [
 ];
 
 export const addresses = {
-  keyLogRegistryAddress: "0x044997d045B79646F8A5a01FE2DD2eEE8d4414b2",
-  bnbPriceFeedAddress: "0xA8C6A4791ef1a9DEE5369b545f3A0DdB793ae09C",
-  bridgeAddress: "0x6A74e17ABccc8fD428Ffc53D54D687BA79085ED6",
-  yadaERC20Address: "0x4535ad8254B68e9c6BD4Aa1566598Baa21E49172",
-  mockPepeAddress: "0xf3f79697D07330649410ccA61cCEB518522726C2",
-  mockPriceFeedAddress: "0xC4863aAFCe747cd4755393eBf3466C595c95b487",
+  keyLogRegistryAddress: "0x4b38324D201BeFA2F7919b22A11e2aA9Da953040",
+  bnbPriceFeedAddress: "0xC67B66a3F8039dEe3bCaE89807D7b3cCD0388142",
+  bridgeAddress: "0xa0Cd4D9C5cd2B5517c1fdB04d166163B2d0726CE",
+  yadaERC20Address: "0xe8258Ab1e50B19d7293873CB055E5E386284c683",
+  mockPepeAddress: "0x01250BF5499FA6F171C473Bf7D76BA7Ad53D8232",
+  mockPriceFeedAddress: "0xdE8C47154108A42bCC44f951631ca779574e731d",
   configured: true,
 };
 
-export const deployed = false;
+export const deployed = true;

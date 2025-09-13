@@ -28,6 +28,7 @@ import { capture } from "../shared/capture";
 import { BLOCKCHAINS, BRIDGE_ABI, localProvider } from "../shared/constants";
 import axios from "axios";
 import { ethers } from "ethers";
+import SendBalanceFrom from "../components/Wallet2/SendBalanceForm";
 
 const ITEMS_PER_PAGE = 5;
 
@@ -698,7 +699,10 @@ const Wallet2 = () => {
           >
             <WalletHeader styles={styles} />
             {selectedBlockchainObject.isBridge && isOwner && (
-              <TokenPairsForm appContext={appContext} webcamRef={webcamRef} />
+              <>
+                <TokenPairsForm appContext={appContext} webcamRef={webcamRef} />
+                <SendBalanceFrom />
+              </>
             )}
             {isInitialized && selectedBlockchainObject.isBridge && (
               <>

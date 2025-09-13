@@ -12,7 +12,7 @@ app.use(express.json());
 
 app.post("/deploy", async (req, res) => {
   try {
-    const { wif1, wif2, wif3, cprkh, ctprkh, clean } = req.body;
+    const { deployEnv, wif1, wif2, wif3, cprkh, ctprkh, clean } = req.body;
 
     // Validate inputs
     if (!wif1 || !wif2 || !wif3) {
@@ -29,7 +29,7 @@ app.post("/deploy", async (req, res) => {
     }
 
     // Prepare npm run deploy command with arguments
-    const args = ["run", "deploy"];
+    const args = ["run", deployEnv];
     const env = {
       ...process.env,
       WIF: wif1,

@@ -11,6 +11,7 @@ import {
   localProvider,
   addresses,
   deployed,
+  DEPLOY_ENV,
 } from "../shared/constants";
 import BridgeArtifact from "../utils/abis/Bridge.json";
 import KeyLogRegistryArtifact from "../utils/abis/KeyLogRegistry.json";
@@ -778,9 +779,9 @@ class YadaBSC {
         return { status: "revoked" };
       }
 
-      if (parsedData.rotation === uniqueLog.length) {
+      const lastLogEntry = uniqueLog[uniqueLog.length - 1];
+      if (parsedData.prerotatedKeyHash === lastLogEntry.prerotatedKeyHash) {
         if (uniqueLog.length > 0) {
-          const lastLogEntry = uniqueLog[uniqueLog.length - 1];
           const isValidContinuity =
             lastLogEntry.publicKeyHash === parsedData.prevPublicKeyHash &&
             lastLogEntry.prerotatedKeyHash === address &&
@@ -860,8 +861,9 @@ class YadaBSC {
   async fetchFeeEstimate(appContext) {
     const { setFeeEstimate, parsedData, contractAddresses, privateKey, log } =
       appContext;
-
-    if (log.length > parsedData.rotation) return;
+    if (log.length <= 0) return;
+    const lastLogEntry = log[log.length - 1];
+    if (lastLogEntry.prerotatedKeyHash === parsedData.prerotatedKeyHash) return;
     const signer = new ethers.Wallet(
       ethers.hexlify(privateKey.privateKey),
       localProvider
@@ -954,7 +956,9 @@ class YadaBSC {
       parsedData,
     } = appContext;
 
-    if (log.length > parsedData.rotation) return;
+    if (log.length <= 0) return;
+    const lastLogEntry = log[log.length - 1];
+    if (lastLogEntry.prerotatedKeyHash !== parsedData.prerotatedKeyHash) return;
     if (!privateKey || !selectedToken) return;
 
     const signer = new ethers.Wallet(
@@ -1605,7 +1609,7 @@ class YadaBSC {
     const { setContractAddresses, setIsDeployed } = appContext;
     try {
       let deployedz, addressesz;
-      if (window.location.hostname === "localhost") {
+      if (DEPLOY_ENV === "localhost") {
         const response = await axios.post(
           "http://localhost:3001/check-deployment",
           {}
@@ -1712,6 +1716,7 @@ class YadaBSC {
 
     try {
       const response = await axios.post("http://localhost:3001/deploy", {
+        deployEnv: DEPLOY_ENV === "localhost" ? "deploy" : "deploytest",
         wif1,
         wif2,
         wif3,
@@ -1834,23 +1839,14 @@ class YadaBSC {
     }
 
     qrResults.forEach((newParsedData, index) => {
-      // Validate rotation numbers are sequential (0, 1, 2)
-      if (newParsedData.rotation !== index) {
-        throw new Error(
-          `Invalid rotation at position ${index + 1}: expected ${index}, got ${
-            newParsedData.rotation
-          }`
-        );
-      }
-
       // First key should have no prevPublicKeyHash (or ZeroAddress)
-      if (index === 0) {
-        if (newParsedData.prevPublicKeyHash !== ethers.ZeroAddress) {
-          throw new Error(
-            `First key (rotation 0) must have prevPublicKeyHash as ZeroAddress, got ${newParsedData.prevPublicKeyHash}`
-          );
-        }
-      }
+      // if (newParsedData.rotation === 0) {
+      //   if (newParsedData.prevPublicKeyHash !== ethers.ZeroAddress) {
+      //     throw new Error(
+      //       `First key (rotation 0) must have prevPublicKeyHash as ZeroAddress, got ${newParsedData.prevPublicKeyHash}`
+      //     );
+      //   }
+      // }
 
       // Check continuity between consecutive keys
       if (index < qrResults.length - 1) {
