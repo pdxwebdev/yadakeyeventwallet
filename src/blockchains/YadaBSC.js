@@ -863,7 +863,7 @@ class YadaBSC {
       appContext;
     if (log.length <= 0) return;
     const lastLogEntry = log[log.length - 1];
-    if (lastLogEntry.prerotatedKeyHash === parsedData.prerotatedKeyHash) return;
+    if (lastLogEntry.publicKeyHash !== parsedData.prevPublicKeyHash) return;
     const signer = new ethers.Wallet(
       ethers.hexlify(privateKey.privateKey),
       localProvider
@@ -958,7 +958,7 @@ class YadaBSC {
 
     if (log.length <= 0) return;
     const lastLogEntry = log[log.length - 1];
-    if (lastLogEntry.prerotatedKeyHash !== parsedData.prerotatedKeyHash) return;
+    if (lastLogEntry.publicKeyHash !== parsedData.prevPublicKeyHash) return;
     if (!privateKey || !selectedToken) return;
 
     const signer = new ethers.Wallet(
