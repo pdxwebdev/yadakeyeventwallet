@@ -758,11 +758,10 @@ class YadaBSC {
         }
       }
 
-      setLog(uniqueLog);
-
       if (uniqueLog.length === 0) {
         return { status: "no_transaction" };
       }
+      setLog(uniqueLog);
 
       const latestEntry = uniqueLog[uniqueLog.length - 1];
       if (latestEntry.publicKeyHash === address) {
@@ -832,7 +831,6 @@ class YadaBSC {
         message: "Submitting wallet initialization transaction.",
         color: "yellow",
       });
-      await this.initializeKeyEventLog(appContext);
     } else if (
       initStatus.status === "invalid_continuity" ||
       initStatus.status === "invalid_rotation"
@@ -956,9 +954,6 @@ class YadaBSC {
       parsedData,
     } = appContext;
 
-    if (log.length <= 0) return;
-    const lastLogEntry = log[log.length - 1];
-    if (lastLogEntry.publicKeyHash !== parsedData.prevPublicKeyHash) return;
     if (!privateKey || !selectedToken) return;
 
     const signer = new ethers.Wallet(
@@ -976,7 +971,12 @@ class YadaBSC {
         BRIDGE_ABI,
         signer
       );
-      const wrappedToken = await bridge.originalToWrapped(selectedToken);
+      let wrappedToken;
+      try {
+        wrappedToken = await bridge.originalToWrapped(selectedToken);
+      } catch (err) {
+        wrappedToken = ethers.ZeroAddress;
+      }
       const hasWrapped = wrappedToken !== ethers.ZeroAddress;
 
       if (selectedToken === ethers.ZeroAddress) {
@@ -1190,6 +1190,7 @@ class YadaBSC {
       setLog,
       contractAddresses,
       tokenPairs,
+      sendWrapped,
     } = appContext;
 
     if (!ethers) {
@@ -1204,16 +1205,19 @@ class YadaBSC {
       );
     }
 
+    const token = tokenPairs.find(
+      (item) => item.original.toLowerCase() === selectedToken.toLowerCase()
+    );
+
     const signer = new ethers.Wallet(
       ethers.hexlify(privateKey.privateKey),
       localProvider
     );
     const address = await signer.getAddress();
-    const token = supportedTokens.find((t) => t.address === selectedToken);
     if (!token) {
       throw new Error("Selected token not supported");
     }
-    const tokenAddress = token.address;
+    const tokenAddress = sendWrapped ? token.wrapped : token.original;
     const tokenDecimals = token.decimals || 18;
     const isBNB =
       tokenAddress.toLowerCase() ===
@@ -2022,7 +2026,6 @@ class YadaBSC {
                 wrapped: pair.wrappedToken,
                 name,
                 symbol,
-                isCrossChain: pair.isCrossChain,
               };
             }
             return null;
@@ -2289,8 +2292,14 @@ class YadaBSC {
         }
       }
 
+      const tokenFee = await this.fetchTokenFee(
+        appContext,
+        selectedOriginal.original
+      );
+
       const txParams = [
         selectedOriginal.original,
+        tokenFee,
         {
           amount: amountToWrap,
           signature: unconfirmedSignature,
@@ -2622,8 +2631,14 @@ class YadaBSC {
         permits.push(remainingPermit);
       }
 
+      const tokenFee = await this.fetchTokenFee(
+        appContext,
+        selectedWrapped.original
+      );
+
       const txParams = [
         selectedWrapped.wrapped,
+        tokenFee,
         {
           amount: amountToUnwrap,
           signature: unconfirmedSignature,
@@ -2826,11 +2841,7 @@ class YadaBSC {
 
       const unconfirmedMessageHash = ethers.keccak256(
         ethers.AbiCoder.defaultAbiCoder().encode(
-          [
-            "tuple(address,string,string,bool,address,address)[]",
-            "address",
-            "uint256",
-          ],
+          ["tuple(address,string,string,address)[]", "address", "uint256"],
           [formattedTokenPairs, signer.address, nonce]
         )
       );
@@ -2840,11 +2851,7 @@ class YadaBSC {
 
       const confirmingMessageHash = ethers.keccak256(
         ethers.AbiCoder.defaultAbiCoder().encode(
-          [
-            "tuple(address,string,string,bool,address,address)[]",
-            "address",
-            "uint256",
-          ],
+          ["tuple(address,string,string,address)[]", "address", "uint256"],
           [formattedTokenPairs, signer.address, nonce + 1n]
         )
       );
@@ -3031,7 +3038,7 @@ class YadaBSC {
       // Generate confirming signature
       const confirmingMessage = ethers.AbiCoder.defaultAbiCoder().encode(
         ["address", "uint256", "address", "uint256"],
-        [wrappedToken, 0, recipientAddress, bridgeNonce + 1n]
+        [wrappedToken, 0, newParsedData.prerotatedKeyHash, bridgeNonce + 1n]
       );
       const confirmingMessageHash = ethers.keccak256(confirmingMessage);
       const confirmingSignature = await newSigner.signMessage(
@@ -3319,7 +3326,7 @@ class YadaBSC {
       // Generate confirming signature
       const confirmingMessage = ethers.AbiCoder.defaultAbiCoder().encode(
         ["address", "uint256", "address", "uint256"],
-        [wrappedToken, 0, accountAddress, bridgeNonce + 1n]
+        [wrappedToken, 0, newParsedData.prerotatedKeyHash, bridgeNonce + 1n]
       );
       const confirmingMessageHash = ethers.keccak256(confirmingMessage);
       const confirmingSignature = await newSigner.signMessage(
@@ -3479,6 +3486,21 @@ class YadaBSC {
       setLoading(false);
       setIsScannerOpen(false);
     }
+  }
+  async fetchTokenFee(appContext, tokenAddress) {
+    const { privateKey, contractAddresses, setLog } = appContext;
+    const signer = new ethers.Wallet(
+      ethers.hexlify(privateKey.privateKey),
+      localProvider
+    );
+    const domain =
+      DEPLOY_ENV === "localhost"
+        ? "http://localhost:8005"
+        : "https://yadacoin.io";
+    const url = `${domain}/token-price?token=${tokenAddress}`;
+    const response = await axios.get(url);
+
+    return response.data;
   }
 }
 

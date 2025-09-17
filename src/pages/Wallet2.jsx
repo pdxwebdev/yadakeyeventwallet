@@ -115,7 +115,7 @@ const Wallet2 = () => {
       } else if (tokenSymbol === "BNB") {
         wrappedTokenSymbol = "BNB";
       } else {
-        wrappedTokenSymbol = `Y${tokenSymbol}`;
+        wrappedTokenSymbol = null;
       }
     }
 
@@ -425,10 +425,10 @@ const Wallet2 = () => {
   }, [tokenPairs, contractAddresses]);
 
   useEffect(() => {
-    if (privateKey && isInitialized) {
+    if (privateKey) {
       walletManager.fetchBalance(appContext);
     }
-  }, [privateKey, isInitialized, log, walletManager, selectedToken]);
+  }, [privateKey, log, walletManager, selectedToken]);
 
   const handleDeployContracts = async () => {
     try {
@@ -704,9 +704,9 @@ const Wallet2 = () => {
                 <SendBalanceFrom />
               </>
             )}
+            <TokenSelector />
             {isInitialized && selectedBlockchainObject.isBridge && (
               <>
-                <TokenSelector />
                 <Group mt="md" align="flex-end">
                   <div style={{ flex: 1 }}>
                     <NumberInput
@@ -857,7 +857,7 @@ const Wallet2 = () => {
                     ? `Wallet is ready. You can send transactions with this key (rotation ${parsedData.rotation}).`
                     : `Please rotate to the next key (rotation ${log.length}) to sign transactions.`}
                 </Text>
-                {parsedData.rotation === log.length && (
+                {isInitialized && parsedData.rotation === log.length && (
                   <TransactionForm
                     recipients={recipients}
                     onAddRecipient={addRecipient}
@@ -868,6 +868,18 @@ const Wallet2 = () => {
                     styles={styles}
                     feeEstimate={feeEstimate}
                   />
+                )}
+                {!isInitialized > 0 && (
+                  <Button
+                    disabled={balance <= 0}
+                    onClick={() => {
+                      walletManager.initializeKeyEventLog(appContext);
+                    }}
+                  >
+                    {balance <= 0
+                      ? "Cannot initialize wallet (BNB balance is 0)"
+                      : "Initialize wallet"}
+                  </Button>
                 )}
                 {combinedHistory.length > 0 && (
                   <TransactionHistory

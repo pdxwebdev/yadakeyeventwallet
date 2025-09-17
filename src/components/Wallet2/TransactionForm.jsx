@@ -1,5 +1,5 @@
 // src/components/Wallet2/TransactionForm.js
-import { Button, TextInput, Group, Text } from "@mantine/core";
+import { Button, TextInput, Group, Text, Slider, Switch } from "@mantine/core";
 import { useAppContext } from "../../context/AppContext";
 
 const TransactionForm = ({
@@ -12,13 +12,28 @@ const TransactionForm = ({
   styles,
   feeEstimate,
 }) => {
-  const { selectedToken, supportedTokens } = useAppContext();
-
+  const {
+    selectedToken,
+    supportedTokens,
+    tokenPairs,
+    setSendWrapped,
+    sendWrapped,
+  } = useAppContext();
+  const pair = tokenPairs.find(
+    (p) => p.original.toLowerCase() === selectedToken.toLowerCase()
+  );
   return (
     <div style={styles.form}>
-      <Text size="lg" weight={500} mb="md">
-        Send Transaction
-      </Text>
+      <Group mb="sm">
+        <Text size="lg" weight={500} mb="md">
+          Send Transaction
+        </Text>
+        <Switch
+          label="Send secure"
+          checked={sendWrapped}
+          onChange={(event) => setSendWrapped(event.currentTarget.checked)}
+        />
+      </Group>
       {recipients.map((recipient, index) => (
         <Group key={index} mb="sm">
           <TextInput

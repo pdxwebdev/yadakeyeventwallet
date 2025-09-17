@@ -21,7 +21,6 @@ const TokenPairsForm = ({ appContext, webcamRef }) => {
           tokenSymbol: "",
           isWrapped: false,
           wrappedAddress: ethers.ZeroAddress,
-          priceFeedAddress: ethers.ZeroAddress,
         },
       ],
     },
@@ -43,7 +42,6 @@ const TokenPairsForm = ({ appContext, webcamRef }) => {
       tokenSymbol: "",
       isWrapped: false,
       wrappedAddress: ethers.ZeroAddress,
-      priceFeedAddress: ethers.ZeroAddress,
     });
   };
 
@@ -56,9 +54,7 @@ const TokenPairsForm = ({ appContext, webcamRef }) => {
       pair.tokenAddress,
       pair.tokenName,
       pair.tokenSymbol,
-      pair.isWrapped,
       ethers.ZeroAddress,
-      pair.priceFeedAddress,
     ]);
 
     setTokenPairs(formattedTokenPairs);
@@ -88,17 +84,6 @@ const TokenPairsForm = ({ appContext, webcamRef }) => {
               label="Token Symbol"
               placeholder="Symbol"
               {...form.getInputProps(`tokenPairs.${index}.tokenSymbol`)}
-            />
-            <Switch
-              label="Is Wrapped"
-              {...form.getInputProps(`tokenPairs.${index}.isWrapped`, {
-                type: "checkbox",
-              })}
-            />
-            <TextInput
-              label="Price Feed Address"
-              placeholder="0x..."
-              {...form.getInputProps(`tokenPairs.${index}.priceFeedAddress`)}
             />
             <Button
               color="red"

@@ -12,7 +12,7 @@ export const WRAPPED_NATIVE_TOKEN_ABI = WrappedNativeTokenArtifact.abi;
 export const ERC20_ABI = MockERC20Artifact.abi;
 export const TOKEN_PAIR_WRAPPER_ABI = TokenPairWrapperArtifact.abi;
 
-export const DEPLOY_ENV = "testnet";
+export const DEPLOY_ENV = "localhost";
 export let localProvider =
   DEPLOY_ENV === "localhost"
     ? new ethers.JsonRpcProvider("http://127.0.0.1:8545/", {

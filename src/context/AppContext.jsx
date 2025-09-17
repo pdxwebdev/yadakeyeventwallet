@@ -1,4 +1,5 @@
 // src/context/AppContext.js
+import { ethers } from "ethers";
 import { createContext, useContext, useMemo, useState } from "react";
 
 const AppContext = createContext();
@@ -29,10 +30,11 @@ export const AppProvider = ({ children }) => {
   const [tokenPairs, setTokenPairs] = useState([]);
   const [selectedOriginal, setSelectedOriginal] = useState("");
   const [supportedTokens, setSupportedTokens] = useState([]); // New: List of supported tokens
-  const [selectedToken, setSelectedToken] = useState(null); // New: Selected token
+  const [selectedToken, setSelectedToken] = useState(ethers.ZeroAddress); // New: Selected token
   const [symbol, setSymbol] = useState(""); // New: Selected token
   const [contractAddresses, setContractAddresses] = useState({});
   const [isDeployed, setIsDeployed] = useState(false); // New state for deployment status
+  const [sendWrapped, setSendWrapped] = useState(false);
   const value = useMemo(
     () => ({
       selectedBlockchain,
@@ -89,6 +91,8 @@ export const AppProvider = ({ children }) => {
       setContractAddresses,
       isDeployed,
       setIsDeployed,
+      sendWrapped,
+      setSendWrapped,
     }),
     [
       selectedBlockchain,
@@ -118,6 +122,7 @@ export const AppProvider = ({ children }) => {
       contractAddresses,
       isDeployed,
       isOwner,
+      sendWrapped,
     ]
   );
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

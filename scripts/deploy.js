@@ -163,30 +163,6 @@ export async function main() {
   }
   const keyLogRegistryAddress = deployments.keyLogRegistryAddress;
 
-  // Deploy Mock BNB/USD Price Feed
-  const PriceFeedAggregatorV3 = await ethers.getContractFactory(
-    "PriceFeedAggregatorV3",
-    deployer
-  );
-  let bnbPriceFeed;
-  if (deployments.bnbPriceFeedAddress && !clean) {
-    bnbPriceFeed = await PriceFeedAggregatorV3.attach(
-      deployments.bnbPriceFeedAddress
-    );
-    console.log(
-      "Using existing BNB/USD Price Feed:",
-      deployments.bnbPriceFeedAddress
-    );
-  } else {
-    bnbPriceFeed = await PriceFeedAggregatorV3.deploy(
-      ethers.parseUnits("500.0", 8)
-    ); // Mock BNB price: $500, 8 decimals
-    await bnbPriceFeed.waitForDeployment();
-    deployments.bnbPriceFeedAddress = await bnbPriceFeed.getAddress();
-    console.log("BNB/USD Price Feed:", deployments.bnbPriceFeedAddress);
-  }
-  const bnbPriceFeedAddress = deployments.bnbPriceFeedAddress;
-
   // Deploy Bridge
   const Bridge = await ethers.getContractFactory("Bridge", deployer);
   let bridge;
@@ -198,15 +174,11 @@ export async function main() {
     );
     console.log("Using existing Bridge proxy:", deployments.bridgeAddress);
   } else {
-    bridge = await upgrades.deployProxy(
-      Bridge,
-      [keyLogRegistryAddress, bnbPriceFeedAddress], // Pass _keyLogRegistry and _ethPriceFeed
-      {
-        initializer: "initialize",
-        kind: "uups",
-        deployer: deployer,
-      }
-    );
+    bridge = await upgrades.deployProxy(Bridge, [keyLogRegistryAddress], {
+      initializer: "initialize",
+      kind: "uups",
+      deployer: deployer,
+    });
     await bridge.waitForDeployment();
     deployments.bridgeAddress = await bridge.getAddress();
     console.log("Bridge deployed to:", deployments.bridgeAddress);
@@ -219,6 +191,13 @@ export async function main() {
     await keyLogRegistry.connect(deployer).setAuthorizedCaller(bridgeAddress);
     console.log("Set KeyLogRegistry authorized caller to:", bridgeAddress);
   }
+  await bridge
+    .connect(deployer)
+    .setFeeSigner(
+      network.name === "localhost"
+        ? "0x903DE6eD93C63Ac5bc51e4dAB50ED2D36e2811BA"
+        : ""
+    );
   console.log("Registering initial key log entry...");
   console.log("Deployer balance:", ethers.formatEther(balance));
   const gasCost = ethers.parseEther("0.1");
@@ -240,7 +219,6 @@ export async function main() {
     `Initial key log entry registered with publicKeyHash: ${keyData.currentSigner.address}, outputAddress: ${keyData.nextSigner.address}`
   );
 
-  // Deploy Mock Tokens and Price Feed
   const MockERC20 = await ethers.getContractFactory("MockERC20", nextDeployer);
   let yadaERC20;
   if (deployments.yadaERC20Address && !clean) {
@@ -278,25 +256,6 @@ export async function main() {
     console.log("Mock PEPE:", deployments.mockPepeAddress);
   }
   const mockPepeAddress = deployments.mockPepeAddress;
-
-  let priceFeed;
-  if (deployments.mockPriceFeedAddress && !clean) {
-    priceFeed = await PriceFeedAggregatorV3.attach(
-      deployments.mockPriceFeedAddress
-    );
-    console.log(
-      "Using existing Price Feed (PEPE/USD):",
-      deployments.mockPriceFeedAddress
-    );
-  } else {
-    priceFeed = await PriceFeedAggregatorV3.deploy(
-      ethers.parseUnits("100000.0", 8)
-    );
-    await priceFeed.waitForDeployment();
-    deployments.mockPriceFeedAddress = await priceFeed.getAddress();
-    console.log("Price Feed (PEPE/USD):", deployments.mockPriceFeedAddress);
-  }
-  const priceFeedAddress = deployments.mockPriceFeedAddress;
 
   async function generatePermit(
     tokenAddress,
@@ -369,34 +328,10 @@ export async function main() {
   // Configure token pairs via Bridge
   if (!deployments.configured || clean) {
     const tokenPairs = [
-      [
-        yadaERC20Address,
-        "Wrapped YadaCoin",
-        "WYDA",
-        true,
-        ethers.ZeroAddress,
-        ethers.ZeroAddress,
-      ],
-      [
-        mockPepeAddress,
-        "PEPE",
-        "PEPE",
-        false,
-        ethers.ZeroAddress,
-        priceFeedAddress,
-      ],
-      [
-        NATIVE_ASSET_ADDRESS,
-        "BNB",
-        "BNB",
-        false,
-        ethers.ZeroAddress,
-        bnbPriceFeedAddress,
-      ],
+      [yadaERC20Address, "Wrapped YadaCoin", "WYDA", true, ethers.ZeroAddress],
+      [mockPepeAddress, "PEPE", "PEPE", false, ethers.ZeroAddress],
+      [NATIVE_ASSET_ADDRESS, "BNB", "BNB", false, ethers.ZeroAddress],
     ];
-
-    const nonce = await bridge.nonces(nextDeployer.address);
-    console.log("Nonce:", nonce.toString());
 
     const supportedTokens = [
       yadaERC20Address,
@@ -468,14 +403,14 @@ export async function main() {
     if (permitbnb) {
       permits.push(permitbnb);
     }
+
+    const nonce = await bridge.nonces(nextDeployer.address);
+    console.log("Nonce:", nonce.toString());
+
     const unconfirmedMessageHash = ethers.keccak256(
       ethers.AbiCoder.defaultAbiCoder().encode(
-        [
-          "tuple(address,string,string,bool,address,address)[]",
-          "address",
-          "uint256",
-        ],
-        [tokenPairs, keyData.nextSigner.address, nonce]
+        ["address", "uint256", "address", "uint256"],
+        [ethers.ZeroAddress, 0, keyData.nextNextSigner.address, nonce]
       )
     );
     const unconfirmedSignature = await nextDeployer.signMessage(
@@ -484,12 +419,8 @@ export async function main() {
 
     const confirmingMessageHash = ethers.keccak256(
       ethers.AbiCoder.defaultAbiCoder().encode(
-        [
-          "tuple(address,string,string,bool,address,address)[]",
-          "address",
-          "uint256",
-        ],
-        [tokenPairs, keyData.nextSigner.address, nonce + 1n]
+        ["address", "uint256", "address", "uint256"],
+        [ethers.ZeroAddress, 0, confirmingPrerotatedKeyHash, nonce + 1n]
       )
     );
     const confirmingSignature = await nextNextDeployer.signMessage(

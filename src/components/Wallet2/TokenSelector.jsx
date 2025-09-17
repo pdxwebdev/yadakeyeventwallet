@@ -49,6 +49,7 @@ const TokenSelector = () => {
         placeholder={
           supportedTokens?.length > 0 ? "Select a token" : "No tokens available"
         }
+        defaultValue={ethers.ZeroAddress}
         disabled={!supportedTokens || supportedTokens.length === 0}
         style={{ width: 400 }}
       />

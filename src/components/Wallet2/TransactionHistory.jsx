@@ -12,6 +12,7 @@ const TransactionHistory = ({
   const token = supportedTokens.find((entry) => {
     return entry.address === selectedToken;
   });
+  if (!token) return <></>;
   return (
     <Card shadow="xs" padding="md" mt="lg" styles={styles.nestedCard}>
       <Title order={3} mb="md">
