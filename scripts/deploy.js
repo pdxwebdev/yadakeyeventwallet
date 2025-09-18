@@ -196,7 +196,7 @@ export async function main() {
     .setFeeSigner(
       network.name === "localhost"
         ? "0x903DE6eD93C63Ac5bc51e4dAB50ED2D36e2811BA"
-        : ""
+        : "0x37B2b1400292Ee6Ee59a4550704D46311FBDc569"
     );
   console.log("Registering initial key log entry...");
   console.log("Deployer balance:", ethers.formatEther(balance));

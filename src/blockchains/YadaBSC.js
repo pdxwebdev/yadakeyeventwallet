@@ -1754,6 +1754,55 @@ class YadaBSC {
     }
   }
 
+  // Deploy function to send POST request with three WIFs
+  async upgrade(appContext) {
+    const {
+      contractAddresses,
+      setIsDeployed,
+      wif,
+      privateKey,
+      setContractAddresses,
+    } = appContext;
+
+    try {
+      const signer = new ethers.Wallet(
+        ethers.hexlify(privateKey.privateKey),
+        localProvider
+      );
+      console.log(signer.address);
+      const response = await axios.post("http://localhost:3001/upgrade", {
+        upgradeEnv: DEPLOY_ENV === "localhost" ? "upgrade" : "upgradeTest",
+        proxyAddress: contractAddresses.bridgeAddress,
+        wif: wif,
+      });
+      const { status, addresses, error } = response.data;
+
+      if (status && addresses) {
+        setContractAddresses({
+          ...contractAddresses,
+          bridgeAddress: contractAddresses.bridgeAddress,
+        });
+        setIsDeployed(true);
+        notifications.show({
+          title: "Upgrade Successful",
+          message: "Contracts upgraded successfully.",
+          color: "green",
+        });
+        return { status: true, addresses };
+      } else {
+        throw new Error(error || "Failed to deploy contracts");
+      }
+    } catch (error) {
+      console.error("Deployment error:", error);
+      notifications.show({
+        title: "Error",
+        message: error.message || "Failed to deploy contracts",
+        color: "red",
+      });
+      return { status: false, error: error.message };
+    }
+  }
+
   // Processes QR code in YadaCoin format: wifString|prerotatedKeyHash|twicePrerotatedKeyHash|prevPublicKeyHash|rotation
   async processScannedQR(
     appContext,

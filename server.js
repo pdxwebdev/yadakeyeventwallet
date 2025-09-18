@@ -134,6 +134,67 @@ app.post("/check-deployment", async (req, res) => {
   }
 });
 
+app.post("/upgrade", async (req, res) => {
+  try {
+    const { upgradeEnv, proxyAddress, wif } = req.body;
+
+    // Prepare npm run deploy command with arguments
+    const args = ["run", upgradeEnv];
+    const env = {
+      ...process.env,
+      PROXY_ADDRESS: proxyAddress,
+      WIF: wif,
+    };
+    console.log(env);
+
+    // Spawn npm process
+    const npmProcess = spawnSync("npm", args, {
+      env,
+      shell: true,
+      cwd: process.cwd(),
+    });
+
+    const stdout = npmProcess.stdout?.toString().trim();
+    const stderr = npmProcess.stderr?.toString().trim();
+    const status = npmProcess.status;
+    let jsonObj = {};
+
+    if (status !== 0) {
+      console.error("NPM command failed:", stderr);
+      return res
+        .status(500)
+        .json({ status: false, error: stderr || "NPM command failed" });
+    }
+
+    console.log("NPM command succeeded:", stdout);
+    // Extract the JSON-like object using a regex
+    const match = stdout.match(/\{[\s\S]*?\}/);
+    if (match) {
+      try {
+        // Use Node's VM to safely evaluate the object-like string
+        jsonObj = vm.runInNewContext(`(${match[0]})`);
+        console.log("Extracted JSON:", jsonObj);
+      } catch (e) {
+        console.error("Failed to parse output:", e);
+        return res
+          .status(500)
+          .json({ status: false, error: "Failed to parse deployment output" });
+      }
+    } else {
+      console.error("No JSON found in output");
+      return res
+        .status(500)
+        .json({ status: false, error: "No JSON found in deployment output" });
+    }
+
+    // Return the JSON response
+    res.json({ status: true, addresses: jsonObj });
+  } catch (err) {
+    console.error("Endpoint error:", err);
+    res.status(500).json({ status: false, error: err.message });
+  }
+});
+
 // Increase server timeout to handle long-running deployments
 const server = app.listen(port, () => {
   console.log(`Deploy server running at http://localhost:${port}`);

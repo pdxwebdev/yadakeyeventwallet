@@ -572,6 +572,16 @@ const Wallet2 = () => {
     }
   };
 
+  const handleUpgradeContracts = async () => {
+    await walletManager.upgrade(appContext);
+
+    notifications.show({
+      title: "Upgrade Successful",
+      message: "Contracts upgraded.",
+      color: "green",
+    });
+  };
+
   const handleRotateKey = useCallback(
     async (appContext) => {
       try {
@@ -836,6 +846,11 @@ const Wallet2 = () => {
               isDeployed={isDeployed}
               styles={styles}
             />
+            {isOwner && (
+              <Button onClick={handleUpgradeContracts}>
+                Upgrade contracts
+              </Button>
+            )}
             {privateKey && isDeployed && log.length === parsedData.rotation && (
               <>
                 <WalletBalance

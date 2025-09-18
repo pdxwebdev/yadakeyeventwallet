@@ -64,13 +64,11 @@ export const BLOCKCHAINS = [
 ];
 
 export const addresses = {
-  keyLogRegistryAddress: "0x4b38324D201BeFA2F7919b22A11e2aA9Da953040",
-  bnbPriceFeedAddress: "0xC67B66a3F8039dEe3bCaE89807D7b3cCD0388142",
-  bridgeAddress: "0xa0Cd4D9C5cd2B5517c1fdB04d166163B2d0726CE",
-  yadaERC20Address: "0xe8258Ab1e50B19d7293873CB055E5E386284c683",
-  mockPepeAddress: "0x01250BF5499FA6F171C473Bf7D76BA7Ad53D8232",
-  mockPriceFeedAddress: "0xdE8C47154108A42bCC44f951631ca779574e731d",
+  keyLogRegistryAddress: "0x61EcAe6576b33636F268bfaA07d78875E50545F7",
+  bridgeAddress: "0x9D4EC8a45bfC4c1884a36a0acC953d1D7958014A",
+  yadaERC20Address: "0xc80669516Fbe4B042B44C249DE3D379Cc0D73de1",
+  mockPepeAddress: "0x025E6B35096B3C74c98d65f8dD7F6bEde913fc3F",
   configured: true,
 };
 
-export const deployed = true;
+export const deployed = false;
