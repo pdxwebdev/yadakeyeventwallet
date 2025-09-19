@@ -90,8 +90,8 @@ const Wallet2 = () => {
   const [tokenPairsFetched, setTokenPairsFetched] = useState(false);
 
   const walletManager = useMemo(
-    () => walletManagerFactory(selectedBlockchain, webcamRef),
-    [selectedBlockchain, webcamRef]
+    () => walletManagerFactory(selectedBlockchain),
+    [selectedBlockchain]
   );
 
   // Derive token symbols for the selected token
@@ -595,7 +595,7 @@ const Wallet2 = () => {
         });
       }
     },
-    [setIsOwner]
+    [setIsOwner, walletManager]
   );
 
   const addRecipient = () => {

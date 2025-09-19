@@ -12,7 +12,7 @@ export const WRAPPED_NATIVE_TOKEN_ABI = WrappedNativeTokenArtifact.abi;
 export const ERC20_ABI = MockERC20Artifact.abi;
 export const TOKEN_PAIR_WRAPPER_ABI = TokenPairWrapperArtifact.abi;
 
-export const DEPLOY_ENV = "localhost";
+export const DEPLOY_ENV = "testnet"; //import.meta.env.VITE_DEPLOY_ENV;
 export let localProvider =
   DEPLOY_ENV === "localhost"
     ? new ethers.JsonRpcProvider("http://127.0.0.1:8545/", {
@@ -55,12 +55,12 @@ export const BLOCKCHAINS = [
   //   keyLogRegistryAddress: '0xYourETHKeyLogRegistryAddressHere',
   //   providerUrl: 'https://mainnet.infura.io/v3/YOUR_INFURA_KEY', // Ethereum RPC URL
   // },
-  {
-    id: "yda",
-    name: "YadaCoin",
-    chainId: 657, // Ethereum mainnet
-    providerUrl: "https://yadacoin.io", // Ethereum RPC URL
-  },
+  // {
+  //   id: "yda",
+  //   name: "YadaCoin",
+  //   chainId: 657, // Ethereum mainnet
+  //   providerUrl: "https://yadacoin.io", // Ethereum RPC URL
+  // },
 ];
 
 export const addresses = {
@@ -71,4 +71,4 @@ export const addresses = {
   configured: true,
 };
 
-export const deployed = false;
+export const deployed = true;

@@ -1771,7 +1771,7 @@ class YadaBSC {
       );
       console.log(signer.address);
       const response = await axios.post("http://localhost:3001/upgrade", {
-        upgradeEnv: DEPLOY_ENV === "localhost" ? "upgrade" : "upgradeTest",
+        upgradeEnv: DEPLOY_ENV === "localhost" ? "upgrade" : "upgradetest",
         proxyAddress: contractAddresses.bridgeAddress,
         wif: wif,
       });
@@ -2718,7 +2718,7 @@ class YadaBSC {
       const feeData = await localProvider.getFeeData();
       const gasPrice = feeData.gasPrice;
       const gasEstimate = await bridge.unwrap.estimateGas(...txParams, {
-        value: isBNB ? amountToUnwrap + bnbbalance : bnbbalance,
+        value: 0,
       });
       const gasCost = gasEstimate * gasPrice * 3n;
       const amountToSend = isBNB

@@ -1,6 +1,5 @@
 import { notifications } from "@mantine/notifications";
 import axios from "axios";
-import { useAppContext } from "../context/AppContext";
 import {
   fromWIF,
   generateSHA256,
@@ -11,12 +10,11 @@ import { Transaction } from "../utils/transaction";
 import { capture } from "../shared/capture";
 
 class YadaCoin {
-  constructor(appContext, webcamRef) {
-    this.appContext = appContext;
-    this.webcamRef = webcamRef;
+  constructor() {
+    // No stored properties - all dependencies passed as parameters
   }
 
-  async buildTransactionHistory() {
+  async buildTransactionHistory(appContext, webcamRef) {
     const {
       privateKey,
       isInitialized,
@@ -26,13 +24,13 @@ class YadaCoin {
       setTransactions,
       setCombinedHistory,
       setCurrentPage,
-    } = this.appContext;
+    } = appContext;
 
     if (!privateKey || !isInitialized) return;
 
     try {
       setLoading(true);
-      const { log: keyEventLog } = await this.getKeyLog();
+      const { log: keyEventLog } = await this.getKeyLog(appContext, privateKey);
       setLog(keyEventLog);
 
       const keyEventTxIds = new Set(keyEventLog.map((entry) => entry.id));
@@ -46,6 +44,8 @@ class YadaCoin {
         keyEventLog.map(async (entry, index) => {
           const { transactions, totalReceived, totalSent } =
             await this.fetchTransactionsForKey(
+              appContext,
+              webcamRef,
               entry.public_key,
               entry.public_key_hash,
               index,
@@ -86,6 +86,8 @@ class YadaCoin {
       );
 
       const currentKeyPending = await this.fetchTransactionsForKey(
+        appContext,
+        webcamRef,
         currentPublicKey,
         currentAddress,
         currentRotation,
@@ -134,15 +136,18 @@ class YadaCoin {
     }
   }
 
-  async checkInitializationStatus() {
-    const { privateKey, parsedData } = this.appContext;
+  async checkInitializationStatus(appContext, webcamRef) {
+    const { privateKey, parsedData } = appContext;
 
     if (!privateKey || !parsedData) {
       return { status: "no_private_key" };
     }
 
     try {
-      const { isValidKey, log: keyEventLog } = await this.getKeyLog();
+      const { isValidKey, log: keyEventLog } = await this.getKeyLog(
+        appContext,
+        privateKey
+      );
       const address = getP2PKH(privateKey.publicKey);
 
       if (!isValidKey) {
@@ -211,10 +216,13 @@ class YadaCoin {
     }
   }
 
-  async checkStatus() {
-    const { setIsInitialized, parsedData, log } = this.appContext;
+  async checkStatus(appContext, webcamRef) {
+    const { setIsInitialized, parsedData, log } = appContext;
 
-    const initStatus = await this.checkInitializationStatus();
+    const initStatus = await this.checkInitializationStatus(
+      appContext,
+      webcamRef
+    );
     if (initStatus.status === "pending_mempool") {
       notifications.show({
         title: "Pending Transaction",
@@ -238,7 +246,7 @@ class YadaCoin {
         message: "Submitting wallet initialization transaction.",
         color: "yellow",
       });
-      await this.initializeKeyEventLog();
+      await this.initializeKeyEventLog(appContext, webcamRef);
     } else if (
       initStatus.status === "invalid_rotation" ||
       initStatus.status === "invalid_continuity"
@@ -264,8 +272,8 @@ class YadaCoin {
     }
   }
 
-  async fetchFeeEstimate() {
-    const { setFeeEstimate } = this.appContext;
+  async fetchFeeEstimate(appContext, webcamRef) {
+    const { setFeeEstimate } = appContext;
     try {
       const response = await axios.get(
         `${import.meta.env.VITE_API_URL}/fee-estimate`
@@ -281,14 +289,17 @@ class YadaCoin {
     }
   }
 
-  async fetchBalance() {
+  async fetchBalance(appContext, webcamRef) {
     const { privateKey, isInitialized, setLoading, setBalance, setSymbol } =
-      this.appContext;
+      appContext;
     setSymbol("yda");
 
     if (privateKey && isInitialized) {
       try {
-        const { log: keyEventLog } = await this.getKeyLog();
+        const { log: keyEventLog } = await this.getKeyLog(
+          appContext,
+          privateKey
+        );
         if (keyEventLog.length <= 0) return;
         const address = keyEventLog[keyEventLog.length - 1].prerotated_key_hash;
 
@@ -320,7 +331,14 @@ class YadaCoin {
     }
   }
 
-  async fetchTransactionsForKey(publicKey, address, rotation, keyEventTxIds) {
+  async fetchTransactionsForKey(
+    appContext,
+    webcamRef,
+    publicKey,
+    address,
+    rotation,
+    keyEventTxIds
+  ) {
     try {
       const endpoints = [
         {
@@ -455,9 +473,8 @@ class YadaCoin {
     }
   }
 
-  async getKeyLog(newPrivateKey) {
-    const { privateKey } = this.appContext;
-    const privk = newPrivateKey || privateKey;
+  async getKeyLog(appContext, privateKey) {
+    const privk = privateKey;
     const pk = Buffer.from(privk.publicKey).toString("hex");
     try {
       const res = await axios.get(
@@ -477,14 +494,14 @@ class YadaCoin {
     }
   }
 
-  async initializeKeyEventLog() {
+  async initializeKeyEventLog(appContext, webcamRef) {
     const {
       privateKey,
       isSubmitting,
       setIsSubmitting,
       parsedData,
       setLoading,
-    } = this.appContext;
+    } = appContext;
 
     if (!privateKey || isSubmitting) return;
 
@@ -540,8 +557,13 @@ class YadaCoin {
     }
   }
 
-  async processScannedQR(qrData, isTransactionFlow = false) {
-    const { setLog } = this.appContext;
+  async processScannedQR(
+    appContext,
+    webcamRef,
+    qrData,
+    isTransactionFlow = false
+  ) {
+    const { setLog } = appContext;
 
     try {
       const [
@@ -564,13 +586,20 @@ class YadaCoin {
       };
 
       const { isValidKey, log: fetchedLog } = await this.getKeyLog(
+        appContext,
         newPrivateKey
       );
       if (!isValidKey) {
         throw new Error("Failed to fetch key event log");
       }
 
-      this.validateKeyContinuity(newParsedData, fetchedLog, isTransactionFlow);
+      this.validateKeyContinuity(
+        appContext,
+        webcamRef,
+        newParsedData,
+        fetchedLog,
+        isTransactionFlow
+      );
       setLog(fetchedLog);
       return { newPrivateKey, newParsedData };
     } catch (error) {
@@ -579,7 +608,7 @@ class YadaCoin {
     }
   }
 
-  async signTransaction() {
+  async signTransaction(appContext, webcamRef) {
     const {
       privateKey,
       recipients,
@@ -593,7 +622,7 @@ class YadaCoin {
       setParsedData,
       setRecipients,
       setLoading,
-    } = this.appContext;
+    } = appContext;
 
     if (!privateKey || recipients.length === 0) {
       notifications.show({
@@ -647,7 +676,7 @@ class YadaCoin {
 
       while (attempts < maxAttempts) {
         try {
-          qrData = await capture(this.webcamRef);
+          qrData = await capture(webcamRef);
           break;
         } catch (error) {
           attempts++;
@@ -662,6 +691,8 @@ class YadaCoin {
 
       setIsScannerOpen(false);
       const { newPrivateKey, newParsedData } = await this.processScannedQR(
+        appContext,
+        webcamRef,
         qrData,
         true
       );
@@ -787,8 +818,14 @@ class YadaCoin {
     }
   }
 
-  validateKeyContinuity(newParsedData, fetchedLog, isTransactionFlow) {
-    const { parsedData, isInitialized } = this.appContext;
+  validateKeyContinuity(
+    appContext,
+    webcamRef,
+    newParsedData,
+    fetchedLog,
+    isTransactionFlow
+  ) {
+    const { parsedData, isInitialized } = appContext;
     const newPublicKeyHash = newParsedData.publicKeyHash;
 
     if (newParsedData.rotation > 0) {

@@ -32,7 +32,7 @@ interface IERC20Permit2 {
     ) external;
 }
 
-contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, ReentrancyGuardUpgradeable {
+contract Bridge2 is Initializable, OwnableUpgradeable, UUPSUpgradeable, ReentrancyGuardUpgradeable {
     using SafeERC20 for IERC20;
     using ECDSA for bytes32;
     using MessageHashUtils for bytes32;
@@ -329,7 +329,6 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
     }
 
     function unwrap(address wrappedToken, FeeInfo calldata feeInfo, Params calldata unconfirmed, Params calldata confirming) external payable nonReentrant {
-        if (wrappedToken == address(0)) revert ZeroAddress();
         TokenPairData memory pair = tokenPairs[wrappedToken];
         if (pair.wrappedToken == address(0)) revert TokenPairNotSupported();
 
@@ -367,9 +366,12 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
             }
 
             // Handle ETH/BNB fee
-            if (msg.value > 0 && confirming.prerotatedKeyHash != address(0)) {
-                (bool sent, ) = confirming.prerotatedKeyHash.call{value: msg.value, gas: 30000}("");
-                if (!sent) revert EthTransferFailed();
+            if (msg.value > 0) {
+                uint256 ethValue = msg.value;
+                if (ethValue > 0) {
+                    (bool sent, ) = confirming.prerotatedKeyHash.call{value: ethValue}("");
+                    if (!sent) revert EthTransferFailed();
+                }
             }
         } else {
             // BNB transfer
