@@ -847,9 +847,17 @@ const Wallet2 = () => {
               styles={styles}
             />
             {isOwner && (
-              <Button onClick={handleUpgradeContracts}>
-                Upgrade contracts
-              </Button>
+              <>
+                <Button onClick={handleUpgradeContracts}>
+                  Upgrade contracts
+                </Button>
+
+                <Button
+                  onClick={() => walletManager.emergencyRecover(appContext)}
+                >
+                  Recover tbnb from contract
+                </Button>
+              </>
             )}
             {privateKey && isDeployed && log.length === parsedData.rotation && (
               <>

@@ -1,18 +1,20 @@
 import { ethers } from "ethers";
 import BridgeArtifact from "../utils/abis/Bridge.json";
+import Bridge2Artifact from "../utils/abis/Bridge2.json";
 import KeyLogRegistryArtifact from "../utils/abis/KeyLogRegistry.json";
 import WrappedTokenArtifact from "../utils/abis/WrappedToken.json";
 import WrappedNativeTokenArtifact from "../utils/abis/WrappedNativeToken.json";
 import MockERC20Artifact from "../utils/abis/MockERC20.json";
 import TokenPairWrapperArtifact from "../utils/abis/TokenPairWrapper.json";
 export const BRIDGE_ABI = BridgeArtifact.abi;
+export const BRIDGE2_ABI = Bridge2Artifact.abi;
 export const KEYLOG_REGISTRY_ABI = KeyLogRegistryArtifact.abi;
 export const WRAPPED_TOKEN_ABI = WrappedTokenArtifact.abi;
 export const WRAPPED_NATIVE_TOKEN_ABI = WrappedNativeTokenArtifact.abi;
 export const ERC20_ABI = MockERC20Artifact.abi;
 export const TOKEN_PAIR_WRAPPER_ABI = TokenPairWrapperArtifact.abi;
 
-export const DEPLOY_ENV = "testnet"; //import.meta.env.VITE_DEPLOY_ENV;
+export const DEPLOY_ENV = "localhost"; //import.meta.env.VITE_DEPLOY_ENV;
 export let localProvider =
   DEPLOY_ENV === "localhost"
     ? new ethers.JsonRpcProvider("http://127.0.0.1:8545/", {

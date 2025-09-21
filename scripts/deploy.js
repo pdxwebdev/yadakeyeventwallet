@@ -202,19 +202,66 @@ export async function main() {
   console.log("Deployer balance:", ethers.formatEther(balance));
   const gasCost = ethers.parseEther("0.1");
   balance = await ethers.provider.getBalance(keyData.currentSigner.address);
-  await bridge
-    .connect(deployer)
-    .registerKeyWithTransfer(
-      keyData.currentSigner.uncompressedPublicKey,
-      keyData.currentSigner.address,
-      keyData.nextSigner.address,
-      keyData.nextNextSigner.address,
-      ethers.ZeroAddress,
-      keyData.nextSigner.address,
-      false,
-      [],
-      { value: balance - gasCost }
-    );
+
+  const nonce = await bridge.nonces(deployer.address);
+  console.log("Nonce:", nonce.toString());
+
+  const unconfirmedMessageHash = ethers.keccak256(
+    ethers.AbiCoder.defaultAbiCoder().encode(
+      ["address", "uint256", "address", "uint256"],
+      [ethers.ZeroAddress, 0, keyData.nextSigner.address, nonce]
+    )
+  );
+  const unconfirmedSignature = await deployer.signMessage(
+    ethers.getBytes(unconfirmedMessageHash)
+  );
+
+  const permitbnb = await generatePermit(
+    ethers.ZeroAddress,
+    deployer,
+    balance - gasCost,
+    [
+      {
+        recipientAddress: keyData.nextSigner.address,
+        amount: balance - gasCost,
+        wrap: false,
+        unwrap: false,
+        mint: false,
+      },
+    ].filter((r) => r.amount > 0)
+  );
+  const firstpermits = [permitbnb];
+  await bridge.connect(deployer).registerKeyPairWithTransfer(
+    ethers.ZeroAddress, //token
+    {
+      token: ethers.ZeroAddress,
+      fee: 0,
+      expires: 0,
+      signature: "0x",
+    }, //fee
+    [], //tokenpairs
+    {
+      amount: 0,
+      signature: unconfirmedSignature,
+      publicKey: keyData.currentSigner.uncompressedPublicKey,
+      prerotatedKeyHash: keyData.nextSigner.address,
+      twicePrerotatedKeyHash: keyData.nextNextSigner.address,
+      prevPublicKeyHash: ethers.ZeroAddress,
+      outputAddress: keyData.nextSigner.address,
+      permits: firstpermits,
+    },
+    {
+      amount: 0,
+      signature: "0x",
+      publicKey: "0x",
+      prerotatedKeyHash: ethers.ZeroAddress,
+      twicePrerotatedKeyHash: ethers.ZeroAddress,
+      prevPublicKeyHash: ethers.ZeroAddress,
+      outputAddress: ethers.ZeroAddress,
+      permits: [],
+    },
+    { value: balance - gasCost }
+  );
   console.log(
     `Initial key log entry registered with publicKeyHash: ${keyData.currentSigner.address}, outputAddress: ${keyData.nextSigner.address}`
   );
@@ -389,7 +436,7 @@ export async function main() {
     const permitbnb = await generatePermit(
       ethers.ZeroAddress,
       keyData.nextSigner,
-      balance,
+      balance - gasCost,
       [
         {
           recipientAddress: confirmingPrerotatedKeyHash,
@@ -454,14 +501,19 @@ export async function main() {
       permits: [],
     };
 
-    await bridge
-      .connect(nextDeployer)
-      .registerKeyPairWithTransfer(
-        ethers.ZeroAddress,
-        unconfirmedKeyData,
-        confirmingKeyData,
-        { value: balance - gasCost }
-      );
+    await bridge.connect(nextDeployer).registerKeyPairWithTransfer(
+      ethers.ZeroAddress, //token
+      {
+        token: ethers.ZeroAddress,
+        fee: 0,
+        expires: 0,
+        signature: "0x",
+      }, //fee
+      [], //tokenpairs
+      unconfirmedKeyData,
+      confirmingKeyData,
+      { value: balance - gasCost }
+    );
     console.log("Added all token pairs: $YDA, $PEPE, BNB");
 
     // deployments.wrappedTokenWMOCKAddress = await bridge.originalToWrapped(

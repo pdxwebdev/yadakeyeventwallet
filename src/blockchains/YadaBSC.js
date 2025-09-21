@@ -12,6 +12,7 @@ import {
   addresses,
   deployed,
   DEPLOY_ENV,
+  BRIDGE2_ABI,
 } from "../shared/constants";
 import BridgeArtifact from "../utils/abis/Bridge.json";
 import KeyLogRegistryArtifact from "../utils/abis/KeyLogRegistry.json";
@@ -337,10 +338,10 @@ class YadaBSC {
                   );
                 }
               } catch (error) {
-                console.warn(
-                  `Error fetching block for ${entry.publicKeyHash}:`,
-                  error
-                );
+                // console.warn(
+                //   `Error fetching block for ${entry.publicKeyHash}:`,
+                //   error
+                // );
               }
               return {
                 rotation: index,
@@ -2152,6 +2153,7 @@ class YadaBSC {
       // Check balances
       const bnbBalance = await localProvider.getBalance(signer.address);
       let tokenRemainingBalance = BigInt(0);
+
       if (isBNB) {
         if (bnbBalance < amountToWrap) {
           throw new Error(
@@ -2226,20 +2228,6 @@ class YadaBSC {
       );
       const bridgeNonce = await bridge.nonces(signer.address);
 
-      const unconfirmedMessage = ethers.AbiCoder.defaultAbiCoder().encode(
-        ["address", "uint256", "address", "uint256"],
-        [
-          selectedOriginal.original,
-          amountToWrap,
-          newParsedData.prerotatedKeyHash,
-          bridgeNonce,
-        ]
-      );
-      const unconfirmedMessageHash = ethers.keccak256(unconfirmedMessage);
-      const unconfirmedSignature = await signer.signMessage(
-        ethers.getBytes(unconfirmedMessageHash)
-      );
-
       const newPublicKey = decompressPublicKey(
         Buffer.from(newPrivateKey.publicKey)
       ).slice(1);
@@ -2283,35 +2271,7 @@ class YadaBSC {
       );
 
       // Add permit for the selected token (wrap + remaining balance)
-      if (isBNB) {
-        // For BNB, include amountToWrap to bridge and remaining BNB balance to next key
-        const totalBNB = amountToWrap + tokenRemainingBalance;
-        const bnbPermit = await this.generatePermit(
-          appContext,
-          ethers.ZeroAddress,
-          signer,
-          totalBNB,
-          [
-            {
-              recipientAddress: contractAddresses.bridgeAddress, // BNB sent to bridge for wrapping
-              amount: amountToWrap,
-              wrap: true,
-              unwrap: false,
-              mint: false,
-            },
-            {
-              recipientAddress: newParsedData.prerotatedKeyHash, // Remaining BNB to next key
-              amount: tokenRemainingBalance,
-              wrap: false,
-              unwrap: false,
-              mint: false,
-            },
-          ].filter((r) => r.amount > 0)
-        );
-        if (bnbPermit) {
-          permits.push(bnbPermit);
-        }
-      } else {
+      if (!isBNB) {
         // For ERC20 tokens, include wrap amount and remaining token balance
         const totalAmount = amountToWrap + tokenRemainingBalance;
         const permit = await this.generatePermit(
@@ -2346,12 +2306,33 @@ class YadaBSC {
         selectedOriginal.original
       );
 
-      const txParams = [
+      // Get fee data and estimate gas properly
+      const feeData = await localProvider.getFeeData();
+      const gasPrice = feeData.gasPrice;
+
+      // For gas estimation, use a temporary unconfirmed signature with original amount
+      const tempUnconfirmedMessage = ethers.AbiCoder.defaultAbiCoder().encode(
+        ["address", "uint256", "address", "uint256"],
+        [
+          selectedOriginal.original,
+          amountToWrap,
+          newParsedData.prerotatedKeyHash,
+          bridgeNonce,
+        ]
+      );
+      const tempUnconfirmedMessageHash = ethers.keccak256(
+        tempUnconfirmedMessage
+      );
+      const tempUnconfirmedSignature = await signer.signMessage(
+        ethers.getBytes(tempUnconfirmedMessageHash)
+      );
+
+      const tempTxParams = [
         selectedOriginal.original,
         tokenFee,
         {
           amount: amountToWrap,
-          signature: unconfirmedSignature,
+          signature: tempUnconfirmedSignature,
           publicKey,
           prerotatedKeyHash: parsedData.prerotatedKeyHash,
           twicePrerotatedKeyHash: parsedData.twicePrerotatedKeyHash,
@@ -2375,44 +2356,149 @@ class YadaBSC {
         },
       ];
 
-      const feeData = await localProvider.getFeeData();
-      const gasPrice = feeData.gasPrice;
-      const gasEstimate = await bridge.wrap.estimateGas(...txParams, {
-        value: isBNB ? amountToWrap + tokenRemainingBalance : bnbBalance,
-      });
-      const gasCost = gasEstimate * gasPrice * 3n; // Buffer for gas fluctuations
-      const amountToSend = isBNB
-        ? amountToWrap + tokenRemainingBalance - gasCost
-        : bnbBalance - gasCost;
+      // Estimate gas with initial parameters
+      let gasEstimate;
+      try {
+        gasEstimate = await bridge.wrapUnwrap.estimateGas(...tempTxParams, {
+          value: isBNB ? amountToWrap : 0, // Use original amount for estimation
+        });
+      } catch (estimateError) {
+        console.error("Gas estimation failed:", estimateError);
+        // Fallback gas limit
+        gasEstimate = 500000n;
+      }
 
-      if (bnbBalance < gasCost) {
-        throw new Error(
-          `Insufficient BNB balance for gas: ${ethers.formatEther(
-            bnbBalance
-          )} available, need ${ethers.formatEther(gasCost)}`
-        );
+      // Add 30% buffer to gas estimate
+      const gasLimit = (gasEstimate * BigInt(130)) / BigInt(100);
+      const gasCost = gasEstimate * gasPrice;
+
+      // Calculate total required BNB
+      let totalRequiredBNB = gasCost;
+      let transactionValue = 0n;
+      let finalAmountToWrap = amountToWrap;
+
+      if (isBNB) {
+        // For BNB wrapping, we need to send the exact amount to wrap as value
+        totalRequiredBNB += amountToWrap;
+        transactionValue = amountToWrap; // Send exactly the amount to wrap
+
+        // Check if we have enough for wrap amount + gas
+        if (bnbBalance < totalRequiredBNB) {
+          throw new Error(
+            `Insufficient BNB balance for wrapping and gas: ${ethers.formatEther(
+              bnbBalance
+            )} available, need ${ethers.formatEther(totalRequiredBNB)}`
+          );
+        }
+
+        // The remaining BNB after wrap + gas will be automatically transferred
+        // via the permit mechanism to the new key
+        tokenRemainingBalance = bnbBalance - amountToWrap - gasCost;
+      } else {
+        // For ERC20, only need gas
+        transactionValue = 0n;
+
+        if (bnbBalance < gasCost) {
+          throw new Error(
+            `Insufficient BNB balance for gas: ${ethers.formatEther(
+              bnbBalance
+            )} available, need ${ethers.formatEther(gasCost)}`
+          );
+        }
       }
-      if (isBNB && bnbBalance < amountToWrap + tokenRemainingBalance) {
-        throw new Error(
-          `Insufficient BNB balance for wrapping and transfer: ${ethers.formatEther(
-            bnbBalance
-          )} available, need ${ethers.formatEther(
-            amountToWrap + tokenRemainingBalance
-          )}`
-        );
-      }
+
+      // Create final unconfirmed signature with the actual amount
+      const finalUnconfirmedMessage = ethers.AbiCoder.defaultAbiCoder().encode(
+        ["address", "uint256", "address", "uint256"],
+        [
+          selectedOriginal.original,
+          finalAmountToWrap,
+          newParsedData.prerotatedKeyHash,
+          bridgeNonce,
+        ]
+      );
+      const finalUnconfirmedMessageHash = ethers.keccak256(
+        finalUnconfirmedMessage
+      );
+      const finalUnconfirmedSignature = await signer.signMessage(
+        ethers.getBytes(finalUnconfirmedMessageHash)
+      );
+
+      // Update txParams with final signature
+      const finalTxParams = [
+        selectedOriginal.original,
+        tokenFee,
+        {
+          amount: finalAmountToWrap,
+          signature: finalUnconfirmedSignature,
+          publicKey,
+          prerotatedKeyHash: parsedData.prerotatedKeyHash,
+          twicePrerotatedKeyHash: parsedData.twicePrerotatedKeyHash,
+          prevPublicKeyHash: parsedData.prevPublicKeyHash,
+          outputAddress: newParsedData.prerotatedKeyHash,
+          hasRelationship: false,
+          tokenSource: signer.address,
+          permits,
+        },
+        {
+          amount: BigInt(0),
+          signature: confirmingSignature,
+          publicKey: newPublicKey,
+          prerotatedKeyHash: newParsedData.prerotatedKeyHash,
+          twicePrerotatedKeyHash: newParsedData.twicePrerotatedKeyHash,
+          prevPublicKeyHash: newParsedData.prevPublicKeyHash,
+          outputAddress: newParsedData.prerotatedKeyHash,
+          hasRelationship: false,
+          tokenSource: newSigner.address,
+          permits: [],
+        },
+      ];
 
       const nonce = await localProvider.getTransactionCount(
         signer.address,
         "latest"
       );
-      const tx = await bridge.wrap(...txParams, {
+
+      // Debug logging
+      console.log("Transaction details:", {
+        balance: ethers.formatEther(bnbBalance),
+        gasLimit: gasLimit.toString(),
+        gasPrice: ethers.formatUnits(gasPrice, "gwei"),
+        gasCost: ethers.formatEther(gasCost),
+        transactionValue: ethers.formatEther(transactionValue),
+        amountToWrap: ethers.formatEther(finalAmountToWrap),
+        totalRequired: ethers.formatEther(totalRequiredBNB),
+        remainingAfterTx: ethers.formatEther(bnbBalance - totalRequiredBNB),
+        isBNB,
         nonce,
-        value: amountToSend,
-        gasLimit: (gasEstimate * 150n) / 100n,
+      });
+
+      // Execute the transaction
+      const tx = await bridge.wrapUnwrap(...finalTxParams, {
+        nonce,
+        value: transactionValue, // Send exactly the amount to wrap (for BNB) or 0 (for ERC20)
+        gasLimit,
         gasPrice,
       });
-      await tx.wait();
+
+      console.log("Transaction sent:", tx.hash);
+      const receipt = await tx.wait();
+
+      if (receipt.status === 0) {
+        // Try to get more detailed revert reason
+        try {
+          const result = await localProvider.call({
+            ...tx,
+            gasLimit: receipt.gasUsed,
+          });
+          console.error("Revert data:", result);
+        } catch (callError) {
+          console.error("Could not get revert reason:", callError);
+        }
+        throw new Error(`Transaction failed: ${tx.hash}`);
+      }
+
+      console.log("Transaction confirmed:", receipt);
 
       const keyLogRegistry = new ethers.Contract(
         contractAddresses.keyLogRegistryAddress,
@@ -2422,31 +2508,44 @@ class YadaBSC {
       const updatedLog = await keyLogRegistry.buildFromPublicKey(publicKey);
       setLog(updatedLog);
 
+      const remainingBNBTransfer =
+        isBNB && tokenRemainingBalance > 0n
+          ? ` and transferred remaining ${ethers.formatEther(
+              tokenRemainingBalance
+            )} BNB to next key`
+          : "";
+
       notifications.show({
         title: "Success",
         message: `Successfully wrapped ${amount} ${
           isBNB ? "BNB" : selectedOriginal.symbol
-        }${
-          tokenRemainingBalance > 0n
-            ? ` and transferred remaining ${ethers.formatUnits(
-                tokenRemainingBalance,
-                tokenDecimals
-              )} ${isBNB ? "BNB" : selectedOriginal.symbol}`
-            : ""
-        }${
-          bnbBalance > (isBNB ? amountToWrap : 0n)
-            ? ` and transferred ${ethers.formatEther(
-                bnbBalance - (isBNB ? amountToWrap : 0n)
-              )} BNB to next key`
-            : ""
-        }`,
+        }${remainingBNBTransfer}`,
         color: "green",
       });
     } catch (error) {
       console.error("Wrap error:", error);
+
+      // Enhanced error messaging
+      let errorMessage = error.message || "Failed to wrap tokens";
+
+      if (error.code === "INSUFFICIENT_FUNDS") {
+        errorMessage = `Insufficient BNB for transaction. Balance: ${ethers.formatEther(
+          await localProvider.getBalance(signer.address)
+        )} BNB. Required: ${ethers.formatEther(
+          error.info?.error?.txCost || 0n
+        )} BNB. Shortfall: ${ethers.formatEther(
+          error.info?.error?.overshot || 0n
+        )} BNB.`;
+      } else if (error.code === "CALL_EXCEPTION") {
+        errorMessage =
+          "Transaction reverted. This could be due to insufficient funds, invalid parameters, or contract logic error.";
+      } else if (error.reason) {
+        errorMessage = error.reason;
+      }
+
       notifications.show({
         title: "Error",
-        message: error.message || "Failed to wrap tokens",
+        message: errorMessage,
         color: "red",
       });
     } finally {
@@ -2500,6 +2599,7 @@ class YadaBSC {
       const amountToUnwrap = ethers.parseUnits(amount, tokenDecimals);
 
       // Check wrapped token balance
+      const bnbbalance = await localProvider.getBalance(signer.address);
       const wrappedTokenContract = new ethers.Contract(
         selectedWrapped.wrapped,
         WRAPPED_TOKEN_ABI,
@@ -2518,20 +2618,6 @@ class YadaBSC {
         );
       }
       const remainingBalance = balance - amountToUnwrap;
-
-      // Check contract BNB balance for BNB unwrapping
-      if (isBNB) {
-        const contractBalance = await localProvider.getBalance(
-          contractAddresses.bridgeAddress
-        );
-        if (contractBalance < amountToUnwrap) {
-          throw new Error(
-            `Insufficient contract BNB balance: ${ethers.formatEther(
-              contractBalance
-            )} available, need ${ethers.formatEther(amountToUnwrap)}`
-          );
-        }
-      }
 
       setIsTransactionFlow(true);
       setIsScannerOpen(true);
@@ -2630,8 +2716,8 @@ class YadaBSC {
       );
 
       // Add permit for the wrapped token (unwrap + remaining balance)
+      const totalAmount = amountToUnwrap + remainingBalance;
       if (!isBNB) {
-        const totalAmount = amountToUnwrap + remainingBalance;
         const permit = await this.generatePermit(
           appContext,
           selectedWrapped.wrapped,
@@ -2664,8 +2750,15 @@ class YadaBSC {
           appContext,
           selectedWrapped.wrapped,
           signer,
-          remainingBalance,
+          totalAmount,
           [
+            {
+              recipientAddress: signer.address,
+              amount: amountToUnwrap,
+              wrap: false,
+              unwrap: true,
+              mint: false,
+            },
             {
               recipientAddress: newParsedData.prerotatedKeyHash,
               amount: remainingBalance,
@@ -2696,8 +2789,6 @@ class YadaBSC {
           twicePrerotatedKeyHash: parsedData.twicePrerotatedKeyHash,
           prevPublicKeyHash: parsedData.prevPublicKeyHash,
           outputAddress: newParsedData.prerotatedKeyHash,
-          hasRelationship: false,
-          tokenSource: signer.address,
           permits,
         },
         {
@@ -2708,28 +2799,22 @@ class YadaBSC {
           twicePrerotatedKeyHash: newParsedData.twicePrerotatedKeyHash,
           prevPublicKeyHash: newParsedData.prevPublicKeyHash,
           outputAddress: newParsedData.prerotatedKeyHash,
-          hasRelationship: false,
-          tokenSource: newSigner.address,
           permits: [],
         },
       ];
 
-      const bnbbalance = await localProvider.getBalance(signer.address);
       const feeData = await localProvider.getFeeData();
       const gasPrice = feeData.gasPrice;
-      const gasEstimate = await bridge.unwrap.estimateGas(...txParams, {
+      const gasEstimate = await bridge.wrapUnwrap.estimateGas(...txParams, {
         value: 0,
       });
       const gasCost = gasEstimate * gasPrice * 3n;
-      const amountToSend = isBNB
-        ? amountToUnwrap + bnbbalance - gasCost
-        : bnbbalance - gasCost;
 
       const nonce = await localProvider.getTransactionCount(
         signer.address,
         "latest"
       );
-      const tx = await bridge.unwrap(...txParams, {
+      const tx = await bridge.wrapUnwrap(...txParams, {
         nonce,
         value: bnbbalance - gasCost,
         gasLimit: (gasEstimate * 150n) / 100n,
@@ -2770,6 +2855,20 @@ class YadaBSC {
       setLoading(false);
       setIsScannerOpen(false);
     }
+  }
+
+  async emergencyRecover(appContext) {
+    const { privateKey, contractAddresses } = appContext;
+    const signer = new ethers.Wallet(
+      ethers.hexlify(privateKey.privateKey),
+      localProvider
+    );
+    const bridge = new ethers.Contract(
+      contractAddresses.bridgeAddress,
+      BRIDGE2_ABI,
+      signer
+    );
+    await bridge.emergencyWithdrawBNB(signer.address);
   }
 
   async addTokenPairs(appContext, webcamRef, formattedTokenPairs) {
@@ -3285,6 +3384,10 @@ class YadaBSC {
       (item) => item.original.toLowerCase() === selectedToken.toLowerCase()
     );
 
+    if (!selectedWrapped) {
+      throw new Error("Selected wrapped token not supported");
+    }
+
     const token = supportedTokens.find((t) => t.address === selectedToken);
     const tokenDecimals = token?.decimals || 18;
 
@@ -3300,7 +3403,7 @@ class YadaBSC {
 
       // Check wrapped token balance
       const wrappedTokenContract = new ethers.Contract(
-        selectedWrapped.original,
+        selectedWrapped.wrapped,
         WRAPPED_TOKEN_ABI,
         signer
       );
@@ -3390,14 +3493,14 @@ class YadaBSC {
           .map((pair) => ({ address: pair.wrapped })),
       ];
 
-      // Generate permits for key rotation
+      // Generate permits for key rotation (excluding BNB since it's sent via value)
       const permits = await this.generatePermitsForTokens(
         appContext,
         signer,
         allTokens,
         newParsedData.prerotatedKeyHash,
         [
-          "0x0000000000000000000000000000000000000000",
+          "0x0000000000000000000000000000000000000000", // Exclude BNB
           wrappedToken.toLowerCase(),
         ]
       );
@@ -3408,7 +3511,7 @@ class YadaBSC {
       const totalAmount = amountToBurn + remainingBalance;
       const permit = await this.generatePermit(
         appContext,
-        selectedWrapped.original,
+        selectedWrapped.wrapped,
         signer,
         totalAmount,
         [
@@ -3432,15 +3535,8 @@ class YadaBSC {
         permits.push(permit);
       }
       const bnbBalance = await localProvider.getBalance(signer.address);
-      permits.push({
-        token: ethers.ZeroAddress,
-        amount: bnbBalance,
-        deadline: 0,
-        v: 0,
-        r: ethers.ZeroHash,
-        s: ethers.ZeroHash,
-        recipients: [],
-      });
+
+      // Prepare transaction parameters
       const txParams = [
         wrappedToken,
         {
@@ -3484,28 +3580,49 @@ class YadaBSC {
         throw new Error(
           `Insufficient BNB balance for gas: ${ethers.formatEther(
             bnbBalance
-          )} available, need ${ethers.formatEther(gasCost)}`
+          )} available, need ${ethers.formatEther(totalGasCost)} for gas costs`
         );
       }
 
-      txParams[1].permits
-        .find((item) => item.token === ethers.ZeroAddress)
-        .recipients.push({
-          recipientAddress: newParsedData.prerotatedKeyHash,
-          amount: amountToSend,
-          wrap: false,
-          unwrap: false,
-          mint: false,
-        });
+      // Ensure we have a reasonable minimum amount to send
+      const minimumValue = ethers.parseEther("0.001");
+      if (maxSafeValue < minimumValue) {
+        throw new Error(
+          `BNB amount too small after gas costs: ${ethers.formatEther(
+            maxSafeValue
+          )} BNB. Minimum recommended: ${ethers.formatEther(minimumValue)} BNB`
+        );
+      }
+
+      const bnbValueToSend = maxSafeValue;
+
+      // Triple-check the math
+      const calculatedTotalCost = totalGasCost + bnbValueToSend;
+      const remainingAfterTx = bnbBalance - calculatedTotalCost;
+
+      if (calculatedTotalCost > bnbBalance) {
+        const shortfall = calculatedTotalCost - bnbBalance;
+        throw new Error(
+          `Safety check failed: Transaction would exceed balance by ${ethers.formatEther(
+            shortfall
+          )} BNB.\n` +
+            `Balance: ${ethers.formatEther(bnbBalance)}\n` +
+            `Gas cost: ${ethers.formatEther(totalGasCost)}\n` +
+            `Value: ${ethers.formatEther(bnbValueToSend)}\n` +
+            `Total: ${ethers.formatEther(calculatedTotalCost)}`
+        );
+      }
 
       const nonce = await localProvider.getTransactionCount(
         signer.address,
         "latest"
       );
+
+      // Execute the transaction - send BNB via value field
       const tx = await bridge.registerKeyPairWithTransfer(...txParams, {
         nonce,
-        value: amountToSend,
-        gasLimit: (gasEstimate * 150n) / 100n,
+        value: bnbValueToSend,
+        gasLimit,
         gasPrice,
       });
       await tx.wait();
@@ -3518,24 +3635,32 @@ class YadaBSC {
       const updatedLog = await keyLogRegistry.buildFromPublicKey(publicKey);
       setLog(updatedLog);
 
+      const bnbTransferMessage =
+        bnbValueToSend > 0n
+          ? ` and transferred ${ethers.formatEther(
+              bnbValueToSend
+            )} BNB to bridge`
+          : "";
+
       notifications.show({
         title: "Success",
-        message: `Successfully burned ${amount} ${selectedWrapped.symbol} from ${accountAddress}`,
+        message: `Successfully burned ${amount} ${selectedWrapped.symbol} from ${accountAddress}${bnbTransferMessage}`,
         color: "green",
       });
     } catch (error) {
       console.error("Burn error:", error);
+
       notifications.show({
         title: "Error",
-        message: error.message || "Failed to burn tokens",
+        message: error,
         color: "red",
       });
-      throw error;
     } finally {
       setLoading(false);
       setIsScannerOpen(false);
     }
   }
+
   async fetchTokenFee(appContext, tokenAddress) {
     const { privateKey, contractAddresses, setLog } = appContext;
     const signer = new ethers.Wallet(

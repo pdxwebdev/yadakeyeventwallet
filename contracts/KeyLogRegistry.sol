@@ -24,7 +24,6 @@ contract KeyLogRegistry is Ownable {
         address publicKeyHash;
         address prevPublicKeyHash;
         address outputAddress;
-        bool hasRelationship;
         bool isOnChain;
         KeyEventFlag flag;
     }
@@ -43,13 +42,12 @@ contract KeyLogRegistry is Ownable {
 
     function registerKeyLog(
         bytes memory publicKey,
-        address publicKeyHash,
         address prerotatedKeyHash,
         address twicePrerotatedKeyHash,
         address prevPublicKeyHash,
-        address outputAddress,
-        bool hasRelationship
+        address outputAddress
     ) external {
+        address publicKeyHash = getAddressFromPublicKey(publicKey);
         // Step 1: Validate using validateTransaction for a single entry
         (KeyEventFlag flag, ) = validateTransaction(
             publicKey,
@@ -58,9 +56,7 @@ contract KeyLogRegistry is Ownable {
             twicePrerotatedKeyHash,
             prevPublicKeyHash,
             outputAddress,
-            hasRelationship,
-            false, // isPair = false
-            address(0), address(0), address(0), address(0), address(0), false // Dummy pair params
+            '0x', address(0), address(0), address(0), address(0), address(0), false
         );
 
         // Step 2: Apply state changes after validation
@@ -70,7 +66,6 @@ contract KeyLogRegistry is Ownable {
             publicKeyHash: publicKeyHash,
             prevPublicKeyHash: prevPublicKeyHash,
             outputAddress: outputAddress,
-            hasRelationship: hasRelationship,
             isOnChain: flag == KeyEventFlag.INCEPTION || flag == KeyEventFlag.CONFIRMING,
             flag: flag
         }));
@@ -95,36 +90,34 @@ contract KeyLogRegistry is Ownable {
     }
 
     function registerKeyLogPair(
-        bytes memory publicKey,
+        bytes calldata unconfirmedPublicKey,
         address unconfirmedPrerotatedKeyHash,
         address unconfirmedTwicePrerotatedKeyHash,
         address unconfirmedPrevPublicKeyHash,
         address unconfirmedOutputAddress,
-        bool unconfirmedHasRelationship,
-        address confirmingPublicKeyHash,
+        bytes calldata confirmingPublicKey,
         address confirmingPrerotatedKeyHash,
         address confirmingTwicePrerotatedKeyHash,
         address confirmingPrevPublicKeyHash,
-        address confirmingOutputAddress,
-        bool confirmingHasRelationship
+        address confirmingOutputAddress
     ) external onlyAuthorized {
-        address unconfirmedPublicKeyHash = getAddressFromPublicKey(publicKey);
+        address unconfirmedPublicKeyHash = getAddressFromPublicKey(unconfirmedPublicKey);
+        address confirmingPublicKeyHash = getAddressFromPublicKey(confirmingPublicKey);
         // Step 1: Validate both entries in a single call
         (KeyEventFlag unconfirmedFlag, KeyEventFlag confirmingFlag) = validateTransaction(
-            publicKey,
+            unconfirmedPublicKey,
             unconfirmedPublicKeyHash,
             unconfirmedPrerotatedKeyHash,
             unconfirmedTwicePrerotatedKeyHash,
             unconfirmedPrevPublicKeyHash,
             unconfirmedOutputAddress,
-            unconfirmedHasRelationship,
-            true, // isPair = true
+            confirmingPublicKey,
             confirmingPublicKeyHash,
             confirmingPrerotatedKeyHash,
             confirmingTwicePrerotatedKeyHash,
             confirmingPrevPublicKeyHash,
             confirmingOutputAddress,
-            confirmingHasRelationship
+            true
         );
 
         // Step 2: Apply state changes after validation
@@ -134,7 +127,6 @@ contract KeyLogRegistry is Ownable {
             publicKeyHash: unconfirmedPublicKeyHash,
             prevPublicKeyHash: unconfirmedPrevPublicKeyHash,
             outputAddress: unconfirmedOutputAddress,
-            hasRelationship: unconfirmedHasRelationship,
             isOnChain: true, // Pair entries are always on-chain
             flag: unconfirmedFlag
         }));
@@ -157,7 +149,6 @@ contract KeyLogRegistry is Ownable {
             publicKeyHash: confirmingPublicKeyHash,
             prevPublicKeyHash: confirmingPrevPublicKeyHash,
             outputAddress: confirmingOutputAddress,
-            hasRelationship: confirmingHasRelationship,
             isOnChain: true, // Pair entries are always on-chain
             flag: confirmingFlag
         }));
@@ -187,59 +178,62 @@ contract KeyLogRegistry is Ownable {
         address twicePrerotatedKeyHash,
         address prevPublicKeyHash,
         address outputAddress,
-        bool hasRelationship,
-        bool isPair,
+        bytes memory confirmingPublicKey,
         address confirmingPublicKeyHash,
         address confirmingPrerotatedKeyHash,
         address confirmingTwicePrerotatedKeyHash,
         address confirmingPrevPublicKeyHash,
         address confirmingOutputAddress,
-        bool confirmingHasRelationship
+        bool isPair
     ) public view returns (KeyEventFlag, KeyEventFlag) {
+
         (KeyLogEntry memory lastEntry, bool hasEntries) = getLatestChainEntry(publicKey);
-        address computedPublicKeyHash = address(uint160(uint256(keccak256(publicKey))));
+        address calculatedPublicKeyhash = getAddressFromPublicKey(publicKey);
 
         // Validate previous entry if it exists (applies to the unconfirmed entry in a pair)
         if (hasEntries) {
             require(lastEntry.isOnChain, "Previous entry must be on-chain");
             require(lastEntry.publicKeyHash == prevPublicKeyHash, "Prev public key mismatch");
-            require(lastEntry.prerotatedKeyHash == computedPublicKeyHash, "Public key mismatch");
+            require(lastEntry.prerotatedKeyHash == calculatedPublicKeyhash, "Public key mismatch");
             require(lastEntry.twicePrerotatedKeyHash == prerotatedKeyHash, "Prerotated key must match previous twice prerotated");
         } else if (prevPublicKeyHash != address(0)) {
             revert("Inception event cannot have a prev_public_key_hash");
         }
 
         // Ensure the provided publicKeyHash matches the computed one
-        require(computedPublicKeyHash == publicKeyHash, "Public key hash mismatch");
+        require(calculatedPublicKeyhash == publicKeyHash, "Public key hash mismatch");
         require(byPrerotatedKeyHash[prerotatedKeyHash] == 0, "Prerotated key hash already used");
         require(byTwicePrerotatedKeyHash[twicePrerotatedKeyHash] == 0, "Twice prerotated key hash already used");
-        require(byPrerotatedKeyHash[confirmingPrerotatedKeyHash] == 0, "Confirming rerotated key hash already used");
-        require(byTwicePrerotatedKeyHash[confirmingTwicePrerotatedKeyHash] == 0, "Confirming twice prerotated key hash already used");
 
         // Determine the flag for the first (or only) entry
         KeyEventFlag firstFlag;
         if (!hasEntries && prevPublicKeyHash == address(0)) {
-            require(!hasRelationship && outputAddress == prerotatedKeyHash, "Invalid inception");
+            require(outputAddress == prerotatedKeyHash, "Invalid inception");
             firstFlag = KeyEventFlag.INCEPTION;
-        } else if (hasRelationship || outputAddress != prerotatedKeyHash) {
+        } else if (outputAddress != prerotatedKeyHash) {
             firstFlag = KeyEventFlag.UNCONFIRMED;
         } else {
-            require(!hasRelationship && outputAddress == prerotatedKeyHash, "Invalid confirming");
+            require(outputAddress == prerotatedKeyHash, "Invalid confirming");
             firstFlag = KeyEventFlag.CONFIRMING;
         }
 
         // If not a pair, return only the first flag
         if (!isPair) {
+            require(prerotatedKeyHash == outputAddress, "Confirming twice prerotated key hash already used");
+            require(confirmingOutputAddress == address(0), "Confirming twice prerotated key hash already used");
             return (firstFlag, KeyEventFlag.UNCONFIRMED); // Second flag is unused
         }
 
         // Pair case: Validate the confirming entry and sequence
+        require(getAddressFromPublicKey(confirmingPublicKey) == confirmingPublicKeyHash, "Invalid confirmingPublicKey");
         require(twicePrerotatedKeyHash == confirmingPrerotatedKeyHash, "Sequence mismatch: twicePrerotatedKeyHash != confirmingPrerotatedKeyHash");
-        require(!confirmingHasRelationship && confirmingOutputAddress == confirmingPrerotatedKeyHash, "Invalid confirming conditions");
+        require(confirmingOutputAddress == confirmingPrerotatedKeyHash, "Invalid confirming conditions");
         require(prerotatedKeyHash == confirmingPublicKeyHash, "Sequence mismatch: prerotatedKeyHash != publicKeyHash");
         require(confirmingPrevPublicKeyHash == publicKeyHash, "Confirming prevPublicKeyHash must match unconfirmed publicKeyHash");
+        require(byPrerotatedKeyHash[confirmingPrerotatedKeyHash] == 0, "Confirming rerotated key hash already used");
+        require(byTwicePrerotatedKeyHash[confirmingTwicePrerotatedKeyHash] == 0, "Confirming twice prerotated key hash already used");
 
-        // For pairs, firstFlag must be UNCONFIRMED, and confirming is always CONFIRMING
+
         return (KeyEventFlag.UNCONFIRMED, KeyEventFlag.CONFIRMING);
     }
 

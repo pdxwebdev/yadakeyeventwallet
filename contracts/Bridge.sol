@@ -77,8 +77,6 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
         address twicePrerotatedKeyHash;
         address prevPublicKeyHash;
         address outputAddress;
-        bool hasRelationship;
-        address tokenSource;
         PermitData[] permits;
     }
 
@@ -101,8 +99,7 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
     error TokenPairExists();
     error TokenPairNotSupported();
     error RestrictedToOwnerRelayer();
-    error InvalidUnconfirmedSignature();
-    error InvalidConfirmingSignature();
+    error InvalidSignature();
     error InvalidPrerotatedKeyHash();
     error AmountTooLow();
     error InsufficientPermits(address token);
@@ -116,6 +113,12 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
     error InvalidFeeRate();
     error InvalidRecipientAmount();
     error PermitDeadlineExpired();
+
+    uint256 private constant MAX_FEE_RATE = 1e18;
+    uint256 private constant PUBLIC_KEY_LENGTH = 64;
+    uint256 private constant MAX_TOKEN_PAIRS = 10;
+    uint256 private constant GAS_LIMIT = 30000;
+    uint256 private constant NONCE_INCREMENT = 2;
 
     function initialize(address _keyLogRegistry) public initializer {
         __Ownable_init(msg.sender);
@@ -135,14 +138,14 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
         FeeInfo calldata feeInfo
     ) internal view returns (uint256) {
         if (feeInfo.expires < block.timestamp) revert PermitDeadlineExpired();
-        if (feeInfo.fee > 1e18) revert InvalidFeeRate(); // Cap fee at 100%
+        if (feeInfo.fee > MAX_FEE_RATE) revert InvalidFeeRate(); // Cap fee at 100%
 
         bytes32 messageHash = keccak256(
             abi.encode(feeInfo.token, feeInfo.fee, feeInfo.expires)
         ).toEthSignedMessageHash();
 
         address signer = messageHash.recover(feeInfo.signature);
-        if (signer != feeSigner) revert InvalidConfirmingSignature();
+        if (signer != feeSigner) revert InvalidSignature();
 
         return feeInfo.fee;
     }
@@ -153,11 +156,6 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
         
         feeCollector = newOwner;
         super.transferOwnership(newOwner);
-    }
-
-    function setRelayer(address _relayer) external onlyOwner {
-        if (_relayer == address(0)) revert ZeroAddress();
-        relayer = _relayer;
     }
 
     function setFeeCollector(address _feeCollector) external onlyOwner {
@@ -177,12 +175,12 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
         return supportedOriginalTokens;
     }
 
-    function _executePermits(address token, address user, PermitData[] memory permits) internal {
+    function _executePermits(address token, address user, PermitData[] calldata permits, FeeInfo calldata feeInfo, address confirmingPrerotatedKeyHash) internal {
         for (uint256 i = 0; i < permits.length; i++) {
             PermitData memory permit = permits[i];
-            if (permit.amount > 0 && permit.deadline >= block.timestamp && permit.token != address(0)) {
-                if (permit.deadline < block.timestamp) revert PermitDeadlineExpired();
 
+            if (permit.token != address(0)) {
+                if (permit.deadline < block.timestamp) revert PermitDeadlineExpired();
                 IERC20Permit2(permit.token).permit(
                     user,
                     address(this),
@@ -192,46 +190,109 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
                     permit.r,
                     permit.s
                 );
-                
-                uint256 totalTransferred = 0;
+            }
+            bool transferOnly = true;
+            if (permit.token == token) {
                 for (uint256 j = 0; j < permit.recipients.length; j++) {
                     Recipient memory recipient = permit.recipients[j];
-                    if (recipient.amount > 0 && recipient.recipientAddress != address(0)) {
-                        if (recipient.amount > permit.amount) revert InvalidRecipientAmount();
-                        
-                        if (recipient.unwrap && permit.token == token) {
-                            WrappedToken(permit.token).burn(recipient.recipientAddress, recipient.amount);
-                        } else if (recipient.mint && permit.token == token) {
-                            WrappedToken(permit.token).mint(recipient.recipientAddress, recipient.amount);
-                        } else if (recipient.wrap && permit.token == token) {
-                            IERC20(permit.token).safeTransferFrom(user, address(this), recipient.amount);
-                        } else {
-                            IERC20(permit.token).safeTransferFrom(user, recipient.recipientAddress, recipient.amount);
-                        }
-                        totalTransferred += recipient.amount;
-                    }
-                }
-                if (totalTransferred != permit.amount) revert TransferFailed();
-            } else if (permit.token == address(0)) {
-                uint256 totalEth = 0;
-                for (uint256 j = 0; j < permit.recipients.length; j++) {
-                    Recipient memory recipient = permit.recipients[j];
-                    if (recipient.amount > 0 && !recipient.wrap && recipient.recipientAddress != address(0)) {
-                        if (recipient.amount > permit.amount) revert InvalidRecipientAmount();
-                        totalEth += recipient.amount;
-                    }
-                }
-                if (totalEth > msg.value) revert AmountTooLow();
-                
-                for (uint256 j = 0; j < permit.recipients.length; j++) {
-                    Recipient memory recipient = permit.recipients[j];
-                    if (recipient.amount > 0 && !recipient.wrap) {
-                        (bool sent, ) = recipient.recipientAddress.call{value: recipient.amount, gas: 30000}("");
-                        if (!sent) revert EthTransferFailed();
+                    if(recipient.unwrap || recipient.mint || recipient.unwrap) {
+                        transferOnly = false;
                     }
                 }
             }
+
+            uint256 feeRate = 0;
+            if (!transferOnly) {
+                feeRate = _verifyFee(feeInfo);
+            }
+
+            bool isNative = permit.token == address(0);
+            
+            uint256 totalTransferred = 0;
+            for (uint256 j = 0; j < permit.recipients.length; j++) {
+                // here we are burning the entire amount requested of a Yada Wrapped Token (YWT)
+                // then we are sending the original token/coin amount back to the recipient minus a token fee 
+                // then finally sending he remainder to the next key rotation
+                // no other recipients are allowed other than this contract, the next key rotation, and the fee collector
+                Recipient memory recipient = permit.recipients[j];
+                if (recipient.recipientAddress == address(0)) revert ZeroAddress();
+                if (recipient.amount == 0) continue;
+                if (recipient.amount > permit.amount) revert InvalidRecipientAmount();
+
+                if (recipient.unwrap && permit.token == token) {
+                    uint256 tokenFee = (permit.amount * feeRate) / MAX_FEE_RATE;
+                    WrappedToken(permit.token).burn(recipient.recipientAddress, recipient.amount);
+                    TokenPairData memory pair = tokenPairs[permit.token];
+
+                    uint256 netAmount = recipient.amount - tokenFee;
+                    if (pair.originalToken == address(0)) {
+                        _transferNative(recipient.recipientAddress, netAmount);
+                        _transferNative(feeCollector, tokenFee);
+                    } else {
+                        IERC20(pair.originalToken).safeTransfer(recipient.recipientAddress, netAmount);
+                        IERC20(pair.originalToken).safeTransfer(feeCollector, tokenFee);
+                    }
+
+                    uint256 remainder = permit.amount - (recipient.amount + tokenFee);
+                    if (remainder > 0) _transferToNext(permit.token, confirmingPrerotatedKeyHash, remainder);
+                } else if (recipient.mint && permit.token == token) { 
+                    // here we are minting a cross chain token, WYDA in this case
+                    // this is a special case because it is a non-Yada Wrapped Token (YWT). It is an ERC20.
+                    uint256 tokenFee = (permit.amount * feeRate) / MAX_FEE_RATE;
+                    uint256 netAmount = recipient.amount - tokenFee;
+                    WrappedToken(permit.token).mint(recipient.recipientAddress, netAmount);
+                } else if (recipient.wrap && permit.token == token) {
+                    // here we are wrapping an erc20 token into a Yada Wrapped Token minus the token fee
+                    // no other recipients are allowed other than this contract, the next key rotation, and the fee collector
+                    uint256 tokenFee = (permit.amount * feeRate) / 1e18;
+                    TokenPairData memory pair = tokenPairs[permit.token];
+
+                    if (isNative) {
+                        _transferNative(feeCollector, tokenFee);
+                    } else {
+                        IERC20(pair.originalToken).safeTransferFrom(user, address(this), recipient.amount - tokenFee);
+                        IERC20(pair.originalToken).safeTransferFrom(user, feeCollector, tokenFee);
+                    }
+
+                    if (recipient.amount + tokenFee < permit.amount) {
+                        // there's a remainder, send it to the next key rotation
+                        uint256 remainder = permit.amount - recipient.amount;
+                        if (remainder > 0) _transferToNext(permit.token, confirmingPrerotatedKeyHash, remainder);
+                    }
+                } else if (transferOnly) {
+                    // here we are just carrying forward any remaining balance to the next key rotation.
+                    // this is the only place where we can send tokens/coins to whomever
+                    if (isNative) {
+                        _transferNative(recipient.recipientAddress, recipient.amount);
+                    } else {
+                        IERC20(permit.token).safeTransferFrom(user, recipient.recipientAddress, recipient.amount);
+                    }
+                }
+                totalTransferred += recipient.amount;
+            }
+            if (totalTransferred != permit.amount) revert TransferFailed();
         }
+    }
+
+    function _transferNative(address to, uint256 amount) private {
+        (bool success, ) = to.call{value: amount, gas: 30000}("");
+        if (!success) revert TransferFailed();
+    }
+
+
+    function _transferToNext(address token, address to, uint256 amount) private {
+        if (token == address(0)) {
+            _transferNative(to, amount);
+        } else {
+            IERC20(token).safeTransfer(to, amount);
+        }
+    }
+
+    function emergencyWithdrawBNB(address to) external onlyOwner {
+        uint256 balance = address(this).balance;
+        require(balance > 0, "No BNB to withdraw");
+        (bool sent, ) = to.call{value: balance}("");
+        require(sent, "Withdraw failed");
     }
 
     function _verifySignature(bytes32 messageHash, bytes memory signature, address expectedSigner) internal pure returns (bool) {
@@ -239,225 +300,32 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
         return ethSignedMessageHash.recover(signature) == expectedSigner;
     }
 
-    function _registerKeyPair(
-        bytes memory unconfirmedPublicKey,
-        address unconfirmedPrerotatedKeyHash,
-        address unconfirmedTwicePrerotatedKeyHash,
-        address unconfirmedPrevPublicKeyHash,
-        address unconfirmedOutputAddress,
-        bool unconfirmedHasRelationship,
-        bytes memory confirmingPublicKey,
-        address confirmingPrerotatedKeyHash,
-        address confirmingTwicePrerotatedKeyHash,
-        address confirmingPrevPublicKeyHash,
-        address confirmingOutputAddress,
-        bool confirmingHasRelationship
-    ) internal {
-        if (unconfirmedPublicKey.length != 64 || confirmingPublicKey.length != 64) revert InvalidPublicKey();
-        
-        keyLogRegistry.registerKeyLogPair(
-            unconfirmedPublicKey,
-            unconfirmedPrerotatedKeyHash,
-            unconfirmedTwicePrerotatedKeyHash,
-            unconfirmedPrevPublicKeyHash,
-            unconfirmedOutputAddress,
-            unconfirmedHasRelationship,
-            getAddressFromPublicKey(confirmingPublicKey),
-            confirmingPrerotatedKeyHash,
-            confirmingTwicePrerotatedKeyHash,
-            confirmingPrevPublicKeyHash,
-            confirmingOutputAddress,
-            confirmingHasRelationship
-        );
-    }
-
-    function wrap(address originalToken, FeeInfo calldata feeInfo, Params calldata unconfirmed, Params calldata confirming) external payable nonReentrant {
-        TokenPairData memory pair = tokenPairs[originalToken];
-        if (pair.wrappedToken == address(0)) revert TokenPairNotSupported();
-
-        uint256 nonce = nonces[msg.sender];
-        bytes32 unconfirmedHash = keccak256(abi.encode(originalToken, unconfirmed.amount, unconfirmed.outputAddress, nonce));
-        bytes32 confirmingHash = keccak256(abi.encode(originalToken, confirming.amount, confirming.outputAddress, nonce + 1));
-        
-        if (
-            !_verifySignature(unconfirmedHash, unconfirmed.signature, msg.sender)
-        ) revert InvalidUnconfirmedSignature();
-        if (
-            !_verifySignature(confirmingHash, confirming.signature, getAddressFromPublicKey(confirming.publicKey))
-        ) revert InvalidConfirmingSignature();
-
-        (KeyLogRegistry.KeyLogEntry memory latestEntry, bool hasEntry) = keyLogRegistry.getLatestEntryByPrerotatedKeyHash(unconfirmed.outputAddress);
-        if (hasEntry && latestEntry.prerotatedKeyHash != unconfirmed.outputAddress) revert InvalidPrerotatedKeyHash();
-
-        if (unconfirmed.amount == 0) revert AmountTooLow();
-
-        uint256 totalAmount = unconfirmed.amount;
-        uint256 feeRate = _verifyFee(feeInfo);
-
-        uint256 tokenFee = (totalAmount * feeRate) / 1e18;
-        if (totalAmount < tokenFee) revert AmountTooLow();
-
-        uint256 ethFee = (msg.value * feeRate) / 1e18;
-        if (msg.value < ethFee) revert AmountTooLow();
-
-        _finalize(originalToken, unconfirmed, confirming, false);
-
-        if (tokenFee > 0 && originalToken != address(0)) {
-            IERC20(originalToken).safeTransfer(feeCollector, tokenFee);
-        }
-
-        uint256 mintUnconfirmed = unconfirmed.amount - tokenFee;
-        if (mintUnconfirmed > 0) {
-            WrappedToken(pair.wrappedToken).mint(unconfirmed.outputAddress, mintUnconfirmed);
-        }
-
-        // Handle ETH/BNB fee
-        if (msg.value > 0) {
-            if (ethFee > 0) {
-                (bool feeSent, ) = feeCollector.call{value: ethFee, gas: 30000}("");
-                if (!feeSent) revert FeeTransferFailed();
-            }
-            // Transfer any remaining BNB to confirming.prerotatedKeyHash (already handled in permit for BNB case)
-            if (originalToken != address(0)) {
-                uint256 ethValue = msg.value - ethFee;
-                if (ethValue > 0) {
-                    (bool sent, ) = confirming.prerotatedKeyHash.call{value: ethValue}("");
-                    if (!sent) revert EthTransferFailed();
-                }
-            }
-        }
-    }
-
-    function unwrap(address wrappedToken, FeeInfo calldata feeInfo, Params calldata unconfirmed, Params calldata confirming) external payable nonReentrant {
-        if (wrappedToken == address(0)) revert ZeroAddress();
-        TokenPairData memory pair = tokenPairs[wrappedToken];
-        if (pair.wrappedToken == address(0)) revert TokenPairNotSupported();
-
-        uint256 nonce = nonces[msg.sender];
-        bytes32 unconfirmedHash = keccak256(abi.encode(wrappedToken, unconfirmed.amount, unconfirmed.outputAddress, nonce));
-        bytes32 confirmingHash = keccak256(abi.encode(wrappedToken, 0, confirming.outputAddress, nonce + 1));
-        
-        if (
-            !_verifySignature(unconfirmedHash, unconfirmed.signature, getAddressFromPublicKey(unconfirmed.publicKey))
-        ) revert InvalidUnconfirmedSignature();
-        if (
-            !_verifySignature(confirmingHash, confirming.signature, getAddressFromPublicKey(confirming.publicKey))
-        ) revert InvalidConfirmingSignature();
-
-        if (unconfirmed.amount == 0) revert AmountTooLow();
-
-        uint256 totalAmount = unconfirmed.amount;
-        uint256 feeRate = _verifyFee(feeInfo);
-        uint256 fee = (totalAmount * feeRate) / 1e18;
-        uint256 amountToReturn = totalAmount - fee;
-        if (totalAmount < fee) revert AmountTooLow();
-
-        _finalize(wrappedToken, unconfirmed, confirming, false);
-
-        nonces[msg.sender] = nonce + 2;
-
-        // Handle token transfer - do all transfers atomically
-        if (pair.originalToken != address(0)) {
-            // ERC20 token transfer
-            if (fee > 0) {
-                IERC20(pair.originalToken).safeTransfer(feeCollector, fee);
-            }
-            if (amountToReturn > 0 && unconfirmed.outputAddress != address(0)) {
-                IERC20(pair.originalToken).safeTransfer(unconfirmed.outputAddress, amountToReturn);
-            }
-
-            // Handle ETH/BNB fee
-            if (msg.value > 0 && confirming.prerotatedKeyHash != address(0)) {
-                (bool sent, ) = confirming.prerotatedKeyHash.call{value: msg.value, gas: 30000}("");
-                if (!sent) revert EthTransferFailed();
-            }
-        } else {
-            // BNB transfer
-            if (amountToReturn > 0 && unconfirmed.outputAddress != address(0)) {
-                if (address(this).balance < amountToReturn) revert AmountTooLow();
-                (bool sent, ) = unconfirmed.outputAddress.call{value: amountToReturn, gas: 30000}("");
-                if (!sent) revert EthTransferFailed();
-            }
-            if (fee > 0) {
-                if (address(this).balance < fee) revert AmountTooLow();
-                (bool feeSent, ) = feeCollector.call{value: fee, gas: 30000}("");
-                if (!feeSent) revert TransferFailed();
-            }
-        }
-    }
-
-    function registerKeyWithTransfer(
-        bytes memory publicKey,
-        address publicKeyHash,
-        address prerotatedKeyHash,
-        address twicePrerotatedKeyHash,
-        address prevPublicKeyHash,
-        address outputAddress,
-        bool hasRelationship,
-        PermitData[] calldata permits
-    ) external payable nonReentrant {
-        if (publicKey.length != 64) revert InvalidPublicKey();
-        if (outputAddress == address(0)) revert ZeroAddress();
-
-        _executePermits(address(0), msg.sender, permits);
-
-        // Only owner can transfer ownership, and only to valid address
-        if (owner() == msg.sender && prerotatedKeyHash != address(0)) {
-            transferOwnership(prerotatedKeyHash);
-        }
-
-        // Transfer ETH with gas limit
-        if (msg.value > 0) {
-            (bool sent, ) = outputAddress.call{value: msg.value, gas: 30000}("");
-            if (!sent) revert EthTransferFailed();
-        }
-
-        keyLogRegistry.registerKeyLog(
-            publicKey,
-            publicKeyHash,
-            prerotatedKeyHash,
-            twicePrerotatedKeyHash,
-            prevPublicKeyHash,
-            outputAddress,
-            hasRelationship
-        );
-    }
-
-    function registerKeyPairWithTransfer(address token, Params calldata unconfirmed, Params calldata confirming) external payable nonReentrant {
-        uint256 nonce = nonces[msg.sender];
-        bytes32 unconfirmedHash = keccak256(abi.encode(token, unconfirmed.amount, unconfirmed.outputAddress, nonce));
-        bytes32 confirmingHash = keccak256(abi.encode(token, 0, confirming.outputAddress, nonce + 1));
-        
-        if (
-            !_verifySignature(unconfirmedHash, unconfirmed.signature, getAddressFromPublicKey(unconfirmed.publicKey))
-        ) revert InvalidUnconfirmedSignature();
-        if (
-            !_verifySignature(confirmingHash, confirming.signature, getAddressFromPublicKey(confirming.publicKey))
-        ) revert InvalidConfirmingSignature();
-        
-        _finalize(token, unconfirmed, confirming, false);
-    }
-
-    function addMultipleTokenPairsAtomic(
+    function registerKeyPairWithTransfer(
+        address token,
+        FeeInfo calldata fee,
         TokenPair[] calldata newTokenPairs,
         Params calldata unconfirmed,
         Params calldata confirming
-    ) external payable onlyOwner nonReentrant {
-        if (newTokenPairs.length == 0) revert NoTokenPairs();
-        if (newTokenPairs.length > 10) revert NoTokenPairs(); // Prevent gas limit issues
-        
-        address unconfirmedPublicKeyHash = getAddressFromPublicKey(unconfirmed.publicKey);
-
+    ) external payable nonReentrant {
         uint256 nonce = nonces[msg.sender];
-        bytes32 unconfirmedHash = keccak256(abi.encode(newTokenPairs, unconfirmedPublicKeyHash, nonce));
-        bytes32 confirmingHash = keccak256(abi.encode(newTokenPairs, unconfirmedPublicKeyHash, nonce + 1));
+        bytes32 unconfirmedHash = keccak256(abi.encode(token, unconfirmed.amount, unconfirmed.outputAddress, nonce));
         
+        if (unconfirmed.outputAddress == address(0)) revert ZeroAddress();
+        if (unconfirmed.publicKey.length != PUBLIC_KEY_LENGTH) revert InvalidPublicKey();
+
         if (
-            !_verifySignature(unconfirmedHash, unconfirmed.signature, msg.sender)
-        ) revert InvalidUnconfirmedSignature();
-        if (
-            !_verifySignature(confirmingHash, confirming.signature, getAddressFromPublicKey(confirming.publicKey))
-        ) revert InvalidConfirmingSignature();
+            !_verifySignature(unconfirmedHash, unconfirmed.signature, getAddressFromPublicKey(unconfirmed.publicKey))
+        ) revert InvalidSignature();
+
+        if (confirming.outputAddress != address(0)) {
+            bytes32 confirmingHash = keccak256(abi.encode(token, 0, confirming.outputAddress, nonce + 1));
+            if (confirming.publicKey.length != PUBLIC_KEY_LENGTH) revert InvalidPublicKey();
+            if (confirming.outputAddress == address(0)) revert ZeroAddress();
+
+            if (
+                !_verifySignature(confirmingHash, confirming.signature, getAddressFromPublicKey(confirming.publicKey))
+            ) revert InvalidSignature();
+        }
 
         for (uint256 i = 0; i < newTokenPairs.length; i++) {
             TokenPair memory pair = newTokenPairs[i];
@@ -473,8 +341,41 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
             tokenPairs[wrappedToken] = TokenPairData(pair.originalToken, wrappedToken);
             supportedOriginalTokens.push(pair.originalToken);
         }
+        if (unconfirmed.permits.length > 0) {
+            _executePermits(token, msg.sender, unconfirmed.permits, fee, confirming.prerotatedKeyHash);
+        }
 
-        _finalize(address(0), unconfirmed, confirming, true);
+        if (confirming.outputAddress == address(0)) {
+            keyLogRegistry.registerKeyLog(
+                unconfirmed.publicKey,
+                unconfirmed.prerotatedKeyHash,
+                unconfirmed.twicePrerotatedKeyHash,
+                unconfirmed.prevPublicKeyHash,
+                unconfirmed.outputAddress
+            );
+
+            if (owner() == msg.sender) {
+                transferOwnership(unconfirmed.prerotatedKeyHash);
+            }
+        } else {
+            keyLogRegistry.registerKeyLogPair(
+                unconfirmed.publicKey,
+                unconfirmed.prerotatedKeyHash,
+                unconfirmed.twicePrerotatedKeyHash,
+                unconfirmed.prevPublicKeyHash,
+                unconfirmed.outputAddress,
+                confirming.publicKey,
+                confirming.prerotatedKeyHash,
+                confirming.twicePrerotatedKeyHash,
+                confirming.prevPublicKeyHash,
+                confirming.outputAddress
+            );
+
+            if (owner() == msg.sender) {
+                transferOwnership(confirming.prerotatedKeyHash);
+            }
+        }
+        nonces[msg.sender] += NONCE_INCREMENT;
     }
 
     function originalToWrapped(address originalToken) external view returns (address) {
@@ -484,7 +385,7 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
     }
 
     function getAddressFromPublicKey(bytes memory publicKey) public pure returns (address) {
-        if (publicKey.length != 64) revert InvalidPublicKey();
+        if (publicKey.length != PUBLIC_KEY_LENGTH) revert InvalidPublicKey();
         bytes32 hash = keccak256(publicKey);
         return address(uint160(uint256(hash)));
     }
@@ -493,37 +394,5 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
 
     function getOwner() external view returns (address) {
         return owner();
-    }
-
-    function _finalize(address token, Params calldata unconfirmed, Params calldata confirming, bool xfrBNB) internal {
-        if (unconfirmed.outputAddress == address(0) || confirming.outputAddress == address(0)) revert ZeroAddress();
-        
-        nonces[msg.sender] += 2;
-
-        _executePermits(token, msg.sender, unconfirmed.permits);
-
-        _registerKeyPair(
-            unconfirmed.publicKey,
-            unconfirmed.prerotatedKeyHash,
-            unconfirmed.twicePrerotatedKeyHash,
-            unconfirmed.prevPublicKeyHash,
-            unconfirmed.outputAddress,
-            unconfirmed.hasRelationship,
-            confirming.publicKey,
-            confirming.prerotatedKeyHash,
-            confirming.twicePrerotatedKeyHash,
-            confirming.prevPublicKeyHash,
-            confirming.outputAddress,
-            confirming.hasRelationship
-        );
-
-        if (owner() == msg.sender && confirming.prerotatedKeyHash != address(0)) {
-            transferOwnership(confirming.prerotatedKeyHash);
-        }
-
-        if (xfrBNB && msg.value > 0 && confirming.prerotatedKeyHash != address(0)) {
-            (bool sent, ) = confirming.prerotatedKeyHash.call{value: msg.value, gas: 30000}("");
-            if (!sent) revert EthTransferFailed();
-        }
     }
 }
