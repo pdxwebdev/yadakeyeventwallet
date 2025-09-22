@@ -5,6 +5,10 @@ import * as shajs from "sha.js";
 import * as tinysecp256k1 from "tiny-secp256k1";
 import MockERC20Artifact from "../src/utils/abis/MockERC20.json" assert { type: "json" };
 import WrappedTokenArtifact from "../src/utils/abis/WrappedToken.json" assert { type: "json" };
+import {
+  createParamsArrayFromObject,
+  signatureFields,
+} from "../src/utils/signature.js";
 const { ethers, upgrades, network } = pkg;
 
 const ERC20_ABI = MockERC20Artifact.abi;
@@ -205,12 +209,21 @@ export async function main() {
 
   const nonce = await bridge.nonces(deployer.address);
   console.log("Nonce:", nonce.toString());
-
+  const unconfirmedKeyData = {
+    amount: 0,
+    publicKey: keyData.currentSigner.uncompressedPublicKey,
+    prerotatedKeyHash: keyData.nextSigner.address,
+    twicePrerotatedKeyHash: keyData.nextNextSigner.address,
+    prevPublicKeyHash: ethers.ZeroAddress,
+    outputAddress: keyData.nextSigner.address,
+  };
   const unconfirmedMessageHash = ethers.keccak256(
-    ethers.AbiCoder.defaultAbiCoder().encode(
-      ["address", "uint256", "address", "uint256"],
-      [ethers.ZeroAddress, 0, keyData.nextSigner.address, nonce]
-    )
+    ethers.AbiCoder.defaultAbiCoder().encode(signatureFields, [
+      ethers.ZeroAddress,
+      [],
+      createParamsArrayFromObject(unconfirmedKeyData),
+      nonce,
+    ])
   );
   const unconfirmedSignature = await deployer.signMessage(
     ethers.getBytes(unconfirmedMessageHash)
@@ -240,26 +253,18 @@ export async function main() {
       signature: "0x",
     }, //fee
     [], //tokenpairs
+    firstpermits,
+    unconfirmedKeyData,
+    unconfirmedSignature,
     {
       amount: 0,
-      signature: unconfirmedSignature,
-      publicKey: keyData.currentSigner.uncompressedPublicKey,
-      prerotatedKeyHash: keyData.nextSigner.address,
-      twicePrerotatedKeyHash: keyData.nextNextSigner.address,
-      prevPublicKeyHash: ethers.ZeroAddress,
-      outputAddress: keyData.nextSigner.address,
-      permits: firstpermits,
-    },
-    {
-      amount: 0,
-      signature: "0x",
       publicKey: "0x",
       prerotatedKeyHash: ethers.ZeroAddress,
       twicePrerotatedKeyHash: ethers.ZeroAddress,
       prevPublicKeyHash: ethers.ZeroAddress,
       outputAddress: ethers.ZeroAddress,
-      permits: [],
     },
+    "0x",
     { value: balance - gasCost }
   );
   console.log(
@@ -453,53 +458,45 @@ export async function main() {
 
     const nonce = await bridge.nonces(nextDeployer.address);
     console.log("Nonce:", nonce.toString());
-
-    const unconfirmedMessageHash = ethers.keccak256(
-      ethers.AbiCoder.defaultAbiCoder().encode(
-        ["address", "uint256", "address", "uint256"],
-        [ethers.ZeroAddress, 0, keyData.nextNextSigner.address, nonce]
-      )
-    );
-    const unconfirmedSignature = await nextDeployer.signMessage(
-      ethers.getBytes(unconfirmedMessageHash)
-    );
-
-    const confirmingMessageHash = ethers.keccak256(
-      ethers.AbiCoder.defaultAbiCoder().encode(
-        ["address", "uint256", "address", "uint256"],
-        [ethers.ZeroAddress, 0, confirmingPrerotatedKeyHash, nonce + 1n]
-      )
-    );
-    const confirmingSignature = await nextNextDeployer.signMessage(
-      ethers.getBytes(confirmingMessageHash)
-    );
-
     const unconfirmedKeyData = {
       amount: 0n,
-      signature: unconfirmedSignature,
       publicKey: keyData.nextSigner.uncompressedPublicKey,
       prerotatedKeyHash: keyData.nextNextSigner.address,
       twicePrerotatedKeyHash: confirmingPrerotatedKeyHash,
       prevPublicKeyHash: keyData.currentSigner.address,
       outputAddress: keyData.nextNextSigner.address,
-      hasRelationship: false,
-      tokenSource: ethers.ZeroAddress,
-      permits: permits,
     };
+    const unconfirmedMessageHash = ethers.keccak256(
+      ethers.AbiCoder.defaultAbiCoder().encode(signatureFields, [
+        ethers.ZeroAddress,
+        [],
+        createParamsArrayFromObject(unconfirmedKeyData),
+        nonce,
+      ])
+    );
+    const unconfirmedSignature = await nextDeployer.signMessage(
+      ethers.getBytes(unconfirmedMessageHash)
+    );
 
     const confirmingKeyData = {
       amount: 0n,
-      signature: confirmingSignature,
       publicKey: keyData.nextNextSigner.uncompressedPublicKey,
-      publicKeyHash: keyData.nextNextSigner.address,
       prerotatedKeyHash: confirmingPrerotatedKeyHash,
       twicePrerotatedKeyHash: confirmingTwicePrerotatedKeyHash,
       prevPublicKeyHash: keyData.nextSigner.address,
       outputAddress: confirmingPrerotatedKeyHash,
-      hasRelationship: false,
-      tokenSource: ethers.ZeroAddress,
-      permits: [],
     };
+    const confirmingMessageHash = ethers.keccak256(
+      ethers.AbiCoder.defaultAbiCoder().encode(signatureFields, [
+        ethers.ZeroAddress,
+        [],
+        createParamsArrayFromObject(confirmingKeyData),
+        nonce + 1n,
+      ])
+    );
+    const confirmingSignature = await nextNextDeployer.signMessage(
+      ethers.getBytes(confirmingMessageHash)
+    );
 
     await bridge.connect(nextDeployer).registerKeyPairWithTransfer(
       ethers.ZeroAddress, //token
@@ -510,8 +507,11 @@ export async function main() {
         signature: "0x",
       }, //fee
       [], //tokenpairs
+      permits,
       unconfirmedKeyData,
+      unconfirmedSignature,
       confirmingKeyData,
+      confirmingSignature,
       { value: balance - gasCost }
     );
     console.log("Added all token pairs: $YDA, $PEPE, BNB");
