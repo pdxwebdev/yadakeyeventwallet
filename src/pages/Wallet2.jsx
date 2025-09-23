@@ -546,7 +546,7 @@ const Wallet2 = () => {
             message: "Submitting wallet initialization transaction.",
             color: "yellow",
           });
-          await walletManager.initializeKeyEventLog(appContext);
+          await walletManager.initializeKeyEventLog(appContext, webcamRef);
         }
 
         await checkOwnerStatus(appContext);
@@ -810,26 +810,27 @@ const Wallet2 = () => {
                     </Button>
                   </div>
                 </Group>
-                {isOwner && (
-                  <>
-                    <MintForm
-                      walletManager={walletManager}
-                      appContext={appContext}
-                      webcamRef={webcamRef}
-                      tokenSymbol={tokenSymbol}
-                      wrappedTokenSymbol={wrappedTokenSymbol}
-                      styles={styles}
-                    />
-                    <BurnForm
-                      walletManager={walletManager}
-                      appContext={appContext}
-                      webcamRef={webcamRef}
-                      tokenSymbol={tokenSymbol}
-                      wrappedTokenSymbol={wrappedTokenSymbol}
-                      styles={styles}
-                    />
-                  </>
-                )}
+                {isOwner &&
+                  selectedToken === contractAddresses.yadaERC20Address && (
+                    <>
+                      <MintForm
+                        walletManager={walletManager}
+                        appContext={appContext}
+                        webcamRef={webcamRef}
+                        tokenSymbol={tokenSymbol}
+                        wrappedTokenSymbol={wrappedTokenSymbol}
+                        styles={styles}
+                      />
+                      <BurnForm
+                        walletManager={walletManager}
+                        appContext={appContext}
+                        webcamRef={webcamRef}
+                        tokenSymbol={tokenSymbol}
+                        wrappedTokenSymbol={wrappedTokenSymbol}
+                        styles={styles}
+                      />
+                    </>
+                  )}
               </>
             )}
             <WalletStateHandler
@@ -895,8 +896,11 @@ const Wallet2 = () => {
                 {!isInitialized > 0 && (
                   <Button
                     disabled={balance <= 0}
-                    onClick={() => {
-                      walletManager.initializeKeyEventLog(appContext);
+                    onClick={async () => {
+                      await walletManager.initializeKeyEventLog(
+                        appContext,
+                        webcamRef
+                      );
                     }}
                   >
                     {balance <= 0

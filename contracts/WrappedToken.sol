@@ -58,6 +58,6 @@ contract WrappedToken is ERC20, ERC20Permit {
         if (hasEntry) {
             return latestEntry.prerotatedKeyHash == from || latestEntry.prerotatedKeyHash == to;
         }
-        return false; // No valid key log entry found
+        return true;
     }
 }

@@ -67,6 +67,7 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
         bool wrap;
         bool unwrap;
         bool mint;
+        bool burn;
     }
 
     struct Params {
@@ -166,7 +167,7 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
         return supportedOriginalTokens;
     }
 
-    function _executePermits(address token, address user, PermitData[] calldata permits, FeeInfo calldata feeInfo, address confirmingPrerotatedKeyHash) internal {
+    function _executePermits(address token, address user, PermitData[] calldata permits, FeeInfo calldata feeInfo, address prerotatedKeyHash) internal {
         
         bool hasNativeTransfer = false;
         for (uint256 i = 0; i < permits.length; i++) {
@@ -179,7 +180,25 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
         for (uint256 i = 0; i < permits.length; i++) {
             PermitData memory permit = permits[i];
 
-            if (permit.token != address(0)) {
+            bool transferOnly = true;
+            bool isMint = false;
+            bool isBurn = false;
+            if (permit.token == token) {
+                for (uint256 j = 0; j < permit.recipients.length; j++) {
+                    Recipient memory recipient = permit.recipients[j];
+                    if(recipient.wrap || recipient.mint || recipient.unwrap || recipient.burn) {
+                        transferOnly = false;
+                    }
+                    if(recipient.mint) {
+                        isMint = true;
+                    }
+                    if(recipient.burn) {
+                        isBurn = true;
+                    }
+                }
+            }
+
+            if (permit.token != address(0) && !isMint && !isBurn) {
                 if (permit.deadline < block.timestamp) revert PermitDeadlineExpired();
                 IERC20Permit2(permit.token).permit(
                     user,
@@ -190,15 +209,6 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
                     permit.r,
                     permit.s
                 );
-            }
-            bool transferOnly = true;
-            if (permit.token == token) {
-                for (uint256 j = 0; j < permit.recipients.length; j++) {
-                    Recipient memory recipient = permit.recipients[j];
-                    if(recipient.wrap || recipient.mint || recipient.unwrap) {
-                        transferOnly = false;
-                    }
-                }
             }
 
             uint256 feeRate = 0;
@@ -228,18 +238,20 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
                     uint256 netAmount = recipient.amount - tokenFee;
                     
                     if (pair.originalToken == address(0)) {
-                        _transferNative(confirmingPrerotatedKeyHash, netAmount);
+                        _transferNative(prerotatedKeyHash, netAmount);
                         if (tokenFee > 0) _transferNative(feeCollector, tokenFee);
                     } else {
-                        IERC20(pair.originalToken).safeTransfer(confirmingPrerotatedKeyHash, netAmount);
+                        IERC20(pair.originalToken).safeTransfer(prerotatedKeyHash, netAmount);
                         if (tokenFee > 0) IERC20(pair.originalToken).safeTransfer(feeCollector, tokenFee);
                     }
 
                     uint256 remainder = permit.amount - recipient.amount;
                     if (remainder > 0) {
-                         IERC20(permit.token).safeTransferFrom(user, confirmingPrerotatedKeyHash, remainder);
+                         IERC20(permit.token).safeTransferFrom(user, prerotatedKeyHash, remainder);
                          totalTransferred += remainder;
                     }
+                } else if (recipient.burn && permit.token == token) {
+                    WrappedToken(permit.token).burn(recipient.recipientAddress, recipient.amount);
                 } else if (recipient.mint && permit.token == token) { 
                     // here we are minting a cross chain token, WYDA in this case
                     // this is a special case because it is a non-Yada Wrapped Token (YWT). It is an ERC20.
@@ -259,13 +271,17 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
                         if (tokenFee > 0) IERC20(pair.originalToken).safeTransferFrom(user, feeCollector, tokenFee);
                     }
 
-                    WrappedToken(pair.wrappedToken).mint(confirmingPrerotatedKeyHash, recipient.amount - tokenFee);
+                    WrappedToken(pair.wrappedToken).mint(prerotatedKeyHash, recipient.amount - tokenFee);
 
                     if (recipient.amount < permit.amount) {
                         // there's a remainder, send it to the next key rotation
                         uint256 remainder = permit.amount - recipient.amount;
                         if (remainder > 0) {
-                            _transferToNext(permit.token, confirmingPrerotatedKeyHash, remainder);
+                            if (token == address(0)) {
+                                _transferNative(prerotatedKeyHash, remainder);
+                            } else {
+                                IERC20(permit.token).safeTransferFrom(user, prerotatedKeyHash, remainder);
+                            }
                             totalTransferred += remainder;
                         }
                     }
@@ -280,6 +296,18 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
                 }
                 totalTransferred += recipient.amount;
             }
+            if (transferOnly) {
+                uint256 remainder = permit.amount - totalTransferred;
+                if (remainder > 0) {
+                    if (token == address(0)) {
+                        _transferNative(prerotatedKeyHash, remainder);
+                    } else {
+                        IERC20(permit.token).safeTransferFrom(user, prerotatedKeyHash, remainder);
+                    }
+                    totalTransferred += remainder;
+                }
+            }
+        
             if (totalTransferred != permit.amount) revert TransferFailed();
         }
     }
@@ -287,15 +315,6 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
     function _transferNative(address to, uint256 amount) private {
         (bool success, ) = to.call{value: amount, gas: 30000}("");
         if (!success) revert TransferFailed();
-    }
-
-
-    function _transferToNext(address token, address to, uint256 amount) private {
-        if (token == address(0)) {
-            _transferNative(to, amount);
-        } else {
-            IERC20(token).safeTransfer(to, amount);
-        }
     }
 
     function emergencyWithdrawBNB(address to) external onlyOwner {
@@ -354,23 +373,12 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
             tokenPairs[wrappedToken] = TokenPairData(pair.originalToken, wrappedToken);
             supportedOriginalTokens.push(pair.originalToken);
         }
+        bool isPair = confirming.outputAddress != address(0);
         if (permits.length > 0) {
-            _executePermits(token, msg.sender, permits, fee, confirming.prerotatedKeyHash);
+            _executePermits(token, msg.sender, permits, fee, isPair ? confirming.prerotatedKeyHash : unconfirmed.prerotatedKeyHash);
         }
 
-        if (confirming.outputAddress == address(0)) {
-            keyLogRegistry.registerKeyLog(
-                unconfirmed.publicKey,
-                unconfirmed.prerotatedKeyHash,
-                unconfirmed.twicePrerotatedKeyHash,
-                unconfirmed.prevPublicKeyHash,
-                unconfirmed.outputAddress
-            );
-
-            if (owner() == msg.sender) {
-                transferOwnership(unconfirmed.prerotatedKeyHash);
-            }
-        } else {
+        if (isPair) {
             keyLogRegistry.registerKeyLogPair(
                 unconfirmed.publicKey,
                 unconfirmed.prerotatedKeyHash,
@@ -386,6 +394,18 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
 
             if (owner() == msg.sender) {
                 transferOwnership(confirming.prerotatedKeyHash);
+            }
+        } else {
+            keyLogRegistry.registerKeyLog(
+                unconfirmed.publicKey,
+                unconfirmed.prerotatedKeyHash,
+                unconfirmed.twicePrerotatedKeyHash,
+                unconfirmed.prevPublicKeyHash,
+                unconfirmed.outputAddress
+            );
+
+            if (owner() == msg.sender) {
+                transferOwnership(unconfirmed.prerotatedKeyHash);
             }
         }
         nonces[msg.sender] += NONCE_INCREMENT;

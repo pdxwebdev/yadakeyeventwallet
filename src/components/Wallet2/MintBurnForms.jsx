@@ -11,7 +11,7 @@ const MintForm = ({
   wrappedTokenSymbol,
   styles,
 }) => {
-  const { selectedToken, balance } = appContext;
+  const { selectedToken, balance, contractAddresses } = appContext;
   const [mintAmount, setMintAmount] = React.useState("");
   const [recipientAddress, setRecipientAddress] = React.useState("");
 

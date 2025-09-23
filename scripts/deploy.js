@@ -240,6 +240,7 @@ export async function main() {
         wrap: false,
         unwrap: false,
         mint: false,
+        burn: false,
       },
     ].filter((r) => r.amount > 0)
   );
@@ -326,6 +327,7 @@ export async function main() {
           wrap: r.wrap || false,
           unwrap: r.unwrap || false,
           mint: r.mint || false,
+          burn: r.burn || false,
         })),
         deadline: 0,
         v: 0,
@@ -369,6 +371,7 @@ export async function main() {
         wrap: r.wrap || false,
         unwrap: r.unwrap || false,
         mint: r.mint || false,
+        burn: r.burn || false,
       })),
       deadline: deadline,
       v: v,
@@ -416,6 +419,7 @@ export async function main() {
                   wrap: false,
                   unwrap: false,
                   mint: false,
+                  burn: false,
                 },
               ],
               tokenNonce
@@ -449,6 +453,7 @@ export async function main() {
           wrap: false,
           unwrap: false,
           mint: false,
+          burn: false,
         },
       ].filter((r) => r.amount > 0)
     );
