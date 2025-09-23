@@ -1,21 +1,11 @@
-/*
-SPDX-License-Identifier: YadaCoin Open Source License (YOSL) v1.1
-
-Copyright (c) 2017-2025 Matthew Vogel, Reynold Vogel, Inc.
-
-This software is licensed under YOSL v1.1 – for personal and research use only.
-NO commercial use, NO blockchain forks, and NO branding use without permission.
-
-For commercial license inquiries, contact: info@yadacoin.io
-
-Full license terms: see LICENSE.txt in this repository.
-*/
-
+// SPDX-License-Identifier: YadaCoin Open Source License (YOSL) v1.1
 pragma solidity ^0.8.0;
 
-import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
+import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 
-contract KeyLogRegistry is Ownable {
+contract KeyLogRegistry is Initializable, OwnableUpgradeable, UUPSUpgradeable {
     enum KeyEventFlag { INCEPTION, UNCONFIRMED, CONFIRMING }
 
     struct KeyLogEntry {
@@ -35,10 +25,29 @@ contract KeyLogRegistry is Ownable {
     mapping(address => uint256) public byPrerotatedKeyHash;
     mapping(address => uint256) public byTwicePrerotatedKeyHash;
 
+    address public authorizedCaller;
+
     event KeyLogRegistered(address indexed publicKeyHash, uint256 index);
     event KeyRotated(address indexed publicKeyHash, uint256 index);
 
-    constructor() Ownable(msg.sender) {}
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers(); // Prevents initialization in the implementation contract
+    }
+
+    function initialize(address initialOwner) public initializer {
+        __Ownable_init(initialOwner);
+        __UUPSUpgradeable_init();
+    }
+
+    modifier onlyAuthorized() {
+        require(msg.sender == authorizedCaller || msg.sender == owner(), "Not authorized");
+        _;
+    }
+
+    function setAuthorizedCaller(address _caller) external onlyOwner {
+        authorizedCaller = _caller;
+    }
 
     function registerKeyLog(
         bytes memory publicKey,
@@ -48,7 +57,6 @@ contract KeyLogRegistry is Ownable {
         address outputAddress
     ) external {
         address publicKeyHash = getAddressFromPublicKey(publicKey);
-        // Step 1: Validate using validateTransaction for a single entry
         (KeyEventFlag flag, ) = validateTransaction(
             publicKey,
             publicKeyHash,
@@ -56,10 +64,9 @@ contract KeyLogRegistry is Ownable {
             twicePrerotatedKeyHash,
             prevPublicKeyHash,
             outputAddress,
-            '0x', address(0), address(0), address(0), address(0), address(0), false
+            "", address(0), address(0), address(0), address(0), address(0), false
         );
 
-        // Step 2: Apply state changes after validation
         keyLogEntries.push(KeyLogEntry({
             twicePrerotatedKeyHash: twicePrerotatedKeyHash,
             prerotatedKeyHash: prerotatedKeyHash,
@@ -82,7 +89,6 @@ contract KeyLogRegistry is Ownable {
             byTwicePrerotatedKeyHash[twicePrerotatedKeyHash] = newIndex + 1;
         }
 
-        // Step 3: Emit events
         emit KeyLogRegistered(publicKeyHash, newIndex);
         if (flag != KeyEventFlag.UNCONFIRMED) {
             emit KeyRotated(publicKeyHash, newIndex);
@@ -103,7 +109,6 @@ contract KeyLogRegistry is Ownable {
     ) external onlyAuthorized {
         address unconfirmedPublicKeyHash = getAddressFromPublicKey(unconfirmedPublicKey);
         address confirmingPublicKeyHash = getAddressFromPublicKey(confirmingPublicKey);
-        // Step 1: Validate both entries in a single call
         (KeyEventFlag unconfirmedFlag, KeyEventFlag confirmingFlag) = validateTransaction(
             unconfirmedPublicKey,
             unconfirmedPublicKeyHash,
@@ -120,14 +125,13 @@ contract KeyLogRegistry is Ownable {
             true
         );
 
-        // Step 2: Apply state changes after validation
         keyLogEntries.push(KeyLogEntry({
             twicePrerotatedKeyHash: unconfirmedTwicePrerotatedKeyHash,
             prerotatedKeyHash: unconfirmedPrerotatedKeyHash,
             publicKeyHash: unconfirmedPublicKeyHash,
             prevPublicKeyHash: unconfirmedPrevPublicKeyHash,
             outputAddress: unconfirmedOutputAddress,
-            isOnChain: true, // Pair entries are always on-chain
+            isOnChain: true,
             flag: unconfirmedFlag
         }));
         uint256 unconfirmedIndex = keyLogEntries.length - 1;
@@ -149,7 +153,7 @@ contract KeyLogRegistry is Ownable {
             publicKeyHash: confirmingPublicKeyHash,
             prevPublicKeyHash: confirmingPrevPublicKeyHash,
             outputAddress: confirmingOutputAddress,
-            isOnChain: true, // Pair entries are always on-chain
+            isOnChain: true,
             flag: confirmingFlag
         }));
         uint256 confirmingIndex = keyLogEntries.length - 1;
@@ -165,7 +169,6 @@ contract KeyLogRegistry is Ownable {
             byTwicePrerotatedKeyHash[confirmingTwicePrerotatedKeyHash] = confirmingIndex + 1;
         }
 
-        // Step 3: Emit events
         emit KeyLogRegistered(unconfirmedPublicKeyHash, unconfirmedIndex);
         emit KeyLogRegistered(confirmingPublicKeyHash, confirmingIndex);
         emit KeyRotated(confirmingPublicKeyHash, confirmingIndex);
@@ -186,11 +189,9 @@ contract KeyLogRegistry is Ownable {
         address confirmingOutputAddress,
         bool isPair
     ) public view returns (KeyEventFlag, KeyEventFlag) {
-
         (KeyLogEntry memory lastEntry, bool hasEntries) = getLatestChainEntry(publicKey);
         address calculatedPublicKeyhash = getAddressFromPublicKey(publicKey);
 
-        // Validate previous entry if it exists (applies to the unconfirmed entry in a pair)
         if (hasEntries) {
             require(lastEntry.isOnChain, "Previous entry must be on-chain");
             require(lastEntry.publicKeyHash == prevPublicKeyHash, "Prev public key mismatch");
@@ -200,12 +201,10 @@ contract KeyLogRegistry is Ownable {
             revert("Inception event cannot have a prev_public_key_hash");
         }
 
-        // Ensure the provided publicKeyHash matches the computed one
         require(calculatedPublicKeyhash == publicKeyHash, "Public key hash mismatch");
         require(byPrerotatedKeyHash[prerotatedKeyHash] == 0, "Prerotated key hash already used");
         require(byTwicePrerotatedKeyHash[twicePrerotatedKeyHash] == 0, "Twice prerotated key hash already used");
 
-        // Determine the flag for the first (or only) entry
         KeyEventFlag firstFlag;
         if (!hasEntries && prevPublicKeyHash == address(0)) {
             require(outputAddress == prerotatedKeyHash, "Invalid inception");
@@ -217,22 +216,19 @@ contract KeyLogRegistry is Ownable {
             firstFlag = KeyEventFlag.CONFIRMING;
         }
 
-        // If not a pair, return only the first flag
         if (!isPair) {
             require(prerotatedKeyHash == outputAddress, "Confirming twice prerotated key hash already used");
             require(confirmingOutputAddress == address(0), "Confirming twice prerotated key hash already used");
-            return (firstFlag, KeyEventFlag.UNCONFIRMED); // Second flag is unused
+            return (firstFlag, KeyEventFlag.UNCONFIRMED);
         }
 
-        // Pair case: Validate the confirming entry and sequence
         require(getAddressFromPublicKey(confirmingPublicKey) == confirmingPublicKeyHash, "Invalid confirmingPublicKey");
         require(twicePrerotatedKeyHash == confirmingPrerotatedKeyHash, "Sequence mismatch: twicePrerotatedKeyHash != confirmingPrerotatedKeyHash");
         require(confirmingOutputAddress == confirmingPrerotatedKeyHash, "Invalid confirming conditions");
         require(prerotatedKeyHash == confirmingPublicKeyHash, "Sequence mismatch: prerotatedKeyHash != publicKeyHash");
         require(confirmingPrevPublicKeyHash == publicKeyHash, "Confirming prevPublicKeyHash must match unconfirmed publicKeyHash");
-        require(byPrerotatedKeyHash[confirmingPrerotatedKeyHash] == 0, "Confirming rerotated key hash already used");
+        require(byPrerotatedKeyHash[confirmingPrerotatedKeyHash] == 0, "Confirming prerotated key hash already used");
         require(byTwicePrerotatedKeyHash[confirmingTwicePrerotatedKeyHash] == 0, "Confirming twice prerotated key hash already used");
-
 
         return (KeyEventFlag.UNCONFIRMED, KeyEventFlag.CONFIRMING);
     }
@@ -243,7 +239,6 @@ contract KeyLogRegistry is Ownable {
         return address(uint160(uint256(hash)));
     }
 
-    // Add this function to KeyLogRegistry.sol
     function getLatestEntryByPrerotatedKeyHash(address prerotatedKeyHash) public view returns (KeyLogEntry memory, bool) {
         uint256 idx = byPrerotatedKeyHash[prerotatedKeyHash];
         if (idx == 0) {
@@ -357,13 +352,5 @@ contract KeyLogRegistry is Ownable {
         return (keyLogEntries[idx - 1], true);
     }
 
-    address public authorizedCaller;
-    modifier onlyAuthorized() {
-        require(msg.sender == authorizedCaller || msg.sender == owner(), "Not authorized");
-        _;
-    }
-
-    function setAuthorizedCaller(address _caller) external onlyOwner {
-        authorizedCaller = _caller;
-    }
+    function _authorizeUpgrade(address newImplementation) internal override onlyOwner {}
 }
