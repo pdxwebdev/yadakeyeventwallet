@@ -16,23 +16,6 @@ const WRAPPED_TOKEN_ABI = WrappedTokenArtifact.abi;
 
 const NATIVE_ASSET_ADDRESS = "0x0000000000000000000000000000000000000000";
 
-const readWIFKeyFromFile = (filePath) => {
-  try {
-    const wif = fs.readFileSync(filePath, "utf8").trim();
-    if (!wif) {
-      throw new Error("WIF key file is empty");
-    }
-    const decoded = bs58.decode(wif);
-    if (decoded.length !== 34 && decoded.length !== 38) {
-      throw new Error("Invalid WIF key length");
-    }
-    const privateKey = decoded.subarray(1, 33);
-    return ethers.hexlify(privateKey);
-  } catch (error) {
-    throw new Error(`Failed to read or parse WIF key: ${error.message}`);
-  }
-};
-
 const createWalletFromWIF = (wif) => {
   const decoded = bs58.decode(wif);
   if (decoded.length !== 34 && decoded.length !== 38) {
@@ -145,7 +128,7 @@ export async function main() {
     console.log(`Funded ${deployer.address} with 1000 ETH/BNB`);
   }
 
-  // Deploy KeyLogRegistry
+  // Deploy KeyLogRegistry as a UUPS proxy
   const KeyLogRegistry = await ethers.getContractFactory(
     "KeyLogRegistry",
     deployer
@@ -156,17 +139,24 @@ export async function main() {
       deployments.keyLogRegistryAddress
     );
     console.log(
-      "Using existing KeyLogRegistry:",
+      "Using existing KeyLogRegistry proxy:",
       deployments.keyLogRegistryAddress
     );
   } else {
-    keyLogRegistry = await KeyLogRegistry.deploy();
+    keyLogRegistry = await upgrades.deployProxy(
+      KeyLogRegistry,
+      [deployer.address], // Initialize with deployer as owner and bridge
+      {
+        initializer: "initialize",
+        kind: "uups",
+        deployer: deployer,
+      }
+    );
     await keyLogRegistry.waitForDeployment();
     deployments.keyLogRegistryAddress = await keyLogRegistry.getAddress();
-    console.log("KeyLogRegistry:", deployments.keyLogRegistryAddress);
+    console.log("KeyLogRegistry proxy:", deployments.keyLogRegistryAddress);
   }
   const keyLogRegistryAddress = deployments.keyLogRegistryAddress;
-
   // Deploy Bridge
   const Bridge = await ethers.getContractFactory("Bridge", deployer);
   let bridge;
@@ -178,17 +168,103 @@ export async function main() {
     );
     console.log("Using existing Bridge proxy:", deployments.bridgeAddress);
   } else {
-    bridge = await upgrades.deployProxy(Bridge, [keyLogRegistryAddress], {
-      initializer: "initialize",
-      kind: "uups",
-      deployer: deployer,
-    });
+    bridge = await upgrades.deployProxy(
+      Bridge,
+      [keyLogRegistryAddress, ethers.ZeroAddress],
+      {
+        initializer: "initialize",
+        kind: "uups",
+        deployer: deployer,
+      }
+    );
     await bridge.waitForDeployment();
     deployments.bridgeAddress = await bridge.getAddress();
-    console.log("Bridge deployed to:", deployments.bridgeAddress);
+    console.log("Bridge proxy deployed to:", deployments.bridgeAddress);
   }
   const bridgeAddress = deployments.bridgeAddress;
 
+  // Deploy WrappedToken implementation
+  const WrappedToken = await ethers.getContractFactory(
+    "WrappedToken",
+    deployer
+  );
+  const wrappedTokenImpl = await WrappedToken.deploy();
+  await wrappedTokenImpl.waitForDeployment();
+  deployments.wrappedTokenImplementation = await wrappedTokenImpl.getAddress();
+  console.log(
+    "WrappedToken implementation:",
+    deployments.wrappedTokenImplementation
+  );
+  // Deploy WrappedTokenBeacon
+  const WrappedTokenBeacon = await ethers.getContractFactory(
+    "WrappedTokenBeacon",
+    deployer
+  );
+  let beacon;
+  if (deployments.beaconAddress && !clean) {
+    beacon = await WrappedTokenBeacon.attach(deployments.beaconAddress);
+    console.log(
+      "Using existing WrappedTokenBeacon:",
+      deployments.beaconAddress
+    );
+  } else {
+    beacon = await ethers.deployContract("WrappedTokenBeacon", [
+      deployments.wrappedTokenImplementation,
+      deployments.bridgeAddress,
+    ]);
+    await beacon.waitForDeployment();
+    const beaconAddress = await beacon.getAddress();
+    const beaconContract = await ethers.getContractAt(
+      "WrappedTokenBeacon",
+      beaconAddress,
+      deployer
+    );
+
+    console.log(deployments.bridgeAddress);
+    console.log(deployments.wrappedTokenImplementation);
+    const currentImplementation = await beaconContract.implementation();
+    console.log(
+      "WrappedTokenBeacon already initialized with implementation:",
+      currentImplementation
+    );
+
+    const beaconOwner = await beaconContract.owner();
+    console.log("beaconOwner: ", beaconOwner);
+    await beacon.waitForDeployment();
+    deployments.beaconAddress = await beacon.getAddress();
+    console.log("WrappedTokenBeacon deployed to:", deployments.beaconAddress);
+  }
+  console.log("Beacon bridge address:", await beacon.bridgeAddress());
+  const beaconAddress = deployments.beaconAddress;
+  await bridge.connect(deployer).setWrappedTokenBeacon(beaconAddress);
+  console.log("Updated Bridge with WrappedTokenBeacon address:", beaconAddress);
+
+  // Deploy WrappedTokenFactory
+  const WrappedTokenFactory = await ethers.getContractFactory(
+    "WrappedTokenFactory",
+    deployer
+  );
+  let factory;
+  if (deployments.factoryAddress && !clean) {
+    console.log(
+      "Using existing WrappedTokenFactory:",
+      deployments.factoryAddress
+    );
+  } else {
+    factory = await upgrades.deployProxy(
+      WrappedTokenFactory,
+      [beaconAddress, deployer.address, deployments.bridgeAddress],
+      {
+        initializer: "initialize",
+        kind: "uups",
+        deployer: deployer,
+      }
+    );
+    await factory.waitForDeployment();
+    deployments.factoryAddress = await factory.getAddress();
+    console.log("WrappedTokenFactory deployed to:", deployments.factoryAddress);
+  }
+  const factoryAddress = deployments.factoryAddress;
   // Set KeyLogRegistry authorized caller
   const currentAuthorized = await keyLogRegistry.authorizedCaller();
   if (currentAuthorized !== bridgeAddress) {
@@ -202,10 +278,12 @@ export async function main() {
         ? "0x903DE6eD93C63Ac5bc51e4dAB50ED2D36e2811BA"
         : "0x37B2b1400292Ee6Ee59a4550704D46311FBDc569"
     );
+
+  // Register initial key log entry
   console.log("Registering initial key log entry...");
-  console.log("Deployer balance:", ethers.formatEther(balance));
   const gasCost = ethers.parseEther("0.1");
   balance = await ethers.provider.getBalance(keyData.currentSigner.address);
+  console.log("Deployer balance:", ethers.formatEther(balance));
 
   const nonce = await bridge.nonces(deployer.address);
   console.log("Nonce:", nonce.toString());
@@ -246,14 +324,14 @@ export async function main() {
   );
   const firstpermits = [permitbnb];
   await bridge.connect(deployer).registerKeyPairWithTransfer(
-    ethers.ZeroAddress, //token
+    ethers.ZeroAddress,
     {
       token: ethers.ZeroAddress,
       fee: 0,
       expires: 0,
       signature: "0x",
-    }, //fee
-    [], //tokenpairs
+    },
+    [], // No token pairs in initial registration
     firstpermits,
     unconfirmedKeyData,
     unconfirmedSignature,
@@ -272,6 +350,7 @@ export async function main() {
     `Initial key log entry registered with publicKeyHash: ${keyData.currentSigner.address}, outputAddress: ${keyData.nextSigner.address}`
   );
 
+  // Deploy MockERC20 contracts for non-native tokens
   const MockERC20 = await ethers.getContractFactory("MockERC20", nextDeployer);
   let yadaERC20;
   if (deployments.yadaERC20Address && !clean) {
@@ -292,23 +371,6 @@ export async function main() {
     console.log("Yada Cross-chain ($WYDA):", deployments.yadaERC20Address);
   }
   const yadaERC20Address = deployments.yadaERC20Address;
-
-  let mockPepe;
-  if (deployments.mockPepeAddress && !clean) {
-    mockPepe = await MockERC20.attach(deployments.mockPepeAddress);
-    console.log("Using existing Mock PEPE:", deployments.mockPepeAddress);
-  } else {
-    mockPepe = await MockERC20.connect(nextDeployer).deploy(
-      "Pepe",
-      "PEPE",
-      ethers.parseEther("1000"),
-      bridgeAddress // Pass bridgeAddress
-    );
-    await mockPepe.waitForDeployment();
-    deployments.mockPepeAddress = await mockPepe.getAddress();
-    console.log("Mock PEPE:", deployments.mockPepeAddress);
-  }
-  const mockPepeAddress = deployments.mockPepeAddress;
 
   async function generatePermit(
     tokenAddress,
@@ -380,19 +442,9 @@ export async function main() {
     };
   }
 
-  // Configure token pairs via Bridge
+  // Configure token pairs
   if (!deployments.configured || clean) {
-    const tokenPairs = [
-      [yadaERC20Address, "Wrapped YadaCoin", "WYDA", true, ethers.ZeroAddress],
-      [mockPepeAddress, "PEPE", "PEPE", false, ethers.ZeroAddress],
-      [NATIVE_ASSET_ADDRESS, "BNB", "BNB", false, ethers.ZeroAddress],
-    ];
-
-    const supportedTokens = [
-      yadaERC20Address,
-      mockPepeAddress,
-      NATIVE_ASSET_ADDRESS,
-    ];
+    const supportedTokens = [yadaERC20Address, NATIVE_ASSET_ADDRESS];
     const permits = await Promise.all(
       supportedTokens.map(async (tokenAddress) => {
         if (tokenAddress.toLowerCase() === NATIVE_ASSET_ADDRESS.toLowerCase()) {
@@ -502,7 +554,7 @@ export async function main() {
     const confirmingSignature = await nextNextDeployer.signMessage(
       ethers.getBytes(confirmingMessageHash)
     );
-
+    console.log(confirmingKeyData.prerotatedKeyHash);
     await bridge.connect(nextDeployer).registerKeyPairWithTransfer(
       ethers.ZeroAddress, //token
       {
@@ -519,13 +571,10 @@ export async function main() {
       confirmingSignature,
       { value: balance - gasCost }
     );
-    console.log("Added all token pairs: $YDA, $PEPE, BNB");
-
+    console.log("Added all token pairs: $YDA, BNB");
+    console.log("new keylog owner: ", await keyLogRegistry.owner());
     // deployments.wrappedTokenWMOCKAddress = await bridge.originalToWrapped(
     //   yadaERC20Address
-    // );
-    // deployments.wrappedTokenYMOCKAddress = await bridge.originalToWrapped(
-    //   mockPepeAddress
     // );
     // deployments.wrappedNativeTokenAddress = await bridge.originalToWrapped(
     //   NATIVE_ASSET_ADDRESS

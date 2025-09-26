@@ -15,16 +15,11 @@ import { BrowserRouter as Router, Routes, Route, Link } from "react-router-dom";
 import "./App.css";
 import Sandbox from "./pages/Sandbox";
 import Home from "./pages/Home";
-import Wallet from "./pages/Wallet";
 import WifToHdConversion from "./pages/WifToHDConversion";
-import Bridge from "./components/Bridge";
-import AdminPanel from "./pages/AdminPanel";
 import Markets from "./components/Markets";
 import { LoadingOverlay, Text } from "@mantine/core";
 import { useAppContext } from "./context/AppContext";
 import Wallet2 from "./pages/Wallet2";
-import { Notifications } from "@mantine/notifications";
-import Bridge2 from "./pages/Bridge2";
 
 // Main App component with the router
 function App() {
@@ -68,11 +63,7 @@ function App() {
           </Link>
         </nav>
         <Routes>
-          <Route path="/home" element={<Home />} />
-          <Route path="/sandbox" element={<Sandbox />} />
-          <Route path="/wallet" element={<Wallet />} />
           <Route path="/" element={<Wallet2 />} />
-          <Route path="/wif-to-hd" element={<WifToHdConversion />} />
           <Route
             path="/whitepaper"
             element={
@@ -85,10 +76,6 @@ function App() {
               />
             }
           />
-          {/* <Route path="/bridge" element={<Bridge />} /> */}
-          <Route path="/bridge" element={<Bridge2 />} />
-          <Route path="/markets" element={<Markets />} />
-          <Route path="/admin" element={<AdminPanel />} />
         </Routes>
       </Router>
     </>

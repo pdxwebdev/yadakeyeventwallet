@@ -8,11 +8,11 @@ import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import "./KeyLogRegistry.sol";
 
-interface IBridge2 {
+interface IBridge {
     function getOwner() external view returns (address);
 }
 
-contract WrappedToken is Initializable, ERC20Upgradeable, ERC20PermitUpgradeable, UUPSUpgradeable, OwnableUpgradeable {
+contract WrappedTokenUpgrade is Initializable, ERC20Upgradeable, ERC20PermitUpgradeable, UUPSUpgradeable, OwnableUpgradeable {
     address public bridge;
     KeyLogRegistry public keyLogRegistry;
 
@@ -31,7 +31,7 @@ contract WrappedToken is Initializable, ERC20Upgradeable, ERC20PermitUpgradeable
     }
 
     function owner() public view override returns (address) {
-        return IBridge2(bridge).getOwner();
+        return IBridge(bridge).getOwner();
     }
 
     modifier onlyBridge() {
@@ -66,4 +66,8 @@ contract WrappedToken is Initializable, ERC20Upgradeable, ERC20PermitUpgradeable
     }
 
     function _authorizeUpgrade(address newImplementation) internal override onlyOwner {}
+
+    function getTestString() external pure returns (string memory) {
+        return "Upgraded WrappedToken v5!";
+    }
 }

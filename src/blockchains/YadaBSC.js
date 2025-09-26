@@ -12,7 +12,10 @@ import {
   addresses,
   deployed,
   DEPLOY_ENV,
-  BRIDGE2_ABI,
+  BRIDGE_ABI,
+  ERC20_ABI,
+  WRAPPED_TOKEN_ABI,
+  KEYLOG_REGISTRY_ABI,
 } from "../shared/constants";
 import BridgeArtifact from "../utils/abis/Bridge.json";
 import KeyLogRegistryArtifact from "../utils/abis/KeyLogRegistry.json";
@@ -26,11 +29,6 @@ import {
   createParamsArrayFromObject,
   signatureFields,
 } from "../utils/signature";
-
-const BRIDGE_ABI = BridgeArtifact.abi;
-const KEYLOG_REGISTRY_ABI = KeyLogRegistryArtifact.abi;
-const ERC20_ABI = MockERC20Artifact.abi;
-const WRAPPED_TOKEN_ABI = WrappedTokenArtifact.abi;
 
 class YadaBSC {
   constructor() {}
@@ -882,90 +880,6 @@ class YadaBSC {
     }
   }
 
-  async fetchFeeEstimate(appContext) {
-    const { setFeeEstimate, parsedData, contractAddresses, privateKey, log } =
-      appContext;
-    if (log.length <= 0) return;
-    const lastLogEntry = log[log.length - 1];
-    if (lastLogEntry.publicKeyHash !== parsedData.prevPublicKeyHash) return;
-    const signer = new ethers.Wallet(
-      ethers.hexlify(privateKey.privateKey),
-      localProvider
-    );
-    if (!signer) {
-      notifications.show({
-        title: "Error",
-        message: "No signer available for fee estimation",
-        color: "red",
-      });
-      return;
-    }
-
-    try {
-      const bridge = new ethers.Contract(
-        contractAddresses.bridgeAddress,
-        BRIDGE_ABI,
-        signer
-      );
-
-      // Estimate gas for a sample transaction (using registerKeyWithTransfer as reference)
-      const publicKey = Buffer.from(
-        signer.signingKey.publicKey.slice(2),
-        "hex"
-      ).slice(1);
-      const publicKeyHash = await signer.getAddress();
-      const prerotatedKeyHash = parsedData.prerotatedKeyHash; // Placeholder for estimation
-      const twicePrerotatedKeyHash = parsedData.twicePrerotatedKeyHash;
-      const prevPublicKeyHash = parsedData.prevPublicKeyHash;
-      const outputAddress = parsedData.prerotatedKeyHash;
-      const hasRelationship = false;
-      const permits = [];
-
-      // Get gas estimate for a typical transaction
-      const gasEstimate = await bridge.registerKeyWithTransfer.estimateGas(
-        publicKey,
-        publicKeyHash,
-        prerotatedKeyHash,
-        twicePrerotatedKeyHash,
-        prevPublicKeyHash,
-        outputAddress,
-        hasRelationship,
-        permits,
-        { value: 0 }
-      );
-
-      // Get current gas price
-      const feeData = await localProvider.getFeeData();
-      const gasPrice = feeData.gasPrice;
-
-      // Calculate estimated fee (with 50% buffer for safety)
-      const estimatedFee = (gasEstimate * gasPrice * 150n) / 100n;
-
-      // Format fee in ETH/BNB
-      const formattedFee = {
-        estimatedFee: ethers.formatEther(estimatedFee),
-        gasPrice: ethers.formatUnits(gasPrice, "gwei"),
-        gasLimit: gasEstimate.toString(),
-      };
-
-      setFeeEstimate(formattedFee);
-
-      notifications.show({
-        title: "Success",
-        message: "Fee estimate updated",
-        color: "green",
-      });
-    } catch (error) {
-      console.error("Error fetching fee estimate:", error);
-      notifications.show({
-        title: "Error",
-        message: "Failed to estimate transaction fee",
-        color: "red",
-      });
-      setFeeEstimate(null);
-    }
-  }
-
   // Fetches token balances
   async fetchBalance(appContext) {
     const {
@@ -1563,7 +1477,9 @@ class YadaBSC {
       console.log(signer.address);
       const response = await axios.post("http://localhost:3001/upgrade", {
         upgradeEnv: DEPLOY_ENV === "localhost" ? "upgrade" : "upgradetest",
-        proxyAddress: contractAddresses.bridgeAddress,
+        bridgeProxyAddress: contractAddresses.bridgeAddress,
+        keyLogRegistryProxyAddress: contractAddresses.keyLogRegistryAddress,
+        wrappedTokenProxyAddresses: [contractAddresses.yadaERC20Address],
         wif: wif,
       });
       const { status, addresses, error } = response.data;
@@ -2055,7 +1971,7 @@ class YadaBSC {
     );
     const bridge = new ethers.Contract(
       contractAddresses.bridgeAddress,
-      BRIDGE2_ABI,
+      BRIDGE_ABI,
       signer
     );
     await bridge.emergencyWithdrawBNB(signer.address);
@@ -2244,7 +2160,6 @@ class YadaBSC {
     const { contractAddresses } = appContext;
     const supportedTokens = [
       { address: contractAddresses.yadaERC20Address },
-      { address: contractAddresses.mockPepeAddress },
       { address: ethers.ZeroAddress },
     ];
     const result = await this.buildAndExecuteTransaction(

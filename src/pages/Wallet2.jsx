@@ -365,9 +365,6 @@ const Wallet2 = () => {
   useEffect(() => {
     if (privateKey && isInitialized) {
       walletManager.buildTransactionHistory(appContext);
-      if (log.length > 0 && log.length !== parsedData.rotation) {
-        walletManager.fetchFeeEstimate(appContext);
-      }
     }
   }, [
     privateKey,

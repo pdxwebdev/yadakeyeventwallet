@@ -5,7 +5,7 @@ import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 
-contract KeyLogRegistry is Initializable, OwnableUpgradeable, UUPSUpgradeable {
+contract KeyLogRegistryUpgrade is Initializable, OwnableUpgradeable, UUPSUpgradeable {
     enum KeyEventFlag { INCEPTION, UNCONFIRMED, CONFIRMING }
 
     struct KeyLogEntry {
@@ -367,5 +367,10 @@ contract KeyLogRegistry is Initializable, OwnableUpgradeable, UUPSUpgradeable {
     function _transferOwnershipForKeyRotation(address newOwner) internal onlyAuthorized {
         if (newOwner == address(0)) revert ZeroAddress();
         _transferOwnership(newOwner);
+    }
+
+    // New function for testing
+    function getTestString() external pure returns (string memory) {
+        return "Upgraded KeyLogRegistry v5!";
     }
 }

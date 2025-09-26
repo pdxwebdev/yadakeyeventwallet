@@ -4,17 +4,12 @@ import { NavLink, ScrollArea } from "@mantine/core";
 import { IconChevronRight } from "@tabler/icons-react";
 import { ethers } from "ethers";
 import { notifications } from "@mantine/notifications";
-import { BLOCKCHAINS } from "../../shared/constants";
+import { BLOCKCHAINS, BRIDGE_ABI } from "../../shared/constants";
 import BridgeArtifact from "../../utils/abis/Bridge.json";
 import KeyLogRegistryArtifact from "../../utils/abis/KeyLogRegistry.json";
 import MockERC20Artifact from "../../utils/abis/MockERC20.json";
 import WrappedTokenArtifact from "../../utils/abis/WrappedToken.json";
 import { useAppContext } from "../../context/AppContext";
-
-const BRIDGE_ABI = BridgeArtifact.abi;
-const KEYLOG_REGISTRY_ABI = KeyLogRegistryArtifact.abi;
-const WRAPPED_TOKEN_ABI = WrappedTokenArtifact.abi;
-const ERC20_ABI = MockERC20Artifact.abi;
 
 const BlockchainNav = () => {
   const {

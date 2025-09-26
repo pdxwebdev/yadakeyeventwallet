@@ -12,11 +12,6 @@ import MockERC20Artifact from "../../utils/abis/MockERC20.json";
 import WrappedTokenArtifact from "../../utils/abis/WrappedToken.json";
 import axios from "axios";
 
-const BRIDGE_ABI = BridgeArtifact.abi;
-const KEYLOG_REGISTRY_ABI = KeyLogRegistryArtifact.abi;
-const ERC20_ABI = MockERC20Artifact.abi;
-const WRAPPED_TOKEN_ABI = WrappedTokenArtifact.abi;
-
 const TokenSelector = () => {
   const appContext = useAppContext();
   const {

@@ -136,13 +136,21 @@ app.post("/check-deployment", async (req, res) => {
 
 app.post("/upgrade", async (req, res) => {
   try {
-    const { upgradeEnv, proxyAddress, wif } = req.body;
+    const {
+      upgradeEnv,
+      bridgeProxyAddress,
+      keyLogRegistryProxyAddress,
+      wrappedTokenProxyAddresses,
+      wif,
+    } = req.body;
 
     // Prepare npm run deploy command with arguments
     const args = ["run", upgradeEnv];
     const env = {
       ...process.env,
-      PROXY_ADDRESS: proxyAddress,
+      BRIDGE_PROXY_ADDRESS: bridgeProxyAddress,
+      KEY_LOG_REGISTRY_PROXY_ADDRESS: keyLogRegistryProxyAddress,
+      WRAPPED_TOKEN_PROXY_ADDRESSES: wrappedTokenProxyAddresses,
       WIF: wif,
     };
     console.log(env);
@@ -168,11 +176,11 @@ app.post("/upgrade", async (req, res) => {
 
     console.log("NPM command succeeded:", stdout);
     // Extract the JSON-like object using a regex
-    const match = stdout.match(/\{[\s\S]*?\}/);
-    if (match) {
+    const extracted = extractFirstJsonLike(stdout);
+    if (extracted) {
       try {
         // Use Node's VM to safely evaluate the object-like string
-        jsonObj = vm.runInNewContext(`(${match[0]})`);
+        jsonObj = vm.runInNewContext(`(${extracted})`);
         console.log("Extracted JSON:", jsonObj);
       } catch (e) {
         console.error("Failed to parse output:", e);
@@ -194,7 +202,21 @@ app.post("/upgrade", async (req, res) => {
     res.status(500).json({ status: false, error: err.message });
   }
 });
+function extractFirstJsonLike(str) {
+  const start = str.indexOf("{");
+  if (start === -1) return null;
 
+  let depth = 0;
+  for (let i = start; i < str.length; i++) {
+    if (str[i] === "{") depth++;
+    else if (str[i] === "}") depth--;
+
+    if (depth === 0) {
+      return str.slice(start, i + 1);
+    }
+  }
+  return null;
+}
 // Increase server timeout to handle long-running deployments
 const server = app.listen(port, () => {
   console.log(`Deploy server running at http://localhost:${port}`);

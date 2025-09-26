@@ -1,14 +1,18 @@
 import { ethers } from "ethers";
 import BridgeArtifact from "../utils/abis/Bridge.json";
-import Bridge2Artifact from "../utils/abis/Bridge2.json";
+import BridgeUpgradeArtifact from "../utils/abis/BridgeUpgrade.json";
 import KeyLogRegistryArtifact from "../utils/abis/KeyLogRegistry.json";
+import KeyLogRegistryUpgradeArtifact from "../utils/abis/KeyLogRegistryUpgrade.json";
 import WrappedTokenArtifact from "../utils/abis/WrappedToken.json";
+import WrappedTokenUpgradeArtifact from "../utils/abis/WrappedTokenUpgrade.json";
 import WrappedNativeTokenArtifact from "../utils/abis/WrappedNativeToken.json";
 import MockERC20Artifact from "../utils/abis/MockERC20.json";
 export const BRIDGE_ABI = BridgeArtifact.abi;
-export const BRIDGE2_ABI = Bridge2Artifact.abi;
+export const BRIDGE_UPGRADE_ABI = BridgeUpgradeArtifact.abi;
 export const KEYLOG_REGISTRY_ABI = KeyLogRegistryArtifact.abi;
+export const KEYLOG_REGISTRY_UPGRADE_ABI = KeyLogRegistryUpgradeArtifact.abi;
 export const WRAPPED_TOKEN_ABI = WrappedTokenArtifact.abi;
+export const WRAPPED_TOKEN_UPGRADE_ABI = WrappedTokenUpgradeArtifact.abi;
 export const WRAPPED_NATIVE_TOKEN_ABI = WrappedNativeTokenArtifact.abi;
 export const ERC20_ABI = MockERC20Artifact.abi;
 
@@ -67,7 +71,6 @@ export const addresses = {
   keyLogRegistryAddress: "0x61EcAe6576b33636F268bfaA07d78875E50545F7",
   bridgeAddress: "0x9D4EC8a45bfC4c1884a36a0acC953d1D7958014A",
   yadaERC20Address: "0xc80669516Fbe4B042B44C249DE3D379Cc0D73de1",
-  mockPepeAddress: "0x025E6B35096B3C74c98d65f8dD7F6bEde913fc3F",
   configured: true,
 };
 

@@ -37,7 +37,7 @@ interface IUUPSUpgradeable {
     function owner() external view returns (address);
 }
 
-contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, ReentrancyGuardUpgradeable {
+contract BridgeUpgrade is Initializable, OwnableUpgradeable, UUPSUpgradeable, ReentrancyGuardUpgradeable {
     using SafeERC20 for IERC20;
     using ECDSA for bytes32;
     using MessageHashUtils for bytes32;
@@ -420,5 +420,9 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
     function setWrappedTokenBeacon(address _wrappedTokenBeacon) external onlyOwner {
         if (_wrappedTokenBeacon == address(0)) revert ZeroAddress();
         wrappedTokenBeacon = _wrappedTokenBeacon;
+    }
+
+    function testUpgrade() external pure returns (string memory) {
+      return 'bridge v6';
     }
 }
