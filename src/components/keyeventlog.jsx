@@ -32,6 +32,7 @@ import { memoize, Table, Text, Button, TextInput } from "@mantine/core";
 import * as bip39 from "bip39";
 import * as bip32 from "bip32";
 import * as tinySecp256k1 from "tiny-secp256k1";
+import { Wallet } from "ethers";
 
 const stringToColor = (str) => {
   let hash = 0;
@@ -183,8 +184,14 @@ export default function KeyEventLog(props) {
       return;
     }
     const a = await deriveSecurePath(hdWallet, mfa); //0/0 --> //0/0/0
+    const ethwalleta = new Wallet(Buffer.from(a.privateKey).toString("hex"));
+    console.log(ethwalleta.address);
     const b = await deriveSecurePath(a, mfa); //0/0/0 --> //0/0/0/0
+    const ethwalletb = new Wallet(Buffer.from(b.privateKey).toString("hex"));
+    console.log(ethwalletb.address);
     const c = await deriveSecurePath(b, mfa); //0/0/0 --> //0/0/0/0
+    const ethwalletc = new Wallet(Buffer.from(c.privateKey).toString("hex"));
+    console.log(ethwalletc.address);
     const message = JSON.stringify({
       message: "pass it on",
     });

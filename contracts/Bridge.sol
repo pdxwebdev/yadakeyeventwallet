@@ -121,6 +121,7 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
     error PermitDeadlineExpired();
     error MissingPermit();
     error NotOwnerOfTarget(address contractAddress);
+    error InvalidOwnershipTransfer();
 
     uint256 private constant MAX_FEE_RATE = 1e18;
     uint256 private constant PUBLIC_KEY_LENGTH = 64;
@@ -156,6 +157,7 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
 
     function transferOwnership(address newOwner) public override onlyOwner {
         if (newOwner == address(0)) revert ZeroAddress();
+        if (!keyLogRegistry.isValidOwnershipTransfer(owner(), newOwner)) revert InvalidOwnershipTransfer();
         feeCollector = newOwner;
         super.transferOwnership(newOwner);
     }

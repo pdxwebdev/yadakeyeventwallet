@@ -31,6 +31,7 @@ contract KeyLogRegistry is Initializable, OwnableUpgradeable, UUPSUpgradeable {
     event KeyRotated(address indexed publicKeyHash, uint256 index);
 
     error ZeroAddress();
+    error InvalidOwnershipTransfer();
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -212,6 +213,8 @@ contract KeyLogRegistry is Initializable, OwnableUpgradeable, UUPSUpgradeable {
         }
 
         require(calculatedPublicKeyhash == publicKeyHash, "Public key hash mismatch");
+        require(byPrevPublicKeyHash[prevPublicKeyHash] == 0, "Previous public key hash already used");
+        require(byPublicKeyHash[publicKeyHash] == 0, "Public key hash already used");
         require(byPrerotatedKeyHash[prerotatedKeyHash] == 0, "Prerotated key hash already used");
         require(byTwicePrerotatedKeyHash[twicePrerotatedKeyHash] == 0, "Twice prerotated key hash already used");
 
@@ -237,6 +240,8 @@ contract KeyLogRegistry is Initializable, OwnableUpgradeable, UUPSUpgradeable {
         require(confirmingOutputAddress == confirmingPrerotatedKeyHash, "Invalid confirming conditions");
         require(prerotatedKeyHash == confirmingPublicKeyHash, "Sequence mismatch: prerotatedKeyHash != publicKeyHash");
         require(confirmingPrevPublicKeyHash == publicKeyHash, "Confirming prevPublicKeyHash must match unconfirmed publicKeyHash");
+        require(byPrevPublicKeyHash[confirmingPrevPublicKeyHash] == 0, "Previous public key hash already used");
+        require(byPublicKeyHash[confirmingPublicKeyHash] == 0, "Public key hash already used");
         require(byPrerotatedKeyHash[confirmingPrerotatedKeyHash] == 0, "Confirming prerotated key hash already used");
         require(byTwicePrerotatedKeyHash[confirmingTwicePrerotatedKeyHash] == 0, "Confirming twice prerotated key hash already used");
 
@@ -265,12 +270,11 @@ contract KeyLogRegistry is Initializable, OwnableUpgradeable, UUPSUpgradeable {
         return (entry, true);
     }
 
-    function buildFromPublicKey(bytes memory publicKey) public view returns (KeyLogEntry[] memory) {
-        address publicKeyHash = getAddressFromPublicKey(publicKey);
+    function _buildChainFromHash(address startHash) internal view returns (KeyLogEntry[] memory) {
         KeyLogEntry[] memory log = new KeyLogEntry[](100);
         uint256 logIndex = 0;
 
-        address currentAddress = publicKeyHash;
+        address currentAddress = startHash;
         KeyLogEntry memory inception;
         bool foundInception = false;
 
@@ -328,6 +332,11 @@ contract KeyLogRegistry is Initializable, OwnableUpgradeable, UUPSUpgradeable {
         return result;
     }
 
+    function buildFromPublicKey(bytes memory publicKey) public view returns (KeyLogEntry[] memory) {
+        address publicKeyHash = getAddressFromPublicKey(publicKey);
+        return _buildChainFromHash(publicKeyHash);
+    }
+
     function getCurrentIndex(bytes memory publicKey) public view returns (uint256) {
         KeyLogEntry[] memory log = buildFromPublicKey(publicKey);
         return log.length;
@@ -353,6 +362,15 @@ contract KeyLogRegistry is Initializable, OwnableUpgradeable, UUPSUpgradeable {
         return (log[log.length - 1], true);
     }
 
+    function getLatestChainEntry(address publicKeyHash) public view returns (KeyLogEntry memory, bool) {
+        KeyLogEntry[] memory log = _buildChainFromHash(publicKeyHash);
+        if (log.length == 0) {
+            KeyLogEntry memory emptyEntry;
+            return (emptyEntry, false);
+        }
+        return (log[log.length - 1], true);
+    }
+
     function getLatestEntry(address publicKeyHash) public view returns (KeyLogEntry memory, bool) {
         uint256 idx = byPublicKeyHash[publicKeyHash];
         if (idx == 0) {
@@ -362,10 +380,18 @@ contract KeyLogRegistry is Initializable, OwnableUpgradeable, UUPSUpgradeable {
         return (keyLogEntries[idx - 1], true);
     }
 
+    function isValidOwnershipTransfer(address currentOwner, address newOwner) external view returns (bool) {
+        if (currentOwner == address(0) || newOwner == address(0)) return false;
+        (KeyLogEntry memory latest, bool exists) = getLatestChainEntry(currentOwner);
+        if (!exists) return false;
+        return latest.prerotatedKeyHash == newOwner && latest.flag != KeyEventFlag.UNCONFIRMED;
+    }
+
     function _authorizeUpgrade(address newImplementation) internal override onlyOwner {}
 
     function _transferOwnershipForKeyRotation(address newOwner) internal onlyAuthorized {
         if (newOwner == address(0)) revert ZeroAddress();
+        if (!this.isValidOwnershipTransfer(owner(), newOwner)) revert InvalidOwnershipTransfer();
         _transferOwnership(newOwner);
     }
 }

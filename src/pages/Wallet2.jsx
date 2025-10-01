@@ -705,131 +705,137 @@ const Wallet2 = () => {
             styles={styles.card}
           >
             <WalletHeader styles={styles} />
-            {selectedBlockchainObject.isBridge && isOwner && (
-              <>
-                <TokenPairsForm appContext={appContext} webcamRef={webcamRef} />
-                <SendBalanceFrom />
-              </>
-            )}
-            <TokenSelector />
-            {isInitialized && selectedBlockchainObject.isBridge && (
-              <>
-                <Group mt="md" align="flex-end">
-                  <div style={{ flex: 1 }}>
-                    <NumberInput
-                      label={`Wrap Amount (${tokenSymbol})`}
-                      value={wrapAmount}
-                      onChange={(value) =>
-                        setWrapAmount(
-                          value === undefined ? "" : value.toString()
-                        )
-                      }
-                      placeholder="Enter amount to wrap"
-                      min={0}
-                      step={0.01}
-                      decimalScale={6}
-                      allowNegative={false}
-                      disabled={
-                        !isDeployed ||
-                        !isInitialized ||
-                        !tokenPairs.some(
-                          (p) =>
-                            p.original.toLowerCase() ===
-                            selectedToken?.toLowerCase()
-                        )
-                      }
-                      styles={styles.input}
-                    />
-                    <Button
-                      onClick={handleWrap}
-                      disabled={
-                        !isDeployed ||
-                        !isInitialized ||
-                        !tokenPairs.some(
-                          (p) =>
-                            p.original.toLowerCase() ===
-                            selectedToken?.toLowerCase()
-                        ) ||
-                        !wrapAmount ||
-                        parseFloat(wrapAmount) <= 0 ||
-                        (balance &&
-                          parseFloat(wrapAmount) > parseFloat(balance.original))
-                      }
-                      mt="sm"
-                    >
-                      Wrap
-                    </Button>
-                  </div>
-                  <div style={{ flex: 1 }}>
-                    <NumberInput
-                      label={`Unwrap Amount (${wrappedTokenSymbol})`}
-                      value={unwrapAmount}
-                      onChange={(value) =>
-                        setUnwrapAmount(
-                          value === undefined ? "" : value.toString()
-                        )
-                      }
-                      placeholder="Enter amount to unwrap"
-                      min={0}
-                      step={0.01}
-                      decimalScale={6}
-                      allowNegative={false}
-                      disabled={
-                        !isDeployed ||
-                        !isInitialized ||
-                        !tokenPairs.some(
-                          (p) =>
-                            p.original.toLowerCase() ===
-                            selectedToken?.toLowerCase()
-                        )
-                      }
-                      styles={styles.input}
-                    />
-                    <Button
-                      onClick={handleUnwrap}
-                      disabled={
-                        !isDeployed ||
-                        !isInitialized ||
-                        !tokenPairs.some(
-                          (p) =>
-                            p.original.toLowerCase() ===
-                            selectedToken?.toLowerCase()
-                        ) ||
-                        !unwrapAmount ||
-                        parseFloat(unwrapAmount) <= 0 ||
-                        (balance &&
-                          parseFloat(unwrapAmount) >
-                            parseFloat(balance.wrapped))
-                      }
-                      mt="sm"
-                    >
-                      Unwrap
-                    </Button>
-                  </div>
-                </Group>
-                {isOwner &&
-                  selectedToken === contractAddresses.yadaERC20Address && (
+            {isInitialized &&
+              selectedBlockchainObject.isBridge &&
+              log.length === parsedData.rotation && (
+                <>
+                  {selectedBlockchainObject.isBridge && isOwner && (
                     <>
-                      <MintForm
-                        walletManager={walletManager}
+                      <TokenPairsForm
                         appContext={appContext}
                         webcamRef={webcamRef}
-                        tokenSymbol={tokenSymbol}
-                        wrappedTokenSymbol={wrappedTokenSymbol}
-                        styles={styles}
                       />
-                      <BurnForm
-                        walletManager={walletManager}
-                        appContext={appContext}
-                        webcamRef={webcamRef}
-                        tokenSymbol={tokenSymbol}
-                        wrappedTokenSymbol={wrappedTokenSymbol}
-                        styles={styles}
-                      />
+                      <SendBalanceFrom />
                     </>
                   )}
-              </>
-            )}
+                  <TokenSelector />
+                  <Group mt="md" align="flex-end">
+                    <div style={{ flex: 1 }}>
+                      <NumberInput
+                        label={`Wrap Amount (${tokenSymbol})`}
+                        value={wrapAmount}
+                        onChange={(value) =>
+                          setWrapAmount(
+                            value === undefined ? "" : value.toString()
+                          )
+                        }
+                        placeholder="Enter amount to wrap"
+                        min={0}
+                        step={0.01}
+                        decimalScale={6}
+                        allowNegative={false}
+                        disabled={
+                          !isDeployed ||
+                          !isInitialized ||
+                          !tokenPairs.some(
+                            (p) =>
+                              p.original.toLowerCase() ===
+                              selectedToken?.toLowerCase()
+                          )
+                        }
+                        styles={styles.input}
+                      />
+                      <Button
+                        onClick={handleWrap}
+                        disabled={
+                          !isDeployed ||
+                          !isInitialized ||
+                          !tokenPairs.some(
+                            (p) =>
+                              p.original.toLowerCase() ===
+                              selectedToken?.toLowerCase()
+                          ) ||
+                          !wrapAmount ||
+                          parseFloat(wrapAmount) <= 0 ||
+                          (balance &&
+                            parseFloat(wrapAmount) >
+                              parseFloat(balance.original))
+                        }
+                        mt="sm"
+                      >
+                        Wrap
+                      </Button>
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <NumberInput
+                        label={`Unwrap Amount (${wrappedTokenSymbol})`}
+                        value={unwrapAmount}
+                        onChange={(value) =>
+                          setUnwrapAmount(
+                            value === undefined ? "" : value.toString()
+                          )
+                        }
+                        placeholder="Enter amount to unwrap"
+                        min={0}
+                        step={0.01}
+                        decimalScale={6}
+                        allowNegative={false}
+                        disabled={
+                          !isDeployed ||
+                          !isInitialized ||
+                          !tokenPairs.some(
+                            (p) =>
+                              p.original.toLowerCase() ===
+                              selectedToken?.toLowerCase()
+                          )
+                        }
+                        styles={styles.input}
+                      />
+                      <Button
+                        onClick={handleUnwrap}
+                        disabled={
+                          !isDeployed ||
+                          !isInitialized ||
+                          !tokenPairs.some(
+                            (p) =>
+                              p.original.toLowerCase() ===
+                              selectedToken?.toLowerCase()
+                          ) ||
+                          !unwrapAmount ||
+                          parseFloat(unwrapAmount) <= 0 ||
+                          (balance &&
+                            parseFloat(unwrapAmount) >
+                              parseFloat(balance.wrapped))
+                        }
+                        mt="sm"
+                      >
+                        Unwrap
+                      </Button>
+                    </div>
+                  </Group>
+                  {isOwner &&
+                    selectedToken === contractAddresses.yadaERC20Address && (
+                      <>
+                        <MintForm
+                          walletManager={walletManager}
+                          appContext={appContext}
+                          webcamRef={webcamRef}
+                          tokenSymbol={tokenSymbol}
+                          wrappedTokenSymbol={wrappedTokenSymbol}
+                          styles={styles}
+                        />
+                        <BurnForm
+                          walletManager={walletManager}
+                          appContext={appContext}
+                          webcamRef={webcamRef}
+                          tokenSymbol={tokenSymbol}
+                          wrappedTokenSymbol={wrappedTokenSymbol}
+                          styles={styles}
+                        />
+                      </>
+                    )}
+                </>
+              )}
             <WalletStateHandler
               privateKey={privateKey}
               isSubmitting={isSubmitting}

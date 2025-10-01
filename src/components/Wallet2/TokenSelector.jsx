@@ -40,7 +40,11 @@ const TokenSelector = () => {
       <Select
         data={tokenOptions}
         value={selectedToken}
-        onChange={appContext.setSelectedToken}
+        onChange={(newValue) => {
+          if (newValue !== null) {
+            appContext.setSelectedToken(newValue);
+          }
+        }}
         placeholder={
           supportedTokens?.length > 0 ? "Select a token" : "No tokens available"
         }

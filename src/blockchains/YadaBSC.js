@@ -1294,15 +1294,15 @@ class YadaBSC {
     if (result.status === true) {
       notifications.show({
         title: "Success",
-        message: `${
+        message: `${ethers.formatEther(
           isBNB ? totalBNBToRecipients : totalRecipientValue
-        } tokens wrapped successfully!`,
+        )} tokens sent successfully!`,
         color: "green",
       });
       console.log(
-        `${
+        `${ethers.formatEther(
           isBNB ? totalBNBToRecipients : totalRecipientValue
-        } tokens wrapped successfully`
+        )} tokens sent successfully`
       );
     } else {
       notifications.show({
@@ -2128,7 +2128,7 @@ class YadaBSC {
         (p) => p.token === ethers.ZeroAddress
       ).recipients[0].amount -= gasCost;
 
-      await bridge.registerKeyPairWithTransfer(
+      const tx = await bridge.registerKeyPairWithTransfer(
         token, //token
         tokenFee, //fee
         tokenPairsToAdd,
@@ -2139,6 +2139,7 @@ class YadaBSC {
         confirmingSignature,
         { value: balance - gasCost }
       );
+      await tx.wait();
 
       const keyLogRegistry = new ethers.Contract(
         contractAddresses.keyLogRegistryAddress,

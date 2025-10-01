@@ -68,9 +68,12 @@ export const BLOCKCHAINS = [
 ];
 
 export const addresses = {
-  keyLogRegistryAddress: "0x61EcAe6576b33636F268bfaA07d78875E50545F7",
-  bridgeAddress: "0x9D4EC8a45bfC4c1884a36a0acC953d1D7958014A",
-  yadaERC20Address: "0xc80669516Fbe4B042B44C249DE3D379Cc0D73de1",
+  keyLogRegistryAddress: "0xd6cf412EdA33F81b7C097DCc78E1AF08910f995c",
+  bridgeAddress: "0xCD4158786120d0E150E934a2676Fd0c354Ce4594",
+  wrappedTokenImplementation: "0x4b2d1bA6d99Ba1a3EA8128Cd74Dd4DC5Fdd3f09E",
+  beaconAddress: "0x4b32afdac04F20E84baE73DeA4Ed04a45Db24603",
+  factoryAddress: "0xc39e3414964Ef6ADCe070403E0dbb2dCA8D3cf1A",
+  yadaERC20Address: "0x3f2B5081c576908316a5b1c5938b73CaFE02C6C0",
   configured: true,
 };
 

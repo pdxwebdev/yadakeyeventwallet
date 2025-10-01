@@ -107,8 +107,7 @@ const WalletStateHandler = ({
         <Stack align="center" spacing="md">
           {
             <Text>
-              Current key (rotation {log.length}) is not initialized. Please
-              scan the correct key (rotation {log.length}) to proceed.
+              Please scan key rotation <strong>{log.length}</strong> to proceed.
             </Text>
           }
           <Button

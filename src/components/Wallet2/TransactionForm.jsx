@@ -22,6 +22,7 @@ const TransactionForm = ({
   const pair = tokenPairs.find(
     (p) => p.original.toLowerCase() === selectedToken.toLowerCase()
   );
+  const token = supportedTokens.find((t) => t.address === selectedToken);
   return (
     <div style={styles.form}>
       <Group mb="sm">
@@ -66,15 +67,13 @@ const TransactionForm = ({
           Add Recipient
         </Button>
         <Button onClick={onSendTransaction} color="teal">
-          Send{" "}
-          {selectedToken
-            ? supportedTokens.find((t) => t.address === selectedToken)?.symbol
-            : "Token"}
+          {sendWrapped ? "Send Y" + token?.symbol : "Send " + token?.symbol}
         </Button>
       </Group>
       {feeEstimate && (
         <Text mt="sm" size="sm">
-          Estimated Fee: {feeEstimate.recommended_fee} BNB
+          Estimated Fee: {feeEstimate.recommended_fee} {sendWrapped ? "Y" : ""}
+          BNB
         </Text>
       )}
     </div>

@@ -208,10 +208,13 @@ export async function main() {
       deployments.beaconAddress
     );
   } else {
-    beacon = await ethers.deployContract("WrappedTokenBeacon", [
-      deployments.wrappedTokenImplementation,
-      deployments.bridgeAddress,
-    ]);
+    beacon = await ethers.deployContract(
+      "WrappedTokenBeacon",
+      [deployments.wrappedTokenImplementation, deployments.bridgeAddress],
+      {
+        signer: deployer, // your ethers.Wallet or signer
+      }
+    );
     await beacon.waitForDeployment();
     const beaconAddress = await beacon.getAddress();
     const beaconContract = await ethers.getContractAt(
