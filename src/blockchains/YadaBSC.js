@@ -911,12 +911,7 @@ class YadaBSC {
         BRIDGE_ABI,
         signer
       );
-      let wrappedToken;
-      try {
-        wrappedToken = await bridge.originalToWrapped(selectedToken);
-      } catch (err) {
-        wrappedToken = ethers.ZeroAddress;
-      }
+      const wrappedToken = await bridge.originalToWrapped(selectedToken);
       const hasWrapped = wrappedToken !== ethers.ZeroAddress;
 
       if (selectedToken === ethers.ZeroAddress) {

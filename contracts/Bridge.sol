@@ -14,6 +14,11 @@ import "./WrappedToken.sol";
 import "./KeyLogRegistry.sol";
 import "./WrappedTokenFactory.sol";
 
+interface IMockERC20 {
+    function mint(address to, uint256 amount) external;
+    function burn(address from, uint256 amount) external;
+}
+
 interface IERC20WithDecimals is IERC20 {
     function decimals() external view returns (uint8);
     function name() external view returns (string memory);
@@ -122,6 +127,7 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
     error MissingPermit();
     error NotOwnerOfTarget(address contractAddress);
     error InvalidOwnershipTransfer();
+    error InsufficientBalance();
 
     uint256 private constant MAX_FEE_RATE = 1e18;
     uint256 private constant PUBLIC_KEY_LENGTH = 64;
@@ -144,7 +150,8 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
         feeSigner = _signer;
     }
 
-    function _verifyFee(FeeInfo calldata feeInfo) internal view returns (uint256) {
+    function _verifyFee(FeeInfo calldata feeInfo, address token) internal view returns (uint256) {
+        if (feeInfo.token != token) revert InvalidFeeRate();
         if (feeInfo.expires < block.timestamp) revert PermitDeadlineExpired();
         if (feeInfo.fee > MAX_FEE_RATE) revert InvalidFeeRate();
         bytes32 messageHash = keccak256(
@@ -173,13 +180,29 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
 
     function _executePermits(address token, address user, PermitData[] calldata permits, FeeInfo calldata feeInfo, address prerotatedKeyHash) internal {
         bool hasNativeTransfer = false;
+        bool requiresOwner = false;  // Flag for direct mint/burn only (IMockERC20 ops)
+        uint256 totalNativeWrap = 0;  // For native wrap balance check
+
+        // Existing native check + owner scan (only for direct mint/burn, not wrap/unwrap)
         for (uint256 i = 0; i < permits.length; i++) {
             PermitData memory permit = permits[i];
             if (permit.token == address(0)) {
                 hasNativeTransfer = true;
             }
+            if (permit.token == token) {
+                for (uint256 j = 0; j < permit.recipients.length; j++) {
+                    Recipient memory recipient = permit.recipients[j];
+                    if (recipient.mint || recipient.burn) {  // Only direct ops require owner
+                        requiresOwner = true;
+                        break;
+                    }
+                }
+                if (requiresOwner) break;
+            }
         }
         if (!hasNativeTransfer) revert MissingPermit();
+        if (requiresOwner && msg.sender != owner()) revert InvalidOwnershipTransfer();
+
         for (uint256 i = 0; i < permits.length; i++) {
             PermitData memory permit = permits[i];
 
@@ -216,7 +239,7 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
 
             uint256 feeRate = 0;
             if (!transferOnly) {
-                feeRate = _verifyFee(feeInfo);
+                feeRate = _verifyFee(feeInfo, token);
             }
 
             bool isNative = permit.token == address(0);
@@ -233,11 +256,14 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
                 if (recipient.amount > permit.amount) revert InvalidRecipientAmount();
 
                 if (recipient.unwrap && permit.token == token) {
+                    // Balance check for unwrap
+                    require(WrappedToken(permit.token).balanceOf(user) >= recipient.amount, "Insufficient wrapped balance for unwrap");
+
                     IERC20(permit.token).safeTransferFrom(user, address(this), recipient.amount);
                     WrappedToken(permit.token).burn(address(this), recipient.amount);
 
                     TokenPairData memory pair = tokenPairs[permit.token];
-                    uint256 tokenFee = (recipient.amount * feeRate) / MAX_FEE_RATE;
+                    uint256 tokenFee =  (recipient.amount * feeInfo.fee) / MAX_FEE_RATE;
                     uint256 netAmount = recipient.amount - tokenFee;
 
                     if (pair.originalToken == address(0)) {
@@ -254,14 +280,20 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
                         totalTransferred += remainder;
                     }
                 } else if (recipient.burn && permit.token == token) {
-                    WrappedToken(permit.token).burn(recipient.recipientAddress, recipient.amount);
+                    IMockERC20(permit.token).burn(recipient.recipientAddress, recipient.amount);
                 } else if (recipient.mint && permit.token == token) {
-                    uint256 tokenFee = (recipient.amount * feeRate) / MAX_FEE_RATE;
+                    uint256 tokenFee =  (recipient.amount * feeInfo.fee) / MAX_FEE_RATE;
                     uint256 netAmount = recipient.amount - tokenFee;
-                    WrappedToken(permit.token).mint(recipient.recipientAddress, netAmount);
+                    IMockERC20(permit.token).mint(recipient.recipientAddress, netAmount);
                 } else if (recipient.wrap && permit.token == token) {
-                    uint256 tokenFee = (recipient.amount * feeRate) / MAX_FEE_RATE;
                     TokenPairData memory pair = tokenPairs[permit.token];
+                    if (!isNative) {
+                        require(IERC20(pair.originalToken).balanceOf(user) >= recipient.amount, "Insufficient original balance for wrap");
+                    } else {
+                        totalNativeWrap += recipient.amount;
+                    }
+
+                    uint256 tokenFee = (recipient.amount * feeInfo.fee) / MAX_FEE_RATE;
                     if (isNative) {
                         if (tokenFee > 0) _transferNative(feeCollector, tokenFee);
                     } else {
@@ -301,6 +333,11 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
                 }
             }
             if (totalTransferred != permit.amount) revert TransferFailed();
+        }
+
+        // Final check for native wrap
+        if (totalNativeWrap > 0) {
+            if (msg.value < totalNativeWrap) revert InsufficientBalance();  // Use existing error for underpay
         }
     }
 
@@ -403,7 +440,6 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
 
     function originalToWrapped(address originalToken) external view returns (address) {
         TokenPairData memory pair = tokenPairs[originalToken];
-        if (pair.wrappedToken == address(0)) revert TokenPairNotSupported();
         return pair.wrappedToken;
     }
 

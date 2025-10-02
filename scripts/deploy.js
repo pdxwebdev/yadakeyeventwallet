@@ -120,11 +120,11 @@ export async function main() {
   if (network.name === "localhost") {
     // Fund deployer
     const [hardhatAccount] = await ethers.getSigners();
-    const tx = await hardhatAccount.sendTransaction({
+    const tx2 = await hardhatAccount.sendTransaction({
       to: deployer.address,
       value: ethers.parseEther("1000.0"),
     });
-    await tx.wait();
+    await tx2.wait();
     console.log(`Funded ${deployer.address} with 1000 ETH/BNB`);
   }
 
@@ -326,7 +326,7 @@ export async function main() {
     ].filter((r) => r.amount > 0)
   );
   const firstpermits = [permitbnb];
-  await bridge.connect(deployer).registerKeyPairWithTransfer(
+  const tx1 = await bridge.connect(deployer).registerKeyPairWithTransfer(
     ethers.ZeroAddress,
     {
       token: ethers.ZeroAddress,
@@ -349,6 +349,7 @@ export async function main() {
     "0x",
     { value: balance - gasCost }
   );
+  await tx1.wait();
   console.log(
     `Initial key log entry registered with publicKeyHash: ${keyData.currentSigner.address}, outputAddress: ${keyData.nextSigner.address}`
   );
@@ -363,11 +364,14 @@ export async function main() {
       deployments.yadaERC20Address
     );
   } else {
-    yadaERC20 = await MockERC20.connect(nextDeployer).deploy(
-      "Wrapped YadaCoin",
-      "WYDA",
-      ethers.parseEther("1000"),
-      bridgeAddress // Pass bridgeAddress
+    yadaERC20 = await upgrades.deployProxy(
+      MockERC20,
+      ["Wrapped YadaCoin", "WYDA", deployments.bridgeAddress],
+      {
+        initializer: "initialize",
+        kind: "uups",
+        deployer: nextDeployer,
+      }
     );
     await yadaERC20.waitForDeployment();
     deployments.yadaERC20Address = await yadaERC20.getAddress();
@@ -558,7 +562,7 @@ export async function main() {
       ethers.getBytes(confirmingMessageHash)
     );
     console.log(confirmingKeyData.prerotatedKeyHash);
-    await bridge.connect(nextDeployer).registerKeyPairWithTransfer(
+    const tx = await bridge.connect(nextDeployer).registerKeyPairWithTransfer(
       ethers.ZeroAddress, //token
       {
         token: ethers.ZeroAddress,
@@ -574,6 +578,7 @@ export async function main() {
       confirmingSignature,
       { value: balance - gasCost }
     );
+    await tx.wait();
     console.log("Added all token pairs: $YDA, BNB");
     console.log("new keylog owner: ", await keyLogRegistry.owner());
     // deployments.wrappedTokenWMOCKAddress = await bridge.originalToWrapped(

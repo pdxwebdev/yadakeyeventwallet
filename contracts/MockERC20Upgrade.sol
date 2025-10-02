@@ -11,7 +11,7 @@ interface IBridge {
     function getOwner() external view returns (address);
 }
 
-contract MockERC20 is Initializable, ERC20Upgradeable, ERC20PermitUpgradeable, UUPSUpgradeable, OwnableUpgradeable {
+contract MockERC20Upgrade is Initializable, ERC20Upgradeable, ERC20PermitUpgradeable, UUPSUpgradeable, OwnableUpgradeable {
     address public bridge;
 
     function initialize(
