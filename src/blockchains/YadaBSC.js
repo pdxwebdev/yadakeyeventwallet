@@ -16,6 +16,8 @@ import {
   ERC20_ABI,
   WRAPPED_TOKEN_ABI,
   KEYLOG_REGISTRY_ABI,
+  BRIDGE_UPGRADE_ABI,
+  ERC20_UPGRADE_ABI,
 } from "../shared/constants";
 import BridgeArtifact from "../utils/abis/Bridge.json";
 import KeyLogRegistryArtifact from "../utils/abis/KeyLogRegistry.json";
@@ -1490,6 +1492,20 @@ class YadaBSC {
           message: "Contracts upgraded successfully.",
           color: "green",
         });
+
+        const bridge = new ethers.Contract(
+          contractAddresses.bridgeAddress,
+          BRIDGE_UPGRADE_ABI,
+          signer
+        );
+        console.log(await bridge.getTestString());
+
+        const yadaERC20 = new ethers.Contract(
+          contractAddresses.yadaERC20Address,
+          ERC20_UPGRADE_ABI,
+          signer
+        );
+        console.log(await yadaERC20.getTestString());
         return { status: true, addresses };
       } else {
         throw new Error(error || "Failed to deploy contracts");
@@ -2040,6 +2056,7 @@ class YadaBSC {
         BRIDGE_ABI,
         signer
       );
+      //console.log(await bridge.testUpgrade());
       const nonce = await bridge.nonces(signer.address);
       console.log("Nonce:", nonce.toString());
 

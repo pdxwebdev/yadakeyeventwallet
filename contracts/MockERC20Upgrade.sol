@@ -48,4 +48,9 @@ contract MockERC20Upgrade is Initializable, ERC20Upgradeable, ERC20PermitUpgrade
     }
 
     function _authorizeUpgrade(address newImplementation) internal override onlyOwner {}
+
+    // New function for testing
+    function getTestString() external pure returns (string memory) {
+        return "Upgraded MockERC20 v6!";
+    }
 }

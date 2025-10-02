@@ -81,6 +81,7 @@ async function main() {
     console.log(
       `Deployed KeyLogRegistryV2 implementation at: ${keyLogRegistryV2Address}`
     );
+
     const BridgeV2 = await ethers.getContractFactory("BridgeUpgrade", deployer);
     const bridgeV2Impl = await BridgeV2.deploy();
     await bridgeV2Impl.waitForDeployment();
@@ -99,6 +100,27 @@ async function main() {
     console.log(`Bridge upgraded at proxy: ${proxyAddress}`);
     console.log(`Upgrade bridge: ${upgradedBridge.target}`);
     results.bridge = { status: true, proxyAddress };
+
+    const MockERC20Upgrade = await ethers.getContractFactory(
+      "MockERC20Upgrade",
+      deployer
+    );
+    const MockERC20UpgradeImpl = await MockERC20Upgrade.deploy();
+    await MockERC20UpgradeImpl.waitForDeployment();
+    const MockERC20UpgradeAddress = await MockERC20UpgradeImpl.getAddress();
+    console.log(`Deployed BridgeV2 implementation at: ${bridgeV2Address}`);
+    // Upgrade Bridge
+    const upgradedBMockErc20 = await upgrades.upgradeProxy(
+      deployments.yadaERC20Address,
+      MockERC20Upgrade,
+      {
+        kind: "uups",
+        deployer,
+      }
+    );
+    await upgradedBMockErc20.waitForDeployment();
+    console.log(`Upgrade bridge: ${upgradedBMockErc20.target}`);
+    results.MockERC20 = { status: true, MockERC20UpgradeAddress };
 
     // Upgrade WrappedTokenFactory
     const WrappedTokenFactory = await ethers.getContractFactory(

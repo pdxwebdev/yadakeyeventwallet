@@ -7,6 +7,7 @@ import WrappedTokenArtifact from "../utils/abis/WrappedToken.json";
 import WrappedTokenUpgradeArtifact from "../utils/abis/WrappedTokenUpgrade.json";
 import WrappedNativeTokenArtifact from "../utils/abis/WrappedNativeToken.json";
 import MockERC20Artifact from "../utils/abis/MockERC20.json";
+import MockERC20UpgradeArtifact from "../utils/abis/MockERC20Upgrade.json";
 export const BRIDGE_ABI = BridgeArtifact.abi;
 export const BRIDGE_UPGRADE_ABI = BridgeUpgradeArtifact.abi;
 export const KEYLOG_REGISTRY_ABI = KeyLogRegistryArtifact.abi;
@@ -15,6 +16,7 @@ export const WRAPPED_TOKEN_ABI = WrappedTokenArtifact.abi;
 export const WRAPPED_TOKEN_UPGRADE_ABI = WrappedTokenUpgradeArtifact.abi;
 export const WRAPPED_NATIVE_TOKEN_ABI = WrappedNativeTokenArtifact.abi;
 export const ERC20_ABI = MockERC20Artifact.abi;
+export const ERC20_UPGRADE_ABI = MockERC20UpgradeArtifact.abi;
 
 export const DEPLOY_ENV = "localhost"; //import.meta.env.VITE_DEPLOY_ENV;
 export let localProvider =

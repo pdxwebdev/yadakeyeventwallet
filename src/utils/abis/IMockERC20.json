@@ -1,7 +1,7 @@
 {
   "_format": "hh-sol-artifact-1",
   "contractName": "IMockERC20",
-  "sourceName": "contracts/Bridge.sol",
+  "sourceName": "contracts/BridgeUpgrade.sol",
   "abi": [
     {
       "inputs": [

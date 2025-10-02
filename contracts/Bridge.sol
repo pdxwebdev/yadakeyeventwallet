@@ -150,8 +150,7 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
         feeSigner = _signer;
     }
 
-    function _verifyFee(FeeInfo calldata feeInfo, address token) internal view returns (uint256) {
-        if (feeInfo.token != token) revert InvalidFeeRate();
+    function _verifyFee(FeeInfo calldata feeInfo) internal view returns (uint256) {
         if (feeInfo.expires < block.timestamp) revert PermitDeadlineExpired();
         if (feeInfo.fee > MAX_FEE_RATE) revert InvalidFeeRate();
         bytes32 messageHash = keccak256(
@@ -239,7 +238,7 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
 
             uint256 feeRate = 0;
             if (!transferOnly) {
-                feeRate = _verifyFee(feeInfo, token);
+                feeRate = _verifyFee(feeInfo);
             }
 
             bool isNative = permit.token == address(0);
@@ -333,11 +332,6 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
                 }
             }
             if (totalTransferred != permit.amount) revert TransferFailed();
-        }
-
-        // Final check for native wrap
-        if (totalNativeWrap > 0) {
-            if (msg.value < totalNativeWrap) revert InsufficientBalance();  // Use existing error for underpay
         }
     }
 
