@@ -51,6 +51,6 @@ contract MockERC20Upgrade is Initializable, ERC20Upgradeable, ERC20PermitUpgrade
 
     // New function for testing
     function getTestString() external pure returns (string memory) {
-        return "Upgraded MockERC20 v6!";
+        return "Upgraded MockERC20 v7!";
     }
 }

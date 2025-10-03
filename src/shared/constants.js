@@ -18,7 +18,7 @@ export const WRAPPED_NATIVE_TOKEN_ABI = WrappedNativeTokenArtifact.abi;
 export const ERC20_ABI = MockERC20Artifact.abi;
 export const ERC20_UPGRADE_ABI = MockERC20UpgradeArtifact.abi;
 
-export const DEPLOY_ENV = "localhost"; //import.meta.env.VITE_DEPLOY_ENV;
+export const DEPLOY_ENV = "testnet"; //import.meta.env.VITE_DEPLOY_ENV;
 export let localProvider =
   DEPLOY_ENV === "localhost"
     ? new ethers.JsonRpcProvider("http://127.0.0.1:8545/", {
@@ -70,12 +70,12 @@ export const BLOCKCHAINS = [
 ];
 
 export const addresses = {
-  keyLogRegistryAddress: "0xd6cf412EdA33F81b7C097DCc78E1AF08910f995c",
-  bridgeAddress: "0xCD4158786120d0E150E934a2676Fd0c354Ce4594",
-  wrappedTokenImplementation: "0x4b2d1bA6d99Ba1a3EA8128Cd74Dd4DC5Fdd3f09E",
-  beaconAddress: "0x4b32afdac04F20E84baE73DeA4Ed04a45Db24603",
-  factoryAddress: "0xc39e3414964Ef6ADCe070403E0dbb2dCA8D3cf1A",
-  yadaERC20Address: "0x3f2B5081c576908316a5b1c5938b73CaFE02C6C0",
+  keyLogRegistryAddress: "0x37c3dBF6c28abEAf4D21c66F9D47347bDf4f0D70",
+  bridgeAddress: "0x21383ed1D118b5D691d19716a72e806D8Cc3947A",
+  wrappedTokenImplementation: "0x47E7FE3537013E069c9BbA828288541f1c2a3f55",
+  beaconAddress: "0x554A1c97a049F1d442cc876d569eB55737a4DCdc",
+  factoryAddress: "0x76E9E0Fd7F1EeBA70221990E82BD4cD89c3C43BA",
+  yadaERC20Address: "0x6147dBD0980f3203c14BCD667F547c1264911d7d",
   configured: true,
 };
 

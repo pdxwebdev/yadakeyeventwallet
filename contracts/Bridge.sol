@@ -411,6 +411,7 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
     ) external payable nonReentrant {
         address unconfirmedPublicKey = getAddressFromPublicKey(unconfirmed.publicKey);
         if (msg.sender != unconfirmedPublicKey) revert InvalidPublicKey();
+        if (fee.token != tokenPairs[token].originalToken && fee.token != tokenPairs[token].wrappedToken) revert InvalidFeeRate();
         uint256 nonce = nonces[msg.sender];
         bytes32 unconfirmedHash = keccak256(abi.encode(token, newTokenPairs, unconfirmed, nonce));
         if (unconfirmed.outputAddress == address(0)) revert ZeroAddress();

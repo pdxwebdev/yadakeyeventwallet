@@ -411,6 +411,7 @@ contract BridgeUpgrade is Initializable, OwnableUpgradeable, UUPSUpgradeable, Re
     ) external payable nonReentrant {
         address unconfirmedPublicKey = getAddressFromPublicKey(unconfirmed.publicKey);
         if (msg.sender != unconfirmedPublicKey) revert InvalidPublicKey();
+        if (fee.token != tokenPairs[token].originalToken && fee.token != tokenPairs[token].wrappedToken) revert InvalidFeeRate();
         uint256 nonce = nonces[msg.sender];
         bytes32 unconfirmedHash = keccak256(abi.encode(token, newTokenPairs, unconfirmed, nonce));
         if (unconfirmed.outputAddress == address(0)) revert ZeroAddress();
@@ -513,6 +514,6 @@ contract BridgeUpgrade is Initializable, OwnableUpgradeable, UUPSUpgradeable, Re
     }
 
     function getTestString() external pure returns (string memory) {
-      return 'bridge v12';
+      return 'bridge v13';
     }
 }
