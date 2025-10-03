@@ -5,18 +5,19 @@ import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 
-contract KeyLogRegistry is Initializable, OwnableUpgradeable, UUPSUpgradeable {
-    enum KeyEventFlag { INCEPTION, UNCONFIRMED, CONFIRMING }
+enum KeyEventFlag { INCEPTION, UNCONFIRMED, CONFIRMING }
 
-    struct KeyLogEntry {
-        address twicePrerotatedKeyHash;
-        address prerotatedKeyHash;
-        address publicKeyHash;
-        address prevPublicKeyHash;
-        address outputAddress;
-        bool isOnChain;
-        KeyEventFlag flag;
-    }
+struct KeyLogEntry {
+    address twicePrerotatedKeyHash;
+    address prerotatedKeyHash;
+    address publicKeyHash;
+    address prevPublicKeyHash;
+    address outputAddress;
+    bool isOnChain;
+    KeyEventFlag flag;
+}
+
+contract KeyLogRegistry is Initializable, OwnableUpgradeable, UUPSUpgradeable {
 
     KeyLogEntry[] public keyLogEntries;
 

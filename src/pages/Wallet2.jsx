@@ -28,7 +28,7 @@ import { capture } from "../shared/capture";
 import { BLOCKCHAINS, BRIDGE_ABI, localProvider } from "../shared/constants";
 import axios from "axios";
 import { ethers } from "ethers";
-import SendBalanceFrom from "../components/Wallet2/SendBalanceForm";
+import SendBalanceForm from "../components/Wallet2/SendBalanceForm";
 
 const ITEMS_PER_PAGE = 5;
 
@@ -715,7 +715,10 @@ const Wallet2 = () => {
                         appContext={appContext}
                         webcamRef={webcamRef}
                       />
-                      <SendBalanceFrom />
+                      <SendBalanceForm
+                        appContext={appContext}
+                        webcamRef={webcamRef}
+                      />
                     </>
                   )}
                   <TokenSelector />

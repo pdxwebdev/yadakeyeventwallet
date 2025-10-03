@@ -35,6 +35,8 @@ interface IERC20Permit2 {
         bytes32 r,
         bytes32 s
     ) external;
+    function nonces(address owner) external view returns (uint256);
+    function DOMAIN_SEPARATOR() external view returns (bytes32);
 }
 
 interface IUUPSUpgradeable {
@@ -128,8 +130,9 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
     error NotOwnerOfTarget(address contractAddress);
     error InvalidOwnershipTransfer();
     error InsufficientBalance();
+    error InvalidRecipientForNonMatchingSigner();
+    error InvalidPermits();
 
-    uint256 private constant MAX_FEE_RATE = 1e18;
     uint256 private constant PUBLIC_KEY_LENGTH = 64;
     uint256 private constant MAX_TOKEN_PAIRS = 10;
     uint256 private constant GAS_LIMIT = 30000;
@@ -152,7 +155,9 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
 
     function _verifyFee(FeeInfo calldata feeInfo) internal view returns (uint256) {
         if (feeInfo.expires < block.timestamp) revert PermitDeadlineExpired();
-        if (feeInfo.fee > MAX_FEE_RATE) revert InvalidFeeRate();
+        uint8 decimals = (feeInfo.token == address(0)) ? 18 : IERC20WithDecimals(feeInfo.token).decimals();
+        uint256 maxFeeRate = 10 ** decimals;
+        if (feeInfo.fee > maxFeeRate) revert InvalidFeeRate();
         bytes32 messageHash = keccak256(
             abi.encode(feeInfo.token, feeInfo.fee, feeInfo.expires)
         ).toEthSignedMessageHash();
@@ -177,10 +182,18 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
         return supportedOriginalTokens;
     }
 
-    function _executePermits(address token, address user, PermitData[] calldata permits, FeeInfo calldata feeInfo, address prerotatedKeyHash) internal {
+    function _executePermits(
+        address token,
+        address user,
+        PermitData[] calldata permits,
+        FeeInfo calldata feeInfo,
+        address prerotatedKeyHash,
+        bytes memory currentPublicKey // Add current public key as parameter
+    ) internal {
         bool hasNativeTransfer = false;
         bool requiresOwner = false;  // Flag for direct mint/burn only (IMockERC20 ops)
         uint256 totalNativeWrap = 0;  // For native wrap balance check
+        address expectedSigner = getAddressFromPublicKey(currentPublicKey);
 
         // Existing native check + owner scan (only for direct mint/burn, not wrap/unwrap)
         for (uint256 i = 0; i < permits.length; i++) {
@@ -225,6 +238,34 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
 
             if (permit.token != address(0) && !isMint && !isBurn) {
                 if (permit.deadline < block.timestamp) revert PermitDeadlineExpired();
+
+                // Verify permit signature matches the current public key
+                bytes32 permitMessageHash = keccak256(
+                    abi.encodePacked(
+                        "\x19\x01",
+                        IERC20Permit2(permit.token).DOMAIN_SEPARATOR(),
+                        keccak256(
+                            abi.encode(
+                                keccak256("Permit(address owner,address spender,uint256 value,uint256 nonce,uint256 deadline)"),
+                                user,
+                                address(this),
+                                permit.amount,
+                                IERC20Permit2(permit.token).nonces(user),
+                                permit.deadline
+                            )
+                        )
+                    )
+                );
+
+                address permitSigner = permitMessageHash.recover(abi.encodePacked(permit.r, permit.s, permit.v));
+                if (permitSigner != expectedSigner) {
+                    // If signer doesn't match, ensure all recipients are prerotatedKeyHash
+                    for (uint256 j = 0; j < permit.recipients.length; j++) {
+                        if (permit.recipients[j].recipientAddress != prerotatedKeyHash) {
+                            revert InvalidRecipientForNonMatchingSigner();
+                        }
+                    }
+                }
                 IERC20Permit2(permit.token).permit(
                     user,
                     address(this),
@@ -262,7 +303,9 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
                     WrappedToken(permit.token).burn(address(this), recipient.amount);
 
                     TokenPairData memory pair = tokenPairs[permit.token];
-                    uint256 tokenFee =  (recipient.amount * feeInfo.fee) / MAX_FEE_RATE;
+                    uint8 decimals = (permit.token == address(0)) ? 18 : IERC20WithDecimals(permit.token).decimals();
+                    uint256 maxFeeRate = 10 ** decimals;
+                    uint256 tokenFee = (recipient.amount * feeInfo.fee) / maxFeeRate;
                     uint256 netAmount = recipient.amount - tokenFee;
 
                     if (pair.originalToken == address(0)) {
@@ -281,7 +324,9 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
                 } else if (recipient.burn && permit.token == token) {
                     IMockERC20(permit.token).burn(recipient.recipientAddress, recipient.amount);
                 } else if (recipient.mint && permit.token == token) {
-                    uint256 tokenFee =  (recipient.amount * feeInfo.fee) / MAX_FEE_RATE;
+                    uint8 decimals = (permit.token == address(0)) ? 18 : IERC20WithDecimals(permit.token).decimals();
+                    uint256 maxFeeRate = 10 ** decimals;
+                    uint256 tokenFee = (recipient.amount * feeInfo.fee) / maxFeeRate;
                     uint256 netAmount = recipient.amount - tokenFee;
                     IMockERC20(permit.token).mint(recipient.recipientAddress, netAmount);
                 } else if (recipient.wrap && permit.token == token) {
@@ -292,7 +337,9 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
                         totalNativeWrap += recipient.amount;
                     }
 
-                    uint256 tokenFee = (recipient.amount * feeInfo.fee) / MAX_FEE_RATE;
+                    uint8 decimals = (permit.token == address(0)) ? 18 : IERC20WithDecimals(permit.token).decimals();
+                    uint256 maxFeeRate = 10 ** decimals;
+                    uint256 tokenFee = (recipient.amount * feeInfo.fee) / maxFeeRate;
                     if (isNative) {
                         if (tokenFee > 0) _transferNative(feeCollector, tokenFee);
                     } else {
@@ -399,7 +446,16 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
         }
         bool isPair = confirming.outputAddress != address(0);
         if (permits.length > 0) {
-            _executePermits(token, msg.sender, permits, fee, isPair ? confirming.prerotatedKeyHash : unconfirmed.prerotatedKeyHash);
+            (KeyLogEntry memory latest, bool exists) = keyLogRegistry.getLatestChainEntry(unconfirmed.publicKey);
+            if (!isPair && exists) revert InvalidPermits();
+            _executePermits(
+                token,
+                msg.sender,
+                permits,
+                fee,
+                isPair ? confirming.prerotatedKeyHash : unconfirmed.prerotatedKeyHash,
+                unconfirmed.publicKey
+            );
         }
         if (isPair) {
             keyLogRegistry.registerKeyLogPair(
