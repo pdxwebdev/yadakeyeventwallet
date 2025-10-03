@@ -409,6 +409,8 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
         Params calldata confirming,
         bytes calldata confirmingSignature
     ) external payable nonReentrant {
+        address unconfirmedPublicKey = getAddressFromPublicKey(unconfirmed.publicKey);
+        if (msg.sender != unconfirmedPublicKey) revert InvalidPublicKey();
         uint256 nonce = nonces[msg.sender];
         bytes32 unconfirmedHash = keccak256(abi.encode(token, newTokenPairs, unconfirmed, nonce));
         if (unconfirmed.outputAddress == address(0)) revert ZeroAddress();
