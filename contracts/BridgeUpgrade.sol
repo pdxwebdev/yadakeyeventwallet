@@ -226,6 +226,12 @@ contract BridgeUpgrade is Initializable, OwnableUpgradeable, UUPSUpgradeable, Re
                     Recipient memory recipient = permit.recipients[j];
                     if (recipient.wrap || recipient.mint || recipient.unwrap || recipient.burn) {
                         transferOnly = false;
+
+                        if (
+                            token != address(0) &&
+                            feeInfo.token != tokenPairs[token].originalToken &&
+                            feeInfo.token != tokenPairs[token].wrappedToken
+                        ) revert InvalidFeeRate();
                     }
                     if (recipient.mint) {
                         isMint = true;
@@ -411,7 +417,6 @@ contract BridgeUpgrade is Initializable, OwnableUpgradeable, UUPSUpgradeable, Re
     ) external payable nonReentrant {
         address unconfirmedPublicKey = getAddressFromPublicKey(unconfirmed.publicKey);
         if (msg.sender != unconfirmedPublicKey) revert InvalidPublicKey();
-        if (fee.token != tokenPairs[token].originalToken && fee.token != tokenPairs[token].wrappedToken) revert InvalidFeeRate();
         uint256 nonce = nonces[msg.sender];
         bytes32 unconfirmedHash = keccak256(abi.encode(token, newTokenPairs, unconfirmed, nonce));
         if (unconfirmed.outputAddress == address(0)) revert ZeroAddress();
