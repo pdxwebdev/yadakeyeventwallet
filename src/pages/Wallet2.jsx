@@ -384,13 +384,11 @@ const Wallet2 = () => {
   ]);
 
   useEffect(() => {
-    if (
-      privateKey &&
-      !isInitialized &&
-      !isSubmitting &&
-      parsedData &&
-      tokenPairsFetched
-    ) {
+    if (privateKey && !isInitialized && !isSubmitting && parsedData) {
+      const selectedBlockchainObject = BLOCKCHAINS.find(
+        (item) => item.id === selectedBlockchain
+      );
+      if (selectedBlockchainObject.isBridge && !fetchTokenPairs) return;
       walletManager.checkStatus(appContext);
     }
   }, [
@@ -690,6 +688,12 @@ const Wallet2 = () => {
     (item) => item.id === selectedBlockchain
   );
 
+  const token = selectedBlockchainObject.isBridge
+    ? supportedTokens.find(
+        (t) => t.address.toLowerCase() === selectedToken.toLowerCase()
+      )
+    : { symbol: "YDA" };
+
   return (
     <AppShell
       navbar={{
@@ -923,7 +927,7 @@ const Wallet2 = () => {
                     }}
                   >
                     {balance <= 0
-                      ? "Cannot initialize wallet (BNB balance is 0)"
+                      ? `Cannot initialize wallet (${token.symbol} balance is 0)`
                       : "Initialize wallet"}
                   </Button>
                 )}
