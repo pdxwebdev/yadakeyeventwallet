@@ -1,5 +1,13 @@
 // src/components/Wallet2/TransactionForm.js
-import { Button, TextInput, Group, Text, Slider, Switch } from "@mantine/core";
+import {
+  Button,
+  TextInput,
+  Group,
+  Text,
+  Slider,
+  Switch,
+  NumberInput,
+} from "@mantine/core";
 import { useAppContext } from "../../context/AppContext";
 import { BLOCKCHAINS } from "../../shared/constants";
 
@@ -56,11 +64,13 @@ const TransactionForm = ({
             }
             style={{ flex: 1 }}
           />
-          <TextInput
+          <NumberInput
             placeholder="Amount"
             value={recipient.amount}
-            onChange={(e) => onUpdateRecipient(index, "amount", e.target.value)}
+            onChange={(value) => onUpdateRecipient(index, "amount", value)}
             style={{ width: 150 }}
+            min={0}
+            defaultValue={0}
           />
           {recipients.length > 1 && (
             <Button

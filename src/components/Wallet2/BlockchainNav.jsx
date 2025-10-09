@@ -19,6 +19,7 @@ const BlockchainNav = () => {
     setSelectedOriginal,
     setLog,
     setBalance,
+    setTokenPairsFetched,
   } = useAppContext();
   const [tokenLists, setTokenLists] = useState({});
 
@@ -92,6 +93,7 @@ const BlockchainNav = () => {
             setSelectedOriginal("");
             setLog([]);
             setBalance(null);
+            setTokenPairsFetched(false);
           }}
           rightSection={<IconChevronRight size={12} />}
         >

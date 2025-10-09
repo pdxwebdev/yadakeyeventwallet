@@ -79,6 +79,8 @@ const Wallet2 = () => {
     isOwner, // Include isOwner from context
     setIsOwner,
     setSendWrapped,
+    tokenPairsFetched,
+    setTokenPairsFetched,
   } = useAppContext();
 
   const webcamRef = useRef(null);
@@ -88,7 +90,6 @@ const Wallet2 = () => {
   const [currentScanIndex, setCurrentScanIndex] = useState(0);
   const [wrapAmount, setWrapAmount] = useState("");
   const [unwrapAmount, setUnwrapAmount] = useState("");
-  const [tokenPairsFetched, setTokenPairsFetched] = useState(false);
 
   const walletManager = useMemo(
     () => walletManagerFactory(selectedBlockchain),
@@ -404,7 +405,7 @@ const Wallet2 = () => {
 
   useEffect(() => {
     const go = async () => {
-      if (tokenPairsFetched) return;
+      if (tokenPairsFetched || !walletManager.fetchTokenPairs) return;
       const tp = await walletManager.fetchTokenPairs(appContext);
       setTokenPairsFetched(true);
       if (tp.length === 0) return;

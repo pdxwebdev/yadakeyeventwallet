@@ -33,6 +33,7 @@ export const AppProvider = ({ children }) => {
   const [contractAddresses, setContractAddresses] = useState({});
   const [isDeployed, setIsDeployed] = useState(false); // New state for deployment status
   const [sendWrapped, setSendWrapped] = useState(false);
+  const [tokenPairsFetched, setTokenPairsFetched] = useState(false);
   const value = useMemo(
     () => ({
       selectedBlockchain,
@@ -91,6 +92,8 @@ export const AppProvider = ({ children }) => {
       setIsDeployed,
       sendWrapped,
       setSendWrapped,
+      tokenPairsFetched,
+      setTokenPairsFetched,
     }),
     [
       selectedBlockchain,
@@ -121,6 +124,7 @@ export const AppProvider = ({ children }) => {
       isDeployed,
       isOwner,
       sendWrapped,
+      tokenPairsFetched,
     ]
   );
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
