@@ -310,12 +310,6 @@ class YadaBSC {
         Buffer.from(privateKey.publicKey)
       ).slice(1);
 
-      // Validate log structure
-      if (!Array.isArray(log)) {
-        console.warn("Log is not an array:", log);
-        log = [];
-      }
-
       if (log.length === 0) {
         console.log(
           "No key log entries found for public key:",
@@ -1528,8 +1522,14 @@ class YadaBSC {
     isTransactionFlow = false,
     isDeployment = false
   ) {
-    const { setUserKeyState, setSigner, privateKey, contractAddresses } =
-      appContext;
+    const {
+      setUserKeyState,
+      setSigner,
+      privateKey,
+      contractAddresses,
+      log,
+      setLog,
+    } = appContext;
 
     try {
       const [
@@ -1548,7 +1548,19 @@ class YadaBSC {
         (prevPublicKeyHash && !ethers.isAddress(prevPublicKeyHash)) ||
         isNaN(parseInt(rotation, 10))
       ) {
-        throw new Error("Invalid QR code data");
+        throw new Error(
+          "Incorrect blockchain selected on device. Restart the device and select BSC."
+        );
+      }
+
+      if (
+        parseInt(rotation) !== (isTransactionFlow ? log.length + 1 : log.length)
+      ) {
+        throw new Error(
+          `Incorrect rotation scanned from device. Set the rotation on the device to ${
+            isTransactionFlow ? log.length + 1 : log.length
+          }.`
+        );
       }
 
       // Convert WIF to Ethereum wallet
@@ -1582,14 +1594,20 @@ class YadaBSC {
         KEYLOG_REGISTRY_ABI,
         signer
       );
-      const log = await keyLogRegistry.buildFromPublicKey(
+      const updatedLog = await keyLogRegistry.buildFromPublicKey(
         decompressPublicKey(
           Buffer.from(privateKey ? privateKey.publicKey : newWallet.publicKey)
         ).slice(1)
       );
 
       // Validate key continuity for non-deployment
-      this.validateKeyContinuity(newParsedData, log, isTransactionFlow);
+      this.validateKeyContinuity(
+        appContext,
+        newParsedData,
+        updatedLog,
+        isTransactionFlow
+      );
+      setLog(updatedLog);
 
       return { newPrivateKey: newWallet, newParsedData };
     } catch (error) {
@@ -1747,17 +1765,12 @@ class YadaBSC {
   }
 
   async fetchTokenPairs(appContext) {
-    const { setLoading, contractAddresses, setTokenPairs, privateKey } =
-      appContext;
-    if (!contractAddresses.bridgeAddress || !privateKey) {
+    const { setLoading, contractAddresses, setTokenPairs } = appContext;
+    if (!contractAddresses.bridgeAddress) {
       console.warn("Bridge address not set, cannot fetch token pairs");
       return [];
     }
     try {
-      const signer = new ethers.Wallet(
-        ethers.hexlify(privateKey.privateKey),
-        localProvider
-      );
       const bridge = new ethers.Contract(
         contractAddresses.bridgeAddress,
         BRIDGE_ABI,

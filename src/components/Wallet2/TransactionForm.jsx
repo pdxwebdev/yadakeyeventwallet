@@ -1,6 +1,7 @@
 // src/components/Wallet2/TransactionForm.js
 import { Button, TextInput, Group, Text, Slider, Switch } from "@mantine/core";
 import { useAppContext } from "../../context/AppContext";
+import { BLOCKCHAINS } from "../../shared/constants";
 
 const TransactionForm = ({
   recipients,
@@ -11,29 +12,39 @@ const TransactionForm = ({
   setFocusedRotation,
   styles,
   feeEstimate,
+  selectedBlockchain,
 }) => {
-  const {
-    selectedToken,
-    supportedTokens,
-    tokenPairs,
-    setSendWrapped,
-    sendWrapped,
-  } = useAppContext();
-  const pair = tokenPairs.find(
-    (p) => p.original.toLowerCase() === selectedToken.toLowerCase()
+  const { selectedToken, supportedTokens, setSendWrapped, sendWrapped } =
+    useAppContext();
+
+  const selectedBlockchainObj = BLOCKCHAINS.find(
+    (i) => i.id === selectedBlockchain
   );
-  const token = supportedTokens.find((t) => t.address === selectedToken);
+  let token;
+  if (selectedBlockchainObj?.isBridge) {
+    const { selectedToken, supportedTokens } = useAppContext();
+    token = supportedTokens.find((entry) => {
+      return entry.address === selectedToken;
+    });
+    if (!token) return <></>;
+  } else {
+    token = {
+      symbol: "YDA",
+    };
+  }
   return (
     <div style={styles.form}>
       <Group mb="sm">
         <Text size="lg" weight={500} mb="md">
           Send Transaction
         </Text>
-        <Switch
-          label="Send secure"
-          checked={sendWrapped}
-          onChange={(event) => setSendWrapped(event.currentTarget.checked)}
-        />
+        {selectedBlockchain.isBridge && (
+          <Switch
+            label="Send secure"
+            checked={sendWrapped}
+            onChange={(event) => setSendWrapped(event.currentTarget.checked)}
+          />
+        )}
       </Group>
       {recipients.map((recipient, index) => (
         <Group key={index} mb="sm">
@@ -73,7 +84,7 @@ const TransactionForm = ({
       {feeEstimate && (
         <Text mt="sm" size="sm">
           Estimated Fee: {feeEstimate.recommended_fee} {sendWrapped ? "Y" : ""}
-          BNB
+          {token?.symbol}
         </Text>
       )}
     </div>

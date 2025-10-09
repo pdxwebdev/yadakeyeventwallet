@@ -1,7 +1,6 @@
 // src/components/TokenSelector.js
 import { useEffect } from "react";
 import { useAppContext } from "../../context/AppContext";
-import { walletManagerFactory } from "../../blockchains/WalletManagerFactory";
 import { Button, Group, Text, Select } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { ethers } from "ethers";
@@ -25,8 +24,6 @@ const TokenSelector = () => {
     contractAddresses,
     setContractAddresses,
   } = appContext;
-
-  const walletManager = walletManagerFactory(selectedBlockchain);
 
   // Guard against undefined supportedTokens
   const tokenOptions = (supportedTokens || []).map((token) => ({

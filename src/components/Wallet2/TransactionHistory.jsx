@@ -1,5 +1,6 @@
 import { Card, Pagination, Table, Text, Title } from "@mantine/core";
 import { useAppContext } from "../../context/AppContext";
+import { BLOCKCHAINS } from "../../shared/constants";
 
 const TransactionHistory = ({
   combinedHistory,
@@ -7,12 +8,23 @@ const TransactionHistory = ({
   totalPages,
   onPageChange,
   styles,
+  selectedBlockchain,
 }) => {
-  const { selectedToken, supportedTokens } = useAppContext();
-  const token = supportedTokens.find((entry) => {
-    return entry.address === selectedToken;
-  });
-  if (!token) return <></>;
+  const selectedBlockchainObj = BLOCKCHAINS.find(
+    (i) => i.id === selectedBlockchain
+  );
+  let token;
+  if (selectedBlockchainObj.isBridge) {
+    const { selectedToken, supportedTokens } = useAppContext();
+    token = supportedTokens.find((entry) => {
+      return entry.address === selectedToken;
+    });
+    if (!token) return <></>;
+  } else {
+    token = {
+      symbol: "YDA",
+    };
+  }
   return (
     <Card shadow="xs" padding="md" mt="lg" styles={styles.nestedCard}>
       <Title order={3} mb="md">

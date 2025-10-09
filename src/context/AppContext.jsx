@@ -14,9 +14,7 @@ export const AppProvider = ({ children }) => {
   const [isScannerOpen, setIsScannerOpen] = useState(false);
   const [isQRModalOpen, setIsQRModalOpen] = useState(false);
   const [parsedData, setParsedData] = useState(null);
-  const [recipients, setRecipients] = useState([
-    { address: "0x742d35cc6634c0532925a3b844bc454e4438f44e", amount: "100" },
-  ]);
+  const [recipients, setRecipients] = useState([{ address: "", amount: "" }]);
   const [privateKey, setPrivateKey] = useState(null);
   const [focusedRotation, setFocusedRotation] = useState(0);
   const [isSubmitting, setIsSubmitting] = useState(false);

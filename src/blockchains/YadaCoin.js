@@ -31,7 +31,6 @@ class YadaCoin {
     try {
       setLoading(true);
       const { log: keyEventLog } = await this.getKeyLog(appContext, privateKey);
-      setLog(keyEventLog);
 
       const keyEventTxIds = new Set(keyEventLog.map((entry) => entry.id));
       const currentAddress = getP2PKH(privateKey.publicKey);
@@ -286,6 +285,77 @@ class YadaCoin {
         message: "Failed to load fee estimate",
         color: "red",
       });
+    }
+  }
+
+  // Rotate key with a single QR scan
+  async rotateKey(appContext, webcamRef) {
+    const {
+      privateKey,
+      parsedData,
+      setIsScannerOpen,
+      setParsedData,
+      setLoading,
+      log,
+      setLog,
+      contractAddresses,
+      setPrivateKey,
+      setWif,
+      supportedTokens,
+    } = appContext;
+
+    try {
+      notifications.show({
+        title: "Key Rotation Required",
+        message: `Please scan the QR code for the next key (rotation ${log.length}).`,
+        color: "yellow",
+      });
+      setIsScannerOpen(true);
+
+      let qrData;
+      let attempts = 0;
+      const maxAttempts = 100;
+      while (attempts < maxAttempts) {
+        try {
+          qrData = await capture(webcamRef);
+          break;
+        } catch (error) {
+          attempts++;
+          await new Promise((resolve) => setTimeout(resolve, 300));
+        }
+      }
+      if (!qrData) {
+        throw new Error("No QR code scanned within time limit");
+      }
+
+      setIsScannerOpen(false);
+      setLoading(true);
+
+      const { newPrivateKey, newParsedData } = await this.processScannedQR(
+        appContext,
+        webcamRef,
+        qrData,
+        false
+      );
+      setParsedData(newParsedData);
+      setPrivateKey(newPrivateKey);
+      setWif(newParsedData.wif);
+
+      notifications.show({
+        title: "Success",
+        message: "Key rotation completed successfully.",
+        color: "green",
+      });
+    } catch (error) {
+      console.error("Key rotation error:", error);
+      notifications.show({
+        title: "Error",
+        message: error.message || "Failed to rotate key",
+        color: "red",
+      });
+    } finally {
+      setLoading(false);
+      setIsScannerOpen(false);
     }
   }
 
@@ -563,7 +633,7 @@ class YadaCoin {
     qrData,
     isTransactionFlow = false
   ) {
-    const { setLog } = appContext;
+    const { setLog, log } = appContext;
 
     try {
       const [
@@ -573,6 +643,24 @@ class YadaCoin {
         prevPublicKeyHash,
         rotation,
       ] = qrData.split("|");
+      if (
+        !validateBitcoinAddress(prerotatedKeyHash) ||
+        !validateBitcoinAddress(twicePrerotatedKeyHash)
+      ) {
+        throw new Error(
+          "Incorrect blockchain selected on device. Restart the device and select YadaCoin."
+        );
+      }
+
+      if (
+        parseInt(rotation) !== (isTransactionFlow ? log.length + 1 : log.length)
+      ) {
+        throw new Error(
+          `Incorrect rotation scanned from device. Set the rotation on the device to ${
+            isTransactionFlow ? log.length + 1 : log.length
+          }.`
+        );
+      }
       const newPrivateKey = fromWIF(wifString);
       const publicKeyHash = getP2PKH(newPrivateKey.publicKey);
       const newParsedData = {
@@ -595,7 +683,6 @@ class YadaCoin {
 
       this.validateKeyContinuity(
         appContext,
-        webcamRef,
         newParsedData,
         fetchedLog,
         isTransactionFlow
@@ -606,6 +693,16 @@ class YadaCoin {
       console.error("QR code parsing error:", error);
       throw error;
     }
+  }
+
+  async fetchLog(appContext, webcamRef) {
+    const { privateKey, setLog } = appContext;
+    const { isValidKey, log: fetchedLog } = await this.getKeyLog(
+      appContext,
+      privateKey
+    );
+    setLog(fetchedLog);
+    return fetchedLog;
   }
 
   async signTransaction(appContext, webcamRef) {
@@ -622,6 +719,7 @@ class YadaCoin {
       setParsedData,
       setRecipients,
       setLoading,
+      setLog,
     } = appContext;
 
     if (!privateKey || recipients.length === 0) {
@@ -793,6 +891,11 @@ class YadaCoin {
           setRecipients([{ address: "", amount: "" }]);
           setIsTransactionFlow(false);
 
+          const { isValidKey, log: fetchedLog } = await this.getKeyLog(
+            appContext,
+            newPrivateKey
+          );
+          setLog(fetchedLog);
           notifications.show({
             title: "Success",
             message:
@@ -820,7 +923,6 @@ class YadaCoin {
 
   validateKeyContinuity(
     appContext,
-    webcamRef,
     newParsedData,
     fetchedLog,
     isTransactionFlow
@@ -843,7 +945,7 @@ class YadaCoin {
 
       const isValidContinuity =
         isTransactionFlow && isInitialized
-          ? newParsedData.prevPublicKeyHash === parsedData.publicKeyHash &&
+          ? newParsedData.publicKeyHash === parsedData.prerotatedKeyHash &&
             newParsedData.prerotatedKeyHash ===
               parsedData.twicePrerotatedKeyHash &&
             (!newParsedData.prevPublicKeyHash ||

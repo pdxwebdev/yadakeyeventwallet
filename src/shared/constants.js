@@ -44,7 +44,8 @@ export const BLOCKCHAINS = [
         name: "Binance Smart Chain (BSC)",
         chainId: 31337, // BSC mainnet
         isBridge: true, // Replace with actual BSC bridge address
-        providerUrl: "http://localhost:8545", // BSC RPC URL
+        providerUrl: "http://localhost:8545", // BSC RPC URL,
+        hardwareInstruction: "Select BSC on your device.",
       }
     : {
         id: "bsc",
@@ -52,6 +53,7 @@ export const BLOCKCHAINS = [
         chainId: 97, // BSC mainnet
         isBridge: true, // Replace with actual BSC bridge address
         providerUrl: "https://data-seed-prebsc-1-s1.binance.org:8545", // BSC RPC URL
+        hardwareInstruction: "Select BSC on your device.",
       },
   // {
   //   id: 'eth',
@@ -61,12 +63,13 @@ export const BLOCKCHAINS = [
   //   keyLogRegistryAddress: '0xYourETHKeyLogRegistryAddressHere',
   //   providerUrl: 'https://mainnet.infura.io/v3/YOUR_INFURA_KEY', // Ethereum RPC URL
   // },
-  // {
-  //   id: "yda",
-  //   name: "YadaCoin",
-  //   chainId: 657, // Ethereum mainnet
-  //   providerUrl: "https://yadacoin.io", // Ethereum RPC URL
-  // },
+  {
+    id: "yda",
+    name: "YadaCoin",
+    chainId: 657, // Ethereum mainnet
+    providerUrl: "https://yadacoin.io", // Ethereum RPC URL
+    hardwareInstruction: "Select YadaCoin on your device.",
+  },
 ];
 
 export const addresses = {

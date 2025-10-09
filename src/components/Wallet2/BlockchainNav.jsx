@@ -17,6 +17,8 @@ const BlockchainNav = () => {
     setSelectedBlockchain,
     setTokenPairs,
     setSelectedOriginal,
+    setLog,
+    setBalance,
   } = useAppContext();
   const [tokenLists, setTokenLists] = useState({});
 
@@ -88,6 +90,8 @@ const BlockchainNav = () => {
             setSelectedBlockchain(blockchain.id);
             setTokenPairs(tokenLists[blockchain.id] || []);
             setSelectedOriginal("");
+            setLog([]);
+            setBalance(null);
           }}
           rightSection={<IconChevronRight size={12} />}
         >

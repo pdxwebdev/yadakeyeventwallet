@@ -78,6 +78,7 @@ const Wallet2 = () => {
     setLoading,
     isOwner, // Include isOwner from context
     setIsOwner,
+    setSendWrapped,
   } = useAppContext();
 
   const webcamRef = useRef(null);
@@ -96,6 +97,11 @@ const Wallet2 = () => {
 
   // Derive token symbols for the selected token
   const { tokenSymbol, wrappedTokenSymbol } = useMemo(() => {
+    const selectedBlockchainObj = BLOCKCHAINS.find(
+      (i) => i.id === selectedBlockchain
+    );
+    if (!selectedBlockchainObj.isBridge)
+      return { tokenSymbol: "WYDA", wrappedTokenSymbol: "" };
     let tokenSymbol = "Token";
     let wrappedTokenSymbol = "WToken";
 
@@ -120,7 +126,7 @@ const Wallet2 = () => {
     }
 
     return { tokenSymbol, wrappedTokenSymbol };
-  }, [selectedToken, supportedTokens, tokenPairs]);
+  }, [selectedToken, supportedTokens, tokenPairs, selectedBlockchain]);
 
   // Function to check if the current signer is the owner
   const checkOwnerStatus = async (appContext) => {
@@ -347,6 +353,7 @@ const Wallet2 = () => {
     setRecipients([{ address: "", amount: "" }]);
     setFeeEstimate(null);
     setIsOwner(false);
+    setSendWrapped(false);
     localStorage.removeItem(`walletPrivateKey_${selectedBlockchain}`);
     localStorage.removeItem(`walletWif_${selectedBlockchain}`);
     localStorage.removeItem(`walletParsedData_${selectedBlockchain}`);
@@ -704,7 +711,10 @@ const Wallet2 = () => {
             withBorder
             styles={styles.card}
           >
-            <WalletHeader styles={styles} />
+            <WalletHeader
+              styles={styles}
+              selectedBlockchain={selectedBlockchain}
+            />
             {isInitialized &&
               selectedBlockchainObject.isBridge &&
               log.length === parsedData.rotation && (
@@ -881,6 +891,7 @@ const Wallet2 = () => {
                   styles={styles}
                   tokenSymbol={tokenSymbol}
                   wrappedTokenSymbol={wrappedTokenSymbol}
+                  selectedBlockchain={selectedBlockchainObject}
                 />
                 <Text mb="md">
                   {parsedData.rotation === log.length
@@ -897,6 +908,7 @@ const Wallet2 = () => {
                     setFocusedRotation={setFocusedRotation}
                     styles={styles}
                     feeEstimate={feeEstimate}
+                    selectedBlockchain={selectedBlockchainObject}
                   />
                 )}
                 {!isInitialized > 0 && (
@@ -921,6 +933,7 @@ const Wallet2 = () => {
                     totalPages={totalPages}
                     onPageChange={setCurrentPage}
                     styles={styles}
+                    selectedBlockchain={selectedBlockchain}
                   />
                 )}
               </>
