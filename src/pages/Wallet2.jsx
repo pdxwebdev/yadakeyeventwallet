@@ -729,6 +729,7 @@ const Wallet2 = () => {
                       <TokenPairsForm
                         appContext={appContext}
                         webcamRef={webcamRef}
+                        styles={styles}
                       />
                       <SendBalanceForm
                         appContext={appContext}
@@ -736,104 +737,121 @@ const Wallet2 = () => {
                       />
                     </>
                   )}
-                  <TokenSelector />
-                  <Group mt="md" align="flex-end">
-                    <div style={{ flex: 1 }}>
-                      <NumberInput
-                        label={`Wrap Amount (${tokenSymbol})`}
-                        value={wrapAmount}
-                        onChange={(value) =>
-                          setWrapAmount(
-                            value === undefined ? "" : value.toString()
-                          )
-                        }
-                        placeholder="Enter amount to wrap"
-                        min={0}
-                        step={0.01}
-                        decimalScale={6}
-                        allowNegative={false}
-                        disabled={
-                          !isDeployed ||
-                          !isInitialized ||
-                          !tokenPairs.some(
-                            (p) =>
-                              p.original.toLowerCase() ===
-                              selectedToken?.toLowerCase()
-                          )
-                        }
-                        styles={styles.input}
-                      />
-                      <Button
-                        onClick={handleWrap}
-                        disabled={
-                          !isDeployed ||
-                          !isInitialized ||
-                          !tokenPairs.some(
-                            (p) =>
-                              p.original.toLowerCase() ===
-                              selectedToken?.toLowerCase()
-                          ) ||
-                          !wrapAmount ||
-                          parseFloat(wrapAmount) <= 0 ||
-                          (balance &&
-                            parseFloat(wrapAmount) >
-                              parseFloat(balance.original))
-                        }
-                        mt="sm"
-                      >
-                        Wrap
-                      </Button>
-                    </div>
-                    <div style={{ flex: 1 }}>
-                      <NumberInput
-                        label={`Unwrap Amount (${wrappedTokenSymbol})`}
-                        value={unwrapAmount}
-                        onChange={(value) =>
-                          setUnwrapAmount(
-                            value === undefined ? "" : value.toString()
-                          )
-                        }
-                        placeholder="Enter amount to unwrap"
-                        min={0}
-                        step={0.01}
-                        decimalScale={6}
-                        allowNegative={false}
-                        disabled={
-                          !isDeployed ||
-                          !isInitialized ||
-                          !tokenPairs.some(
-                            (p) =>
-                              p.original.toLowerCase() ===
-                              selectedToken?.toLowerCase()
-                          )
-                        }
-                        styles={styles.input}
-                      />
-                      <Button
-                        onClick={handleUnwrap}
-                        disabled={
-                          !isDeployed ||
-                          !isInitialized ||
-                          !tokenPairs.some(
-                            (p) =>
-                              p.original.toLowerCase() ===
-                              selectedToken?.toLowerCase()
-                          ) ||
-                          !unwrapAmount ||
-                          parseFloat(unwrapAmount) <= 0 ||
-                          (balance &&
-                            parseFloat(unwrapAmount) >
-                              parseFloat(balance.wrapped))
-                        }
-                        mt="sm"
-                      >
-                        Unwrap
-                      </Button>
-                    </div>
-                  </Group>
+                  <TokenSelector styles={styles} />
+                  <Card
+                    withBorder
+                    mt="md"
+                    radius="md"
+                    p="md"
+                    style={styles.card}
+                  >
+                    <Text size="lg" weight={500} mb="md">
+                      Wrap tokens
+                    </Text>
+                    <Group mt="md" align="flex-end">
+                      <div style={{ flex: 1 }}>
+                        <NumberInput
+                          label={`Wrap Amount (${tokenSymbol})`}
+                          value={wrapAmount}
+                          onChange={(value) =>
+                            setWrapAmount(
+                              value === undefined ? "" : value.toString()
+                            )
+                          }
+                          placeholder="Enter amount to wrap"
+                          min={0}
+                          step={0.01}
+                          decimalScale={6}
+                          allowNegative={false}
+                          disabled={
+                            !isDeployed ||
+                            !isInitialized ||
+                            !tokenPairs.some(
+                              (p) =>
+                                p.original.toLowerCase() ===
+                                selectedToken?.toLowerCase()
+                            )
+                          }
+                          styles={styles.input}
+                        />
+                        <Button
+                          onClick={handleWrap}
+                          disabled={
+                            !isDeployed ||
+                            !isInitialized ||
+                            !tokenPairs.some(
+                              (p) =>
+                                p.original.toLowerCase() ===
+                                selectedToken?.toLowerCase()
+                            ) ||
+                            !wrapAmount ||
+                            parseFloat(wrapAmount) <= 0 ||
+                            (balance &&
+                              parseFloat(wrapAmount) >
+                                parseFloat(balance.original))
+                          }
+                          mt="sm"
+                        >
+                          Wrap
+                        </Button>
+                      </div>
+                      <div style={{ flex: 1 }}>
+                        <NumberInput
+                          label={`Unwrap Amount (${wrappedTokenSymbol})`}
+                          value={unwrapAmount}
+                          onChange={(value) =>
+                            setUnwrapAmount(
+                              value === undefined ? "" : value.toString()
+                            )
+                          }
+                          placeholder="Enter amount to unwrap"
+                          min={0}
+                          step={0.01}
+                          decimalScale={6}
+                          allowNegative={false}
+                          disabled={
+                            !isDeployed ||
+                            !isInitialized ||
+                            !tokenPairs.some(
+                              (p) =>
+                                p.original.toLowerCase() ===
+                                selectedToken?.toLowerCase()
+                            )
+                          }
+                          styles={styles.input}
+                        />
+                        <Button
+                          onClick={handleUnwrap}
+                          disabled={
+                            !isDeployed ||
+                            !isInitialized ||
+                            !tokenPairs.some(
+                              (p) =>
+                                p.original.toLowerCase() ===
+                                selectedToken?.toLowerCase()
+                            ) ||
+                            !unwrapAmount ||
+                            parseFloat(unwrapAmount) <= 0 ||
+                            (balance &&
+                              parseFloat(unwrapAmount) >
+                                parseFloat(balance.wrapped))
+                          }
+                          mt="sm"
+                        >
+                          Unwrap
+                        </Button>
+                      </div>
+                    </Group>
+                  </Card>
                   {isOwner &&
                     selectedToken === contractAddresses.yadaERC20Address && (
-                      <>
+                      <Card
+                        withBorder
+                        mt="md"
+                        radius="md"
+                        p="md"
+                        style={styles.card}
+                      >
                         <MintForm
                           walletManager={walletManager}
                           appContext={appContext}
@@ -850,7 +868,7 @@ const Wallet2 = () => {
                           wrappedTokenSymbol={wrappedTokenSymbol}
                           styles={styles}
                         />
-                      </>
+                      </Card>
                     )}
                 </>
               )}
@@ -869,7 +887,14 @@ const Wallet2 = () => {
               styles={styles}
             />
             {isOwner && (
-              <>
+              <Card
+                mt="md"
+                shadow="sm"
+                padding="lg"
+                radius="md"
+                withBorder
+                styles={styles.card}
+              >
                 <Button onClick={handleUpgradeContracts}>
                   Upgrade contracts
                 </Button>
@@ -879,7 +904,7 @@ const Wallet2 = () => {
                 >
                   Recover tbnb from contract
                 </Button>
-              </>
+              </Card>
             )}
             {privateKey && isDeployed && log.length === parsedData.rotation && (
               <>
@@ -898,11 +923,16 @@ const Wallet2 = () => {
                   wrappedTokenSymbol={wrappedTokenSymbol}
                   selectedBlockchain={selectedBlockchainObject}
                 />
-                <Text mb="md">
-                  {parsedData.rotation === log.length
-                    ? `Wallet is ready. You can send transactions with this key (rotation ${parsedData.rotation}).`
-                    : `Please rotate to the next key (rotation ${log.length}) to sign transactions.`}
-                </Text>
+                <Card withBorder mt="md" radius="md" p="md" style={styles.card}>
+                  <Text size="lg" weight={500} mb="md">
+                    Wallet state
+                  </Text>
+                  <Text mb="md">
+                    {parsedData.rotation === log.length
+                      ? `Wallet is ready. You can send transactions with this key (rotation ${parsedData.rotation}).`
+                      : `Please rotate to the next key (rotation ${log.length}) to sign transactions.`}
+                  </Text>
+                </Card>
                 {isInitialized && parsedData.rotation === log.length && (
                   <TransactionForm
                     recipients={recipients}

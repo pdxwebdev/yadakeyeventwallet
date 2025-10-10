@@ -1,11 +1,19 @@
 import React, { useState } from "react";
-import { Button, Group, TextInput, Switch, Stack } from "@mantine/core";
+import {
+  Button,
+  Group,
+  TextInput,
+  Switch,
+  Stack,
+  Card,
+  Text,
+} from "@mantine/core";
 import { useForm } from "@mantine/form";
 import { ethers } from "ethers";
 import { useAppContext } from "../../context/AppContext";
 import { walletManagerFactory } from "../../blockchains/WalletManagerFactory";
 
-const TokenPairsForm = ({ appContext, webcamRef }) => {
+const TokenPairsForm = ({ appContext, webcamRef, styles }) => {
   const { selectedBlockchain } = appContext;
 
   const walletManager = walletManagerFactory(selectedBlockchain);
@@ -66,42 +74,47 @@ const TokenPairsForm = ({ appContext, webcamRef }) => {
   };
 
   return (
-    <form onSubmit={form.onSubmit(handleSubmit)}>
-      <Stack mb="md">
-        {form.values.tokenPairs.map((pair, index) => (
-          <Group key={index} mt="xs">
-            <TextInput
-              label="Token Address"
-              placeholder="0x..."
-              {...form.getInputProps(`tokenPairs.${index}.tokenAddress`)}
-            />
-            <TextInput
-              label="Token Name"
-              placeholder="Token Name"
-              {...form.getInputProps(`tokenPairs.${index}.tokenName`)}
-            />
-            <TextInput
-              label="Token Symbol"
-              placeholder="Symbol"
-              {...form.getInputProps(`tokenPairs.${index}.tokenSymbol`)}
-            />
-            <Button
-              color="red"
-              onClick={() => removeTokenPair(index)}
-              disabled={form.values.tokenPairs.length === 1}
-            >
-              Remove
+    <Card withBorder mt="md" radius="md" p="md" style={styles.card}>
+      <Text size="lg" weight={500} mb="md">
+        Add token pairs
+      </Text>
+      <form onSubmit={form.onSubmit(handleSubmit)}>
+        <Stack mb="md">
+          {form.values.tokenPairs.map((pair, index) => (
+            <Group key={index} mt="xs">
+              <TextInput
+                label="Token Address"
+                placeholder="0x..."
+                {...form.getInputProps(`tokenPairs.${index}.tokenAddress`)}
+              />
+              <TextInput
+                label="Token Name"
+                placeholder="Token Name"
+                {...form.getInputProps(`tokenPairs.${index}.tokenName`)}
+              />
+              <TextInput
+                label="Token Symbol"
+                placeholder="Symbol"
+                {...form.getInputProps(`tokenPairs.${index}.tokenSymbol`)}
+              />
+              <Button
+                color="red"
+                onClick={() => removeTokenPair(index)}
+                disabled={form.values.tokenPairs.length === 1}
+              >
+                Remove
+              </Button>
+            </Group>
+          ))}
+          <Group>
+            <Button onClick={addTokenPair}>Add Token Pair</Button>
+            <Button type="submit" loading={loading}>
+              Submit
             </Button>
           </Group>
-        ))}
-        <Group>
-          <Button onClick={addTokenPair}>Add Token Pair</Button>
-          <Button type="submit" loading={loading}>
-            Submit
-          </Button>
-        </Group>
-      </Stack>
-    </form>
+        </Stack>
+      </form>
+    </Card>
   );
 };
 

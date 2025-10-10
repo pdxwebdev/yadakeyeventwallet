@@ -1,7 +1,7 @@
 // src/components/TokenSelector.js
 import { useEffect } from "react";
 import { useAppContext } from "../../context/AppContext";
-import { Button, Group, Text, Select } from "@mantine/core";
+import { Button, Group, Text, Select, Card } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { ethers } from "ethers";
 import { localProvider } from "../../shared/constants";
@@ -11,7 +11,7 @@ import MockERC20Artifact from "../../utils/abis/MockERC20.json";
 import WrappedTokenArtifact from "../../utils/abis/WrappedToken.json";
 import axios from "axios";
 
-const TokenSelector = () => {
+const TokenSelector = ({ styles }) => {
   const appContext = useAppContext();
   const {
     selectedBlockchain,
@@ -32,24 +32,28 @@ const TokenSelector = () => {
   }));
 
   return (
-    <Group>
-      <Text>Select Token:</Text>
-      <Select
-        data={tokenOptions}
-        value={selectedToken}
-        onChange={(newValue) => {
-          if (newValue !== null) {
-            appContext.setSelectedToken(newValue);
+    <Card withBorder mt="md" radius="md" p="md" style={styles.card}>
+      <Group>
+        <Text>Select Token:</Text>
+        <Select
+          data={tokenOptions}
+          value={selectedToken}
+          onChange={(newValue) => {
+            if (newValue !== null) {
+              appContext.setSelectedToken(newValue);
+            }
+          }}
+          placeholder={
+            supportedTokens?.length > 0
+              ? "Select a token"
+              : "No tokens available"
           }
-        }}
-        placeholder={
-          supportedTokens?.length > 0 ? "Select a token" : "No tokens available"
-        }
-        defaultValue={ethers.ZeroAddress}
-        disabled={!supportedTokens || supportedTokens.length === 0}
-        style={{ width: 400 }}
-      />
-    </Group>
+          defaultValue={ethers.ZeroAddress}
+          disabled={!supportedTokens || supportedTokens.length === 0}
+          style={{ width: 400 }}
+        />
+      </Group>
+    </Card>
   );
 };
 

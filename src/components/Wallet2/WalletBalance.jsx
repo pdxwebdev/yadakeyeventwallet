@@ -14,7 +14,7 @@ const WalletBalance = ({
   selectedBlockchain,
 }) => {
   return (
-    <Card withBorder radius="md" p="md" style={styles.card}>
+    <Card mt="md" withBorder radius="md" p="md" style={styles.card}>
       <Text size="lg" weight={500}>
         Wallet Balance
       </Text>

@@ -359,7 +359,14 @@ const SendBalanceForm = ({ appContext, webcamRef }) => {
   };
 
   return (
-    <Card shadow="sm" padding="lg" radius="md" withBorder styles={styles.card}>
+    <Card
+      mt="md"
+      shadow="sm"
+      padding="lg"
+      radius="md"
+      withBorder
+      styles={styles.card}
+    >
       <Text size="lg" weight={500} mb="md">
         Send Balance from QR Code
       </Text>

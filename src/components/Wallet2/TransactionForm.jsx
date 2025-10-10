@@ -7,6 +7,7 @@ import {
   Slider,
   Switch,
   NumberInput,
+  Card,
 } from "@mantine/core";
 import { useAppContext } from "../../context/AppContext";
 import { BLOCKCHAINS } from "../../shared/constants";
@@ -41,7 +42,7 @@ const TransactionForm = ({
     };
   }
   return (
-    <div style={styles.form}>
+    <Card withBorder mt="md" radius="md" p="md" style={styles.form}>
       <Group mb="sm">
         <Text size="lg" weight={500} mb="md">
           Send Transaction
@@ -97,7 +98,7 @@ const TransactionForm = ({
           {token?.symbol}
         </Text>
       )}
-    </div>
+    </Card>
   );
 };
 
