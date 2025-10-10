@@ -388,7 +388,7 @@ const Wallet2 = () => {
       const selectedBlockchainObject = BLOCKCHAINS.find(
         (item) => item.id === selectedBlockchain
       );
-      if (selectedBlockchainObject.isBridge && !fetchTokenPairs) return;
+      if (selectedBlockchainObject.isBridge && !tokenPairsFetched) return;
       walletManager.checkStatus(appContext);
     }
   }, [
