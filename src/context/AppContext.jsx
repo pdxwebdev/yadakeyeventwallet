@@ -1,11 +1,12 @@
 // src/context/AppContext.js
 import { ethers } from "ethers";
 import { createContext, useContext, useMemo, useState } from "react";
+import { BLOCKCHAINS } from "../shared/constants";
 
 const AppContext = createContext();
 
 export const AppProvider = ({ children }) => {
-  const [selectedBlockchain, setSelectedBlockchain] = useState("bsc"); // Default to BSC
+  const [selectedBlockchain, setSelectedBlockchain] = useState(BLOCKCHAINS[0]); // Default to BSC
   const [transactions, setTransactions] = useState([]);
   const [log, setLog] = useState([]);
   const [wif, setWif] = useState("");

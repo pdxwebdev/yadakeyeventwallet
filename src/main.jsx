@@ -16,69 +16,88 @@ import App from "./App.jsx";
 import ReactDOM from "react-dom/client";
 import { createTheme, MantineProvider } from "@mantine/core";
 import { AppProvider } from "./context/AppContext";
+import { createContext, useContext, useState } from "react";
 import "@mantine/core/styles.css";
-// import "@mantine/core/styles/ScrollArea.css";
-// import "@mantine/core/styles/VisuallyHidden.css";
-// import "@mantine/core/styles/Paper.css";
-// import "@mantine/core/styles/Popover.css";
-// import "@mantine/core/styles/CloseButton.css";
-// import "@mantine/core/styles/Group.css";
-// import "@mantine/core/styles/Loader.css";
-// import "@mantine/core/styles/Overlay.css";
-// import "@mantine/core/styles/ModalBase.css";
-// import "@mantine/core/styles/Input.css";
-// import "@mantine/core/styles/InlineInput.css";
-// import "@mantine/core/styles/Flex.css";
-// import "@mantine/core/styles/FloatingIndicator.css";
 import "@mantine/notifications/styles.css";
 import "@mantine/core/styles/Table.css";
+import { BLOCKCHAINS } from "./shared/constants.js";
 
-const root = ReactDOM.createRoot(document.getElementById("root"));
-root.render(
-  <MantineProvider
-    forceColorScheme="dark" // Enforce dark theme
-    theme={{
-      primaryColor: "teal", // Changed to teal for buttons
-      colors: {
-        // Optional: Customize dark theme colors
-        dark: [
-          "#C1C2C5", // Lightest
-          "#A6A7AB",
-          "#909296",
-          "#5C5F66",
-          "#373A40",
-          "#2C2E33",
-          "#25262B",
-          "#1A1B1E", // Darker
-          "#141517",
-          "#101113", // Darkest
-        ],
-      },
-      components: {
-        Anchor: {
-          defaultProps: {
-            color: "teal.4", // Default link color
-          },
-          styles: (theme) => ({
-            root: {
-              color: theme.colors.teal[4], // Unvisited links
-              "&:visited": {
-                color: theme.colors.teal[6], // Visited links
-              },
-              "&:hover": {
-                color: theme.colors.teal[3], // Hover state
-                textDecoration: "underline",
-              },
-            },
-          }),
+// Create a context for theme updates
+export const ThemeContext = createContext({
+  primaryColor: "teal",
+  setPrimaryColor: () => {},
+});
+
+// Root component
+function Root() {
+  const [primaryColor, setPrimaryColor] = useState(BLOCKCHAINS[0].color); // Initial primary color
+
+  // Create dynamic theme based on state
+  const theme = createTheme({
+    primaryColor, // Dynamically update primary color
+    colors: {
+      dark: [
+        "#C1C2C5",
+        "#A6A7AB",
+        "#909296",
+        "#5C5F66",
+        "#373A40",
+        "#2C2E33",
+        "#25262B",
+        "#1A1B1E",
+        "#141517",
+        "#101113",
+      ],
+    },
+    components: {
+      Anchor: {
+        defaultProps: {
+          color: `${primaryColor}.4`, // Sync with primaryColor
         },
+        styles: (theme) => ({
+          root: {
+            color: theme.colors[primaryColor][4],
+            "&:visited": {
+              color: theme.colors[primaryColor][6],
+            },
+            "&:hover": {
+              color: theme.colors[primaryColor][3],
+              textDecoration: "underline",
+            },
+          },
+        }),
       },
-    }}
-    withGlobalStyles
-    withNormalizeCSS
-  >
-    <AppProvider>
-      <App />
-    </AppProvider>
-  </MantineProvider>
-);
+      // Optional: Override Button styles globally
+      Button: {
+        styles: (theme) => ({
+          root: {
+            backgroundColor: theme.colors[primaryColor][6], // Use primaryColor for buttons
+            color: primaryColor === "yellow" ? theme.black : theme.white,
+            "&:hover": {
+              backgroundColor: theme.colors[primaryColor][7],
+            },
+          },
+        }),
+      },
+    },
+  });
+
+  return (
+    <ThemeContext.Provider value={{ primaryColor, setPrimaryColor }}>
+      <MantineProvider
+        forceColorScheme="dark"
+        theme={theme}
+        withGlobalStyles
+        withNormalizeCSS
+      >
+        <AppProvider>
+          <App />
+        </AppProvider>
+      </MantineProvider>
+    </ThemeContext.Provider>
+  );
+}
+
+// Render the app
+const root = ReactDOM.createRoot(document.getElementById("root"));
+root.render(<Root />);

@@ -10,11 +10,8 @@ const TransactionHistory = ({
   styles,
   selectedBlockchain,
 }) => {
-  const selectedBlockchainObj = BLOCKCHAINS.find(
-    (i) => i.id === selectedBlockchain
-  );
   let token;
-  if (selectedBlockchainObj.isBridge) {
+  if (selectedBlockchain.isBridge) {
     const { selectedToken, supportedTokens } = useAppContext();
     token = supportedTokens.find((entry) => {
       return entry.address === selectedToken;

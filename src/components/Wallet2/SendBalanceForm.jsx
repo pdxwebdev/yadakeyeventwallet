@@ -1,5 +1,13 @@
 import { useState, useRef } from "react";
-import { Button, TextInput, Group, Text, Card, Select } from "@mantine/core";
+import {
+  Button,
+  TextInput,
+  Group,
+  Text,
+  Card,
+  Select,
+  Title,
+} from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { useAppContext } from "../../context/AppContext";
 import { fromWIF } from "../../utils/hdWallet";
@@ -37,7 +45,7 @@ const SendBalanceForm = ({ appContext, webcamRef }) => {
     ethers.ZeroAddress
   ); // Default to BNB
 
-  const walletManager = walletManagerFactory(selectedBlockchain);
+  const walletManager = walletManagerFactory(selectedBlockchain.id);
 
   // Get token symbol for display
   const getTokenSymbol = (tokenAddress) => {
@@ -367,9 +375,9 @@ const SendBalanceForm = ({ appContext, webcamRef }) => {
       withBorder
       styles={styles.card}
     >
-      <Text size="lg" weight={500} mb="md">
+      <Title order={4} mb="md">
         Send Balance from QR Code
-      </Text>
+      </Title>
       <Group direction="column" spacing="md">
         <Select
           label="Select Token"

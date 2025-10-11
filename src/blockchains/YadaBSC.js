@@ -285,6 +285,7 @@ class YadaBSC {
       setCurrentPage,
       selectedToken,
       contractAddresses,
+      loading,
     } = appContext;
 
     if (!privateKey || !selectedToken) {
@@ -295,7 +296,7 @@ class YadaBSC {
       ethers.hexlify(privateKey.privateKey),
       localProvider
     );
-
+    let alreadyLoading = !!loading;
     try {
       setLoading(true);
       setCombinedHistory([]); // Clear previous history
@@ -469,7 +470,7 @@ class YadaBSC {
         color: "red",
       });
     } finally {
-      setLoading(false);
+      if (!alreadyLoading) setLoading(false);
     }
   }
 
@@ -863,7 +864,7 @@ class YadaBSC {
         message:
           initStatus.status === "invalid_rotation"
             ? `Expected key rotation ${log.length}, but current key is rotation ${log.length}. Please use the correct key.`
-            : "The key does not maintain continuity with the key event log. Please use a valid key.",
+            : "The key does not maintain continuity with the key event log. Check your PIN and try again.",
         color: "red",
       });
     } else if (initStatus.status === "error") {
@@ -888,6 +889,7 @@ class YadaBSC {
       contractAddresses,
       log,
       parsedData,
+      loading,
     } = appContext;
 
     if (!privateKey || !selectedToken) return;
@@ -896,6 +898,7 @@ class YadaBSC {
       ethers.hexlify(privateKey.privateKey),
       localProvider
     );
+    let alreadyLoading = !!loading;
     try {
       setLoading(true);
       const address = await signer.getAddress();
@@ -963,7 +966,7 @@ class YadaBSC {
       });
       setBalance(null);
     } finally {
-      setLoading(false);
+      if (!alreadyLoading) setLoading(false);
     }
   }
 
@@ -1744,7 +1747,7 @@ class YadaBSC {
           throw new Error(
             `The scanned key (rotation ${data.rotation}) at position ${
               index + 1
-            } does not maintain continuity`
+            } does not maintain continuity. Check your PIN and try again.`
           );
         }
       }

@@ -46,6 +46,7 @@ export const BLOCKCHAINS = [
         isBridge: true, // Replace with actual BSC bridge address
         providerUrl: "http://localhost:8545", // BSC RPC URL,
         hardwareInstruction: "Select BSC on your device.",
+        color: "yellow",
       }
     : {
         id: "bsc",
@@ -54,6 +55,7 @@ export const BLOCKCHAINS = [
         isBridge: true, // Replace with actual BSC bridge address
         providerUrl: "https://data-seed-prebsc-1-s1.binance.org:8545", // BSC RPC URL
         hardwareInstruction: "Select BSC on your device.",
+        color: "yellow",
       },
   // {
   //   id: 'eth',
@@ -69,6 +71,7 @@ export const BLOCKCHAINS = [
     chainId: 657, // Ethereum mainnet
     providerUrl: "https://yadacoin.io", // Ethereum RPC URL
     hardwareInstruction: "Select YadaCoin on your device.",
+    color: "teal",
   },
 ];
 

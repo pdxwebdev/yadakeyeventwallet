@@ -7,6 +7,8 @@ import {
   Text,
   Group,
   NumberInput,
+  Grid,
+  Title,
 } from "@mantine/core";
 import { notifications, Notifications } from "@mantine/notifications";
 import { useAppContext } from "../context/AppContext";
@@ -81,6 +83,7 @@ const Wallet2 = () => {
     setSendWrapped,
     tokenPairsFetched,
     setTokenPairsFetched,
+    blockchainColor,
   } = useAppContext();
 
   const webcamRef = useRef(null);
@@ -92,16 +95,13 @@ const Wallet2 = () => {
   const [unwrapAmount, setUnwrapAmount] = useState("");
 
   const walletManager = useMemo(
-    () => walletManagerFactory(selectedBlockchain),
+    () => walletManagerFactory(selectedBlockchain.id),
     [selectedBlockchain]
   );
 
   // Derive token symbols for the selected token
   const { tokenSymbol, wrappedTokenSymbol } = useMemo(() => {
-    const selectedBlockchainObj = BLOCKCHAINS.find(
-      (i) => i.id === selectedBlockchain
-    );
-    if (!selectedBlockchainObj.isBridge)
+    if (!selectedBlockchain.isBridge)
       return { tokenSymbol: "WYDA", wrappedTokenSymbol: "" };
     let tokenSymbol = "Token";
     let wrappedTokenSymbol = "WToken";
@@ -138,7 +138,7 @@ const Wallet2 = () => {
     }
 
     try {
-      if (selectedBlockchain !== "bsc") {
+      if (selectedBlockchain.id !== "bsc") {
         setIsOwner(false);
         return;
       }
@@ -236,21 +236,23 @@ const Wallet2 = () => {
 
   useEffect(() => {
     const storedPrivateKey = localStorage.getItem(
-      `walletPrivateKey_${selectedBlockchain}`
+      `walletPrivateKey_${selectedBlockchain.id}`
     );
-    const storedWif = localStorage.getItem(`walletWif_${selectedBlockchain}`);
+    const storedWif = localStorage.getItem(
+      `walletWif_${selectedBlockchain.id}`
+    );
     const storedParsedData = localStorage.getItem(
-      `walletParsedData_${selectedBlockchain}`
+      `walletParsedData_${selectedBlockchain.id}`
     );
     const storedIsInitialized = localStorage.getItem(
-      `walletIsInitialized_${selectedBlockchain}`
+      `walletIsInitialized_${selectedBlockchain.id}`
     );
 
     if (storedPrivateKey && storedWif && storedParsedData) {
       try {
         const privateKeyObj = fromWIF(storedWif);
         const parsed = JSON.parse(storedParsedData);
-        if (parsed.blockchain === selectedBlockchain) {
+        if (parsed.blockchain === selectedBlockchain.id) {
           setPrivateKey(privateKeyObj);
           setWif(storedWif);
           setParsedData({ ...parsed });
@@ -288,44 +290,44 @@ const Wallet2 = () => {
   ]);
 
   useEffect(() => {
-    if (privateKey && parsedData?.blockchain === selectedBlockchain) {
+    if (privateKey && parsedData?.blockchain === selectedBlockchain.id) {
       localStorage.setItem(
-        `walletPrivateKey_${selectedBlockchain}`,
+        `walletPrivateKey_${selectedBlockchain.id}`,
         JSON.stringify(privateKey)
       );
     } else {
-      localStorage.removeItem(`walletPrivateKey_${selectedBlockchain}`);
+      localStorage.removeItem(`walletPrivateKey_${selectedBlockchain.id}`);
     }
   }, [privateKey, parsedData, selectedBlockchain]);
 
   useEffect(() => {
-    if (wif && parsedData?.blockchain === selectedBlockchain) {
-      localStorage.setItem(`walletWif_${selectedBlockchain}`, wif);
+    if (wif && parsedData?.blockchain === selectedBlockchain.id) {
+      localStorage.setItem(`walletWif_${selectedBlockchain.id}`, wif);
     } else {
-      localStorage.removeItem(`walletWif_${selectedBlockchain}`);
+      localStorage.removeItem(`walletWif_${selectedBlockchain.id}`);
     }
   }, [wif, parsedData, selectedBlockchain]);
 
   useEffect(() => {
-    if (parsedData && parsedData.blockchain === selectedBlockchain) {
+    if (parsedData && parsedData.blockchain === selectedBlockchain.id) {
       const { ...dataToStore } = parsedData;
       localStorage.setItem(
-        `walletParsedData_${selectedBlockchain}`,
+        `walletParsedData_${selectedBlockchain.id}`,
         JSON.stringify(dataToStore)
       );
     } else {
-      localStorage.removeItem(`walletParsedData_${selectedBlockchain}`);
+      localStorage.removeItem(`walletParsedData_${selectedBlockchain.id}`);
     }
   }, [parsedData, selectedBlockchain]);
 
   useEffect(() => {
-    if (parsedData?.blockchain === selectedBlockchain) {
+    if (parsedData?.blockchain === selectedBlockchain.id) {
       localStorage.setItem(
-        `walletIsInitialized_${selectedBlockchain}`,
+        `walletIsInitialized_${selectedBlockchain.id}`,
         isInitialized.toString()
       );
     } else {
-      localStorage.removeItem(`walletIsInitialized_${selectedBlockchain}`);
+      localStorage.removeItem(`walletIsInitialized_${selectedBlockchain.id}`);
     }
   }, [isInitialized, parsedData, selectedBlockchain]);
 
@@ -355,13 +357,13 @@ const Wallet2 = () => {
     setFeeEstimate(null);
     setIsOwner(false);
     setSendWrapped(false);
-    localStorage.removeItem(`walletPrivateKey_${selectedBlockchain}`);
-    localStorage.removeItem(`walletWif_${selectedBlockchain}`);
-    localStorage.removeItem(`walletParsedData_${selectedBlockchain}`);
-    localStorage.removeItem(`walletIsInitialized_${selectedBlockchain}`);
-    localStorage.removeItem(`walletParsedData_${selectedBlockchain}_QR1`);
-    localStorage.removeItem(`walletParsedData_${selectedBlockchain}_QR2`);
-    localStorage.removeItem(`walletParsedData_${selectedBlockchain}_QR3`);
+    localStorage.removeItem(`walletPrivateKey_${selectedBlockchain.id}`);
+    localStorage.removeItem(`walletWif_${selectedBlockchain.id}`);
+    localStorage.removeItem(`walletParsedData_${selectedBlockchain.id}`);
+    localStorage.removeItem(`walletIsInitialized_${selectedBlockchain.id}`);
+    localStorage.removeItem(`walletParsedData_${selectedBlockchain.id}_QR1`);
+    localStorage.removeItem(`walletParsedData_${selectedBlockchain.id}_QR2`);
+    localStorage.removeItem(`walletParsedData_${selectedBlockchain.id}_QR3`);
     notifications.show({
       title: "Wallet Reset",
       message:
@@ -385,10 +387,7 @@ const Wallet2 = () => {
 
   useEffect(() => {
     if (privateKey && !isInitialized && !isSubmitting && parsedData) {
-      const selectedBlockchainObject = BLOCKCHAINS.find(
-        (item) => item.id === selectedBlockchain
-      );
-      if (selectedBlockchainObject.isBridge && !tokenPairsFetched) return;
+      if (selectedBlockchain.isBridge && !tokenPairsFetched) return;
       walletManager.checkStatus(appContext);
     }
   }, [
@@ -431,7 +430,7 @@ const Wallet2 = () => {
     if (privateKey) {
       walletManager.fetchBalance(appContext);
     }
-  }, [privateKey, log, walletManager, selectedToken]);
+  }, [privateKey, selectedToken]);
 
   const handleDeployContracts = async () => {
     try {
@@ -535,7 +534,7 @@ const Wallet2 = () => {
 
         qrResults.forEach((result, index) => {
           localStorage.setItem(
-            `walletParsedData_${selectedBlockchain}_QR${index + 1}`,
+            `walletParsedData_${selectedBlockchain.id}_QR${index + 1}`,
             JSON.stringify(result.newParsedData)
           );
         });
@@ -684,11 +683,8 @@ const Wallet2 = () => {
   const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
   const endIndex = startIndex + ITEMS_PER_PAGE;
   const paginatedHistory = combinedHistory.slice(startIndex, endIndex);
-  const selectedBlockchainObject = BLOCKCHAINS.find(
-    (item) => item.id === selectedBlockchain
-  );
 
-  const token = selectedBlockchainObject.isBridge
+  const token = selectedBlockchain.isBridge
     ? supportedTokens.find(
         (t) => t.address.toLowerCase() === selectedToken.toLowerCase()
       )
@@ -709,244 +705,34 @@ const Wallet2 = () => {
       <AppShell.Main>
         <Container size="lg" py="xl">
           <Notifications position="top-center" />
-          <Card
-            shadow="sm"
-            padding="lg"
-            radius="md"
-            withBorder
-            styles={styles.card}
-          >
-            <WalletHeader
-              styles={styles}
-              selectedBlockchain={selectedBlockchain}
-            />
-            {isInitialized &&
-              selectedBlockchainObject.isBridge &&
-              log.length === parsedData.rotation && (
-                <>
-                  {selectedBlockchainObject.isBridge && isOwner && (
-                    <>
-                      <TokenPairsForm
-                        appContext={appContext}
-                        webcamRef={webcamRef}
-                        styles={styles}
-                      />
-                      <SendBalanceForm
-                        appContext={appContext}
-                        webcamRef={webcamRef}
-                      />
-                    </>
-                  )}
-                  <TokenSelector styles={styles} />
-                  <Card
-                    withBorder
-                    mt="md"
-                    radius="md"
-                    p="md"
-                    style={styles.card}
-                  >
-                    <Text size="lg" weight={500} mb="md">
-                      Wrap tokens
-                    </Text>
-                    <Group mt="md" align="flex-end">
-                      <div style={{ flex: 1 }}>
-                        <NumberInput
-                          label={`Wrap Amount (${tokenSymbol})`}
-                          value={wrapAmount}
-                          onChange={(value) =>
-                            setWrapAmount(
-                              value === undefined ? "" : value.toString()
-                            )
-                          }
-                          placeholder="Enter amount to wrap"
-                          min={0}
-                          step={0.01}
-                          decimalScale={6}
-                          allowNegative={false}
-                          disabled={
-                            !isDeployed ||
-                            !isInitialized ||
-                            !tokenPairs.some(
-                              (p) =>
-                                p.original.toLowerCase() ===
-                                selectedToken?.toLowerCase()
-                            )
-                          }
-                          styles={styles.input}
-                        />
-                        <Button
-                          onClick={handleWrap}
-                          disabled={
-                            !isDeployed ||
-                            !isInitialized ||
-                            !tokenPairs.some(
-                              (p) =>
-                                p.original.toLowerCase() ===
-                                selectedToken?.toLowerCase()
-                            ) ||
-                            !wrapAmount ||
-                            parseFloat(wrapAmount) <= 0 ||
-                            (balance &&
-                              parseFloat(wrapAmount) >
-                                parseFloat(balance.original))
-                          }
-                          mt="sm"
-                        >
-                          Wrap
-                        </Button>
-                      </div>
-                      <div style={{ flex: 1 }}>
-                        <NumberInput
-                          label={`Unwrap Amount (${wrappedTokenSymbol})`}
-                          value={unwrapAmount}
-                          onChange={(value) =>
-                            setUnwrapAmount(
-                              value === undefined ? "" : value.toString()
-                            )
-                          }
-                          placeholder="Enter amount to unwrap"
-                          min={0}
-                          step={0.01}
-                          decimalScale={6}
-                          allowNegative={false}
-                          disabled={
-                            !isDeployed ||
-                            !isInitialized ||
-                            !tokenPairs.some(
-                              (p) =>
-                                p.original.toLowerCase() ===
-                                selectedToken?.toLowerCase()
-                            )
-                          }
-                          styles={styles.input}
-                        />
-                        <Button
-                          onClick={handleUnwrap}
-                          disabled={
-                            !isDeployed ||
-                            !isInitialized ||
-                            !tokenPairs.some(
-                              (p) =>
-                                p.original.toLowerCase() ===
-                                selectedToken?.toLowerCase()
-                            ) ||
-                            !unwrapAmount ||
-                            parseFloat(unwrapAmount) <= 0 ||
-                            (balance &&
-                              parseFloat(unwrapAmount) >
-                                parseFloat(balance.wrapped))
-                          }
-                          mt="sm"
-                        >
-                          Unwrap
-                        </Button>
-                      </div>
-                    </Group>
-                  </Card>
-                  {isOwner &&
-                    selectedToken === contractAddresses.yadaERC20Address && (
-                      <Card
-                        withBorder
-                        mt="md"
-                        radius="md"
-                        p="md"
-                        style={styles.card}
-                      >
-                        <MintForm
-                          walletManager={walletManager}
-                          appContext={appContext}
-                          webcamRef={webcamRef}
-                          tokenSymbol={tokenSymbol}
-                          wrappedTokenSymbol={wrappedTokenSymbol}
-                          styles={styles}
-                        />
-                        <BurnForm
-                          walletManager={walletManager}
-                          appContext={appContext}
-                          webcamRef={webcamRef}
-                          tokenSymbol={tokenSymbol}
-                          wrappedTokenSymbol={wrappedTokenSymbol}
-                          styles={styles}
-                        />
-                      </Card>
-                    )}
-                </>
-              )}
-            <WalletStateHandler
-              privateKey={privateKey}
-              isSubmitting={isSubmitting}
-              isInitialized={isInitialized}
-              parsedData={parsedData}
-              log={log}
-              onDeployContracts={handleDeployContracts}
-              onRotateKey={() => {
-                handleRotateKey(appContext);
-              }}
-              onReset={resetWalletState}
-              isDeployed={isDeployed}
-              styles={styles}
-            />
-            {isOwner && (
-              <Card
-                mt="md"
-                shadow="sm"
-                padding="lg"
-                radius="md"
-                withBorder
-                styles={styles.card}
-              >
-                <Button onClick={handleUpgradeContracts}>
-                  Upgrade contracts
-                </Button>
-
-                <Button
-                  onClick={() => walletManager.emergencyRecover(appContext)}
-                >
-                  Recover tbnb from contract
-                </Button>
-              </Card>
-            )}
-            {privateKey && isDeployed && log.length === parsedData.rotation && (
-              <>
-                <WalletBalance
-                  balance={balance}
-                  parsedData={parsedData}
-                  log={log}
-                  onRefresh={() => {
-                    walletManager.fetchBalance(appContext);
-                    walletManager.buildTransactionHistory(appContext);
-                  }}
-                  onCopyAddress={copyAddressToClipboard}
-                  onShowQR={() => setIsQRModalOpen(true)}
-                  styles={styles}
-                  tokenSymbol={tokenSymbol}
-                  wrappedTokenSymbol={wrappedTokenSymbol}
-                  selectedBlockchain={selectedBlockchainObject}
-                />
-                <Card withBorder mt="md" radius="md" p="md" style={styles.card}>
-                  <Text size="lg" weight={500} mb="md">
-                    Wallet state
-                  </Text>
-                  <Text mb="md">
-                    {parsedData.rotation === log.length
-                      ? `Wallet is ready. You can send transactions with this key (rotation ${parsedData.rotation}).`
-                      : `Please rotate to the next key (rotation ${log.length}) to sign transactions.`}
-                  </Text>
-                </Card>
-                {isInitialized && parsedData.rotation === log.length && (
-                  <TransactionForm
-                    recipients={recipients}
-                    onAddRecipient={addRecipient}
-                    onRemoveRecipient={removeRecipient}
-                    onUpdateRecipient={updateRecipient}
-                    onSendTransaction={handleSignTransaction}
-                    setFocusedRotation={setFocusedRotation}
-                    styles={styles}
-                    feeEstimate={feeEstimate}
-                    selectedBlockchain={selectedBlockchainObject}
-                  />
-                )}
-                {!isInitialized > 0 && (
+          <WalletHeader
+            styles={styles}
+            selectedBlockchain={selectedBlockchain}
+          />
+          <WalletStateHandler
+            privateKey={privateKey}
+            isSubmitting={isSubmitting}
+            isInitialized={isInitialized}
+            parsedData={parsedData}
+            log={log}
+            onDeployContracts={handleDeployContracts}
+            onRotateKey={() => {
+              handleRotateKey(appContext);
+            }}
+            onReset={resetWalletState}
+            isDeployed={isDeployed}
+            styles={styles}
+          />
+          {privateKey && isDeployed && log.length === parsedData.rotation && (
+            <>
+              <Card withBorder mt="md" radius="md" p="md" style={styles.card}>
+                <Title order={5}>Wallet state</Title>
+                <Text mt="md">
+                  {parsedData.rotation === log.length
+                    ? `Wallet is ready. You can send transactions with this key (rotation ${parsedData.rotation}).`
+                    : `Please rotate to the next key (rotation ${log.length}) to sign transactions.`}
+                </Text>
+                {token && !isInitialized > 0 && (
                   <Button
                     disabled={balance <= 0}
                     onClick={async () => {
@@ -961,45 +747,248 @@ const Wallet2 = () => {
                       : "Initialize wallet"}
                   </Button>
                 )}
-                {combinedHistory.length > 0 && (
-                  <TransactionHistory
-                    combinedHistory={paginatedHistory}
-                    currentPage={currentPage}
-                    totalPages={totalPages}
-                    onPageChange={setCurrentPage}
-                    styles={styles}
-                    selectedBlockchain={selectedBlockchain}
-                  />
+              </Card>
+              <WalletBalance
+                balance={balance}
+                parsedData={parsedData}
+                log={log}
+                onRefresh={() => {
+                  walletManager.fetchBalance(appContext);
+                  walletManager.buildTransactionHistory(appContext);
+                }}
+                onCopyAddress={copyAddressToClipboard}
+                onShowQR={() => setIsQRModalOpen(true)}
+                styles={styles}
+                tokenSymbol={tokenSymbol}
+                wrappedTokenSymbol={wrappedTokenSymbol}
+                selectedBlockchain={selectedBlockchain}
+              />
+
+              {isInitialized &&
+                selectedBlockchain.isBridge &&
+                log.length === parsedData.rotation && (
+                  <>
+                    {selectedBlockchain.isBridge && isOwner && (
+                      <>
+                        <TokenPairsForm
+                          appContext={appContext}
+                          webcamRef={webcamRef}
+                          styles={styles}
+                        />
+                        <SendBalanceForm
+                          appContext={appContext}
+                          webcamRef={webcamRef}
+                        />
+                      </>
+                    )}
+                    <TokenSelector styles={styles} />
+                    <Card
+                      withBorder
+                      mt="md"
+                      radius="md"
+                      p="md"
+                      style={styles.card}
+                    >
+                      <Title order={4}>Wrap tokens</Title>
+                      <Group mt="md" align="flex-end">
+                        <div style={{ flex: 1 }}>
+                          <NumberInput
+                            label={`Wrap Amount (${tokenSymbol})`}
+                            value={wrapAmount}
+                            onChange={(value) =>
+                              setWrapAmount(
+                                value === undefined ? "" : value.toString()
+                              )
+                            }
+                            placeholder="Enter amount to wrap"
+                            min={0}
+                            step={0.01}
+                            decimalScale={6}
+                            allowNegative={false}
+                            disabled={
+                              !isDeployed ||
+                              !isInitialized ||
+                              !tokenPairs.some(
+                                (p) =>
+                                  p.original.toLowerCase() ===
+                                  selectedToken?.toLowerCase()
+                              )
+                            }
+                            styles={styles.input}
+                          />
+                          <Button
+                            onClick={handleWrap}
+                            color="blue"
+                            disabled={
+                              !isDeployed ||
+                              !isInitialized ||
+                              !tokenPairs.some(
+                                (p) =>
+                                  p.original.toLowerCase() ===
+                                  selectedToken?.toLowerCase()
+                              ) ||
+                              !wrapAmount ||
+                              parseFloat(wrapAmount) <= 0 ||
+                              (balance &&
+                                parseFloat(wrapAmount) >
+                                  parseFloat(balance.original))
+                            }
+                            mt="sm"
+                          >
+                            Wrap
+                          </Button>
+                        </div>
+                        <div style={{ flex: 1 }}>
+                          <NumberInput
+                            label={`Unwrap Amount (${wrappedTokenSymbol})`}
+                            value={unwrapAmount}
+                            onChange={(value) =>
+                              setUnwrapAmount(
+                                value === undefined ? "" : value.toString()
+                              )
+                            }
+                            placeholder="Enter amount to unwrap"
+                            min={0}
+                            step={0.01}
+                            decimalScale={6}
+                            allowNegative={false}
+                            disabled={
+                              !isDeployed ||
+                              !isInitialized ||
+                              !tokenPairs.some(
+                                (p) =>
+                                  p.original.toLowerCase() ===
+                                  selectedToken?.toLowerCase()
+                              )
+                            }
+                            styles={styles.input}
+                          />
+                          <Button
+                            onClick={handleUnwrap}
+                            disabled={
+                              !isDeployed ||
+                              !isInitialized ||
+                              !tokenPairs.some(
+                                (p) =>
+                                  p.original.toLowerCase() ===
+                                  selectedToken?.toLowerCase()
+                              ) ||
+                              !unwrapAmount ||
+                              parseFloat(unwrapAmount) <= 0 ||
+                              (balance &&
+                                parseFloat(unwrapAmount) >
+                                  parseFloat(balance.wrapped))
+                            }
+                            mt="sm"
+                          >
+                            Unwrap
+                          </Button>
+                        </div>
+                      </Group>
+                    </Card>
+                    {isOwner &&
+                      selectedToken === contractAddresses.yadaERC20Address && (
+                        <Card
+                          withBorder
+                          mt="md"
+                          radius="md"
+                          p="md"
+                          style={styles.card}
+                        >
+                          <MintForm
+                            walletManager={walletManager}
+                            appContext={appContext}
+                            webcamRef={webcamRef}
+                            tokenSymbol={tokenSymbol}
+                            wrappedTokenSymbol={wrappedTokenSymbol}
+                            styles={styles}
+                          />
+                          <BurnForm
+                            walletManager={walletManager}
+                            appContext={appContext}
+                            webcamRef={webcamRef}
+                            tokenSymbol={tokenSymbol}
+                            wrappedTokenSymbol={wrappedTokenSymbol}
+                            styles={styles}
+                          />
+                        </Card>
+                      )}
+                  </>
                 )}
-              </>
-            )}
-            <Group mt="xl">
-              <Button onClick={resetWalletState} color="red" variant="outline">
-                Erase Wallet Cache
+              {isInitialized && parsedData.rotation === log.length && (
+                <TransactionForm
+                  recipients={recipients}
+                  onAddRecipient={addRecipient}
+                  onRemoveRecipient={removeRecipient}
+                  onUpdateRecipient={updateRecipient}
+                  onSendTransaction={handleSignTransaction}
+                  setFocusedRotation={setFocusedRotation}
+                  styles={styles}
+                  feeEstimate={feeEstimate}
+                  selectedBlockchain={selectedBlockchain}
+                />
+              )}
+            </>
+          )}
+          {isOwner && (
+            <Card
+              mt="md"
+              shadow="sm"
+              padding="lg"
+              radius="md"
+              withBorder
+              styles={styles.card}
+            >
+              <Button color={blockchainColor} onClick={handleUpgradeContracts}>
+                Upgrade contracts
               </Button>
-            </Group>
-            <QRScannerModal
-              isOpen={isScannerOpen}
-              onClose={() => {
-                setIsScannerOpen(false);
-                setIsTransactionFlow(false);
-              }}
-              webcamRef={webcamRef}
-              parsedData={parsedData}
-              log={log}
+
+              <Button
+                mt="md"
+                color={blockchainColor}
+                onClick={() => walletManager.emergencyRecover(appContext)}
+              >
+                Recover tbnb from contract
+              </Button>
+            </Card>
+          )}
+
+          {combinedHistory.length > 0 && (
+            <TransactionHistory
+              combinedHistory={paginatedHistory}
+              currentPage={currentPage}
+              totalPages={totalPages}
+              onPageChange={setCurrentPage}
               styles={styles}
-              isTransactionFlow={isTransactionFlow}
-              isDeployed={isDeployed}
-              currentScanIndex={currentScanIndex}
+              selectedBlockchain={selectedBlockchain}
             />
-            <QRDisplayModal
-              isOpen={isQRModalOpen}
-              onClose={() => setIsQRModalOpen(false)}
-              parsedData={parsedData}
-              log={log}
-              styles={styles}
-            />
-          </Card>
+          )}
+          <Group mt="xl">
+            <Button onClick={resetWalletState} color="red" variant="outline">
+              Erase Wallet Cache
+            </Button>
+          </Group>
+          <QRScannerModal
+            isOpen={isScannerOpen}
+            onClose={() => {
+              setIsScannerOpen(false);
+              setIsTransactionFlow(false);
+            }}
+            webcamRef={webcamRef}
+            parsedData={parsedData}
+            log={log}
+            styles={styles}
+            isTransactionFlow={isTransactionFlow}
+            isDeployed={isDeployed}
+            currentScanIndex={currentScanIndex}
+          />
+          <QRDisplayModal
+            isOpen={isQRModalOpen}
+            onClose={() => setIsQRModalOpen(false)}
+            parsedData={parsedData}
+            log={log}
+            styles={styles}
+          />
         </Container>
       </AppShell.Main>
     </AppShell>

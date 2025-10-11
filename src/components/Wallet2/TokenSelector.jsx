@@ -1,7 +1,7 @@
 // src/components/TokenSelector.js
 import { useEffect } from "react";
 import { useAppContext } from "../../context/AppContext";
-import { Button, Group, Text, Select, Card } from "@mantine/core";
+import { Button, Group, Text, Select, Card, Title } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { ethers } from "ethers";
 import { localProvider } from "../../shared/constants";
@@ -23,6 +23,7 @@ const TokenSelector = ({ styles }) => {
     privateKey,
     contractAddresses,
     setContractAddresses,
+    blockchainColor,
   } = appContext;
 
   // Guard against undefined supportedTokens
@@ -33,26 +34,24 @@ const TokenSelector = ({ styles }) => {
 
   return (
     <Card withBorder mt="md" radius="md" p="md" style={styles.card}>
-      <Group>
-        <Text>Select Token:</Text>
-        <Select
-          data={tokenOptions}
-          value={selectedToken}
-          onChange={(newValue) => {
-            if (newValue !== null) {
-              appContext.setSelectedToken(newValue);
-            }
-          }}
-          placeholder={
-            supportedTokens?.length > 0
-              ? "Select a token"
-              : "No tokens available"
+      <Title order={4}>Select Token</Title>
+      <Select
+        mt="md"
+        color={blockchainColor}
+        data={tokenOptions}
+        value={selectedToken}
+        onChange={(newValue) => {
+          if (newValue !== null) {
+            appContext.setSelectedToken(newValue);
           }
-          defaultValue={ethers.ZeroAddress}
-          disabled={!supportedTokens || supportedTokens.length === 0}
-          style={{ width: 400 }}
-        />
-      </Group>
+        }}
+        placeholder={
+          supportedTokens?.length > 0 ? "Select a token" : "No tokens available"
+        }
+        defaultValue={ethers.ZeroAddress}
+        disabled={!supportedTokens || supportedTokens.length === 0}
+        style={{ width: 400 }}
+      />
     </Card>
   );
 };

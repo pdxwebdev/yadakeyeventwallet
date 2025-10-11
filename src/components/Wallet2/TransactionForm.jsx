@@ -8,6 +8,7 @@ import {
   Switch,
   NumberInput,
   Card,
+  Title,
 } from "@mantine/core";
 import { useAppContext } from "../../context/AppContext";
 import { BLOCKCHAINS } from "../../shared/constants";
@@ -26,11 +27,8 @@ const TransactionForm = ({
   const { selectedToken, supportedTokens, setSendWrapped, sendWrapped } =
     useAppContext();
 
-  const selectedBlockchainObj = BLOCKCHAINS.find(
-    (i) => i.id === selectedBlockchain
-  );
   let token;
-  if (selectedBlockchainObj?.isBridge) {
+  if (selectedBlockchain?.isBridge) {
     const { selectedToken, supportedTokens } = useAppContext();
     token = supportedTokens.find((entry) => {
       return entry.address === selectedToken;
@@ -43,20 +41,17 @@ const TransactionForm = ({
   }
   return (
     <Card withBorder mt="md" radius="md" p="md" style={styles.form}>
-      <Group mb="sm">
-        <Text size="lg" weight={500} mb="md">
-          Send Transaction
-        </Text>
-        {selectedBlockchain.isBridge && (
-          <Switch
-            label="Send secure"
-            checked={sendWrapped}
-            onChange={(event) => setSendWrapped(event.currentTarget.checked)}
-          />
-        )}
-      </Group>
+      <Title order={5}>Send Transaction</Title>
+      {selectedBlockchain.isBridge && (
+        <Switch
+          mt="md"
+          label="Send secure"
+          checked={sendWrapped}
+          onChange={(event) => setSendWrapped(event.currentTarget.checked)}
+        />
+      )}
       {recipients.map((recipient, index) => (
-        <Group key={index} mb="sm">
+        <Group key={index} mb="sm" mt="xs">
           <TextInput
             placeholder="Recipient Address"
             value={recipient.address}

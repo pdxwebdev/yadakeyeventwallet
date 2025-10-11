@@ -1,6 +1,7 @@
 // src/components/Wallet2/WalletStateHandler.js
 import {
   Button,
+  Card,
   Collapse,
   Flex,
   Loader,
@@ -27,8 +28,8 @@ const WalletStateHandler = ({
 
   if (!privateKey) {
     return (
-      <>
-        <Title order={3} mb="md" fw="bold">
+      <Card withBorder mt="md" radius="md" p="md" style={styles.card}>
+        <Title order={4} mb="md" fw="bold">
           {isDeployed
             ? "Please scan a QR code for the active key."
             : "Please deploy contracts to initialize the wallet."}
@@ -75,7 +76,7 @@ const WalletStateHandler = ({
             Deploy Contracts
           </Button>
         )}
-      </>
+      </Card>
     );
   }
 

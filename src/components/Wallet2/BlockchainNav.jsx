@@ -1,5 +1,5 @@
 // src/components/BlockchainNav.js
-import { useState, useEffect } from "react";
+import { useState, useEffect, useContext } from "react";
 import { NavLink, ScrollArea } from "@mantine/core";
 import { IconChevronRight } from "@tabler/icons-react";
 import { ethers } from "ethers";
@@ -10,6 +10,7 @@ import KeyLogRegistryArtifact from "../../utils/abis/KeyLogRegistry.json";
 import MockERC20Artifact from "../../utils/abis/MockERC20.json";
 import WrappedTokenArtifact from "../../utils/abis/WrappedToken.json";
 import { useAppContext } from "../../context/AppContext";
+import { ThemeContext } from "../../main.jsx"; // Adjust path as needed
 
 const BlockchainNav = () => {
   const {
@@ -20,8 +21,10 @@ const BlockchainNav = () => {
     setLog,
     setBalance,
     setTokenPairsFetched,
+    setBlockchainColor,
   } = useAppContext();
   const [tokenLists, setTokenLists] = useState({});
+  const { setPrimaryColor } = useContext(ThemeContext);
 
   // Fetch supported tokens for each blockchain
   useEffect(() => {
@@ -72,8 +75,8 @@ const BlockchainNav = () => {
       }
       setTokenLists(newTokenLists);
       // Update tokenPairs in context for the selected blockchain
-      if (newTokenLists[selectedBlockchain]) {
-        setTokenPairs(newTokenLists[selectedBlockchain]);
+      if (newTokenLists[selectedBlockchain.id]) {
+        setTokenPairs(newTokenLists[selectedBlockchain.id]);
       }
     };
 
@@ -86,14 +89,15 @@ const BlockchainNav = () => {
         <NavLink
           key={blockchain.id}
           label={blockchain.name}
-          active={selectedBlockchain === blockchain.id}
+          active={selectedBlockchain.id === blockchain.id}
           onClick={() => {
-            setSelectedBlockchain(blockchain.id);
+            setSelectedBlockchain(blockchain);
             setTokenPairs(tokenLists[blockchain.id] || []);
             setSelectedOriginal("");
             setLog([]);
             setBalance(null);
             setTokenPairsFetched(false);
+            setPrimaryColor(blockchain.color);
           }}
           rightSection={<IconChevronRight size={12} />}
         >

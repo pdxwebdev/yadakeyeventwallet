@@ -7,6 +7,7 @@ import {
   Stack,
   Card,
   Text,
+  Title,
 } from "@mantine/core";
 import { useForm } from "@mantine/form";
 import { ethers } from "ethers";
@@ -16,7 +17,7 @@ import { walletManagerFactory } from "../../blockchains/WalletManagerFactory";
 const TokenPairsForm = ({ appContext, webcamRef, styles }) => {
   const { selectedBlockchain } = appContext;
 
-  const walletManager = walletManagerFactory(selectedBlockchain);
+  const walletManager = walletManagerFactory(selectedBlockchain.id);
   const [tokenPairs, setTokenPairs] = useState([]);
   const [loading, setLoading] = useState(false);
 
@@ -75,9 +76,9 @@ const TokenPairsForm = ({ appContext, webcamRef, styles }) => {
 
   return (
     <Card withBorder mt="md" radius="md" p="md" style={styles.card}>
-      <Text size="lg" weight={500} mb="md">
+      <Title order={4} mb="md">
         Add token pairs
-      </Text>
+      </Title>
       <form onSubmit={form.onSubmit(handleSubmit)}>
         <Stack mb="md">
           {form.values.tokenPairs.map((pair, index) => (

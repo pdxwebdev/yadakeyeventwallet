@@ -1,5 +1,4 @@
-
-  // Styles (unchanged)
+// Styles (unchanged)
 export const styles = (theme) => ({
   card: {
     backgroundColor:
@@ -55,9 +54,7 @@ export const styles = (theme) => ({
   webcam: {
     borderRadius: "8px",
     border: `1px solid ${
-      theme.colorScheme === "dark"
-        ? theme.colors.dark[4]
-        : theme.colors.gray[4]
+      theme.colorScheme === "dark" ? theme.colors.dark[4] : theme.colors.gray[4]
     }`,
   },
   button: {

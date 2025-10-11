@@ -26,21 +26,20 @@ const WalletBalance = ({
       {balance ? (
         <>
           {selectedBlockchain.isBridge && (
-            <Text c="grey" id="unprotected">
-              Unprotected Balance:
-              {balance.original} {tokenSymbol || "Token"}{" "}
+            <Text size={25} lh={2} c="grey" id="unprotected">
+              Unprotected Balance: {balance.original} {tokenSymbol || "Token"}{" "}
               <Tooltip label="The is the unwrapped/unprotected asset. This asset can be transferred with your private key without additional security checks.">
                 <IconInfoCircle size={18} style={{ verticalAlign: "middle" }} />
               </Tooltip>
             </Text>
           )}
           {!selectedBlockchain.isBridge && (
-            <Text c="grey" id="unprotected">
+            <Text size={25} lh={1} c="grey" id="unprotected">
               Balance: {balance} YDA
             </Text>
           )}
           {selectedBlockchain.isBridge && wrappedTokenSymbol && (
-            <Text c="green">
+            <Text size={25} lh={1} c={selectedBlockchain.color} fw="bolder">
               Secured Balance: {balance.wrapped} Y{wrappedTokenSymbol}{" "}
               <Tooltip label="The is the wrapped/secured asset. This asset can NOT be transferred with your private key without additional security checks.">
                 <IconInfoCircle size={18} style={{ verticalAlign: "middle" }} />
@@ -49,7 +48,9 @@ const WalletBalance = ({
           )}
         </>
       ) : (
-        <Text>No balance available</Text>
+        <Text size={25} lh={2} fw="bolder">
+          Balance: 0 {selectedBlockchain.isBridge ? tokenSymbol : "YDA"}
+        </Text>
       )}
       <Group mt="md">
         <Button onClick={onRefresh}>Refresh Balance</Button>
