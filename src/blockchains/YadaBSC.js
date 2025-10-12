@@ -1092,7 +1092,6 @@ class YadaBSC {
       const amountToSend = balance - gasCost;
 
       if (amountToSend <= 0n) {
-        setIsInitialized(true);
         throw new Error(
           `Insufficient BNB balance: ${ethers.formatEther(balance)} BNB`
         );
@@ -2178,7 +2177,7 @@ class YadaBSC {
       setLog(updatedLog);
       return { status: true };
     } catch (error) {
-      console.error("Error adding token pairs:", error);
+      console.error("Error in buildAndExecuteTransaction:", error);
       return { status: false, message: error.message };
     } finally {
       setLoading(false);
