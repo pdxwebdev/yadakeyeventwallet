@@ -496,6 +496,58 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
         nonces[msg.sender] += NONCE_INCREMENT;
     }
 
+    function transferBalanceToLatestKey(
+        bytes memory publicKey,
+        PermitData[] calldata permits
+    ) external nonReentrant {
+
+        address expectedSigner = getAddressFromPublicKey(publicKey);
+        for(uint256 i = 0; i < permits.length; i++) {
+            PermitData memory permit = permits[i];
+            if (permit.token == address(0)) revert InvalidPermits();
+            // Get latest key log entry for the public key
+            (KeyLogEntry memory latestEntry, bool exists) = keyLogRegistry.getLatestChainEntry(publicKey);
+            if (!exists) revert InvalidPublicKey();
+
+            uint256 balance = IERC20(permit.token).balanceOf(expectedSigner);
+            if (balance == 0) revert InsufficientBalance();
+            if (permit.deadline < block.timestamp) revert PermitDeadlineExpired();
+
+            //Verify permit signature matches the current public key
+            bytes32 permitMessageHash = keccak256(
+                abi.encodePacked(
+                    "\x19\x01",
+                    IERC20Permit2(permit.token).DOMAIN_SEPARATOR(),
+                    keccak256(
+                        abi.encode(
+                            keccak256("Permit(address owner,address spender,uint256 value,uint256 nonce,uint256 deadline)"),
+                            expectedSigner,
+                            address(this),
+                            balance,
+                            IERC20Permit2(permit.token).nonces(expectedSigner),
+                            permit.deadline
+                        )
+                    )
+                )
+            );
+
+            address permitSigner = permitMessageHash.recover(abi.encodePacked(permit.r, permit.s, permit.v));
+            if (permitSigner != expectedSigner) {
+                revert InvalidRecipientForNonMatchingSigner();
+            }
+            IERC20Permit2(permit.token).permit(
+                expectedSigner,
+                address(this),
+                balance,
+                permit.deadline,
+                permit.v,
+                permit.r,
+                permit.s
+            );
+            IERC20(permit.token).safeTransferFrom(expectedSigner, latestEntry.prerotatedKeyHash, balance);
+        }
+    }
+
     function originalToWrapped(address originalToken) external view returns (address) {
         TokenPairData memory pair = tokenPairs[originalToken];
         return pair.wrappedToken;

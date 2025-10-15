@@ -10,7 +10,7 @@ import {
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { useAppContext } from "../../context/AppContext";
-import { fromWIF } from "../../utils/hdWallet";
+import { decompressPublicKey, fromWIF } from "../../utils/hdWallet";
 import { ethers } from "ethers";
 import QRScannerModal from "./QRScannerModal";
 import { capture } from "../../shared/capture";
@@ -34,16 +34,14 @@ const SendBalanceForm = ({ appContext, webcamRef }) => {
     parsedData,
     setLog,
     setLoading,
+    selectedToken,
   } = appContext; // Call useAppContext at the top level
   const [isScannerOpen, setIsScannerOpen] = useState(false);
-  const [recipientAddress, setRecipientAddress] = useState("");
+
   const [scannedWallet, setScannedWallet] = useState(null);
   const [balance, setBalance] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   const [wif, setWif] = useState("");
-  const [selectedTokenAddress, setSelectedTokenAddress] = useState(
-    ethers.ZeroAddress
-  ); // Default to BNB
 
   const walletManager = walletManagerFactory(selectedBlockchain.id);
 
@@ -174,7 +172,7 @@ const SendBalanceForm = ({ appContext, webcamRef }) => {
 
       setWif(wifString);
       setScannedWallet(signer);
-      await fetchBalance(signer, selectedTokenAddress);
+      await fetchBalance(signer, selectedToken);
 
       notifications.show({
         title: "Success",
@@ -195,13 +193,7 @@ const SendBalanceForm = ({ appContext, webcamRef }) => {
 
   // Function to send the balance of the selected token to the recipient address
   const handleSendBalance = async () => {
-    if (
-      !scannedWallet ||
-      !recipientAddress ||
-      !ethers.isAddress(recipientAddress) ||
-      !balance ||
-      parseFloat(balance.value) <= 0
-    ) {
+    if (!scannedWallet || !balance || parseFloat(balance.value) <= 0) {
       notifications.show({
         title: "Error",
         message:
@@ -213,152 +205,39 @@ const SendBalanceForm = ({ appContext, webcamRef }) => {
 
     try {
       setIsLoading(true);
-      const signer = scannedWallet;
 
-      if (selectedTokenAddress === ethers.ZeroAddress) {
-        // Send BNB
-        const balanceWei = await localProvider.getBalance(signer.address);
-        const feeData = await localProvider.getFeeData();
-        const gasPrice = feeData.gasPrice;
-        const gasLimit = BigInt(21000); // Standard gas limit for a simple transfer
-        const gasCost = gasPrice * gasLimit;
-        const amountToSend = balanceWei - gasCost;
+      // Execute the transaction using the bridge contract
+      const result = await walletManager.transferBalanceToLatestKey(
+        appContext,
+        scannedWallet
+      );
 
-        if (amountToSend <= 0) {
-          throw new Error(
-            `Insufficient BNB balance for gas: ${ethers.formatEther(
-              balanceWei
-            )} BNB available`
-          );
-        }
-
-        const nonce = await localProvider.getTransactionCount(
-          signer.address,
-          "pending"
-        );
-        const tx = await signer.sendTransaction({
-          to: recipientAddress,
-          value: amountToSend,
-          gasLimit,
-          gasPrice,
-          nonce,
-        });
-
-        const receipt = await tx.wait();
-
-        console.log({
-          transactionHash: receipt.transactionHash,
-          status: receipt.status,
-          to: receipt.to,
-          from: receipt.from,
-          gasUsed: receipt.gasUsed.toString(),
-        });
-
+      if (result.status) {
         notifications.show({
           title: "Success",
-          message: `Successfully sent ${ethers.formatEther(
-            amountToSend
-          )} BNB to ${recipientAddress}`,
+          message: `Successfully sent ${balance.symbol}`,
           color: "green",
         });
       } else {
-        // Send ERC20 or Wrapped token
-        const isWrapped = tokenPairs.some(
-          (pair) =>
-            pair.wrapped.toLowerCase() === selectedTokenAddress.toLowerCase()
-        );
-        const abi = isWrapped ? WRAPPED_TOKEN_ABI : ERC20_ABI;
-        const tokenContract = new ethers.Contract(
-          selectedTokenAddress,
-          abi,
-          signer
-        );
-
-        const balanceWei = await tokenContract.balanceOf(signer.address);
-        const decimals = await tokenContract.decimals();
-        const amountToSend = balanceWei;
-
-        if (amountToSend <= 0) {
-          throw new Error(
-            `Insufficient balance: ${ethers.formatUnits(
-              balanceWei,
-              decimals
-            )} ${balance.symbol} available`
-          );
-        }
-
-        // Generate permit for the token transfer
-        const permit = await walletManager.generatePermit(
-          {
-            selectedBlockchain,
-            contractAddresses,
-            supportedTokens,
-            tokenPairs,
-          }, // Pass context explicitly
-          selectedTokenAddress,
-          signer,
-          amountToSend,
-          [
-            {
-              recipientAddress: recipientAddress,
-              amount: amountToSend,
-              wrap: false,
-              unwrap: false,
-              mint: false,
-              burn: false,
-            },
-          ]
-        );
-
-        if (!permit) {
-          throw new Error(
-            `Permit generation failed for token ${selectedTokenAddress}`
-          );
-        }
-
-        // Execute the transaction using the bridge contract
-        const result = await walletManager.buildAndExecuteTransaction(
-          appContext, // Pass context explicitly
-          webcamRef,
-          selectedTokenAddress,
-          [], // No new token pairs
-          [selectedTokenAddress.toLowerCase()], // Exclude the selected token from additional permits
-          {
-            token: ethers.ZeroAddress,
-            fee: 0,
-            expires: 0,
-            signature: "0x",
-          }, // Default fee info
-          supportedTokens.map((token) => ({ address: token.address })), // Supported tokens
-          permit
-        );
-
-        if (result.status) {
-          notifications.show({
-            title: "Success",
-            message: `Successfully sent ${ethers.formatUnits(
-              amountToSend,
-              decimals
-            )} ${balance.symbol} to ${recipientAddress}`,
-            color: "green",
-          });
-        } else {
-          throw new Error(result.message || "Failed to send token balance");
-        }
+        throw new Error(result.message || "Failed to send token balance");
       }
 
+      const signer = new ethers.Wallet(
+        ethers.hexlify(privateKey.privateKey),
+        localProvider
+      );
       // Refresh balance after transaction
-      await fetchBalance(signer, selectedTokenAddress);
+      await fetchBalance(signer, selectedToken);
     } catch (error) {
       console.error(
-        `Error sending ${getTokenSymbol(selectedTokenAddress)} balance:`,
+        `Error sending ${getTokenSymbol(selectedToken)} balance:`,
         error
       );
       notifications.show({
         title: "Error",
         message:
           error.message ||
-          `Failed to send ${getTokenSymbol(selectedTokenAddress)} balance`,
+          `Failed to send ${getTokenSymbol(selectedToken)} balance`,
         color: "red",
       });
     } finally {
@@ -379,19 +258,6 @@ const SendBalanceForm = ({ appContext, webcamRef }) => {
         Send Balance from QR Code
       </Title>
       <Group direction="column" spacing="md">
-        <Select
-          label="Select Token"
-          placeholder="Select a token"
-          value={selectedTokenAddress}
-          onChange={(value) => {
-            setSelectedTokenAddress(value);
-            if (scannedWallet) {
-              fetchBalance(scannedWallet, value); // Refresh balance when token changes
-            }
-          }}
-          data={tokenOptions} // Use deduplicated options
-          styles={styles.select}
-        />
         <Button
           onClick={handleScanQR}
           disabled={isLoading}
@@ -405,23 +271,11 @@ const SendBalanceForm = ({ appContext, webcamRef }) => {
             Balance: {balance.value} {balance.symbol}
           </Text>
         )}
-        <TextInput
-          label="Recipient Address"
-          placeholder="Enter recipient address"
-          value={recipientAddress}
-          onChange={(event) =>
-            setRecipientAddress(event.currentTarget.value.trim())
-          }
-          disabled={isLoading}
-          styles={styles.input}
-        />
         <Button
           onClick={handleSendBalance}
           disabled={
             isLoading ||
             !scannedWallet ||
-            !recipientAddress ||
-            !ethers.isAddress(recipientAddress) ||
             !balance ||
             parseFloat(balance.value) <= 0
           }

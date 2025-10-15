@@ -8,6 +8,7 @@ import {
 } from "../utils/hdWallet";
 import { Transaction } from "../utils/transaction";
 import { capture } from "../shared/capture";
+import { ethers } from "ethers";
 
 class YadaCoin {
   constructor() {
@@ -842,6 +843,229 @@ class YadaCoin {
           outputs: transactionOutputs,
           relationship: "",
           relationship_hash: await generateSHA256(""),
+          public_key_hash: getP2PKH(privateKey.publicKey),
+          prev_public_key_hash: parsedData.prevPublicKeyHash,
+          fee: transactionFee,
+        });
+        await actualTxn.hashAndSign();
+
+        let newTransactionOutputs = [
+          {
+            to: newParsedData.prerotatedKeyHash,
+            value: balance - totalAmount - transactionFee,
+          },
+        ];
+
+        const zeroValueTxn = new Transaction({
+          key: newPrivateKey,
+          public_key: Buffer.from(newPrivateKey.publicKey).toString("hex"),
+          twice_prerotated_key_hash: newParsedData.twicePrerotatedKeyHash,
+          prerotated_key_hash: newParsedData.prerotatedKeyHash,
+          inputs: [{ id: actualTxn.id }],
+          outputs: newTransactionOutputs,
+          relationship: "",
+          relationship_hash: await generateSHA256(""),
+          public_key_hash: getP2PKH(newPrivateKey.publicKey),
+          prev_public_key_hash: getP2PKH(privateKey.publicKey),
+          fee: 0,
+        });
+        await zeroValueTxn.hashAndSign();
+
+        setLoading(true);
+        const actualResponse = await axios.post(
+          `${import.meta.env.VITE_API_URL}/transaction?origin=${
+            window.location.origin
+          }&username_signature=1`,
+          [actualTxn.toJson(), zeroValueTxn.toJson()],
+          { headers: { "Content-Type": "application/json" } }
+        );
+
+        if (actualResponse.status === 200) {
+          localStorage.removeItem("walletPrivateKey");
+          localStorage.removeItem("walletWif");
+          localStorage.removeItem("walletParsedData");
+          localStorage.removeItem("walletIsInitialized");
+
+          setPrivateKey(newPrivateKey);
+          setWif(newParsedData.wif);
+          setParsedData(newParsedData);
+          setRecipients([{ address: "", amount: "" }]);
+          setIsTransactionFlow(false);
+
+          const { isValidKey, log: fetchedLog } = await this.getKeyLog(
+            appContext,
+            newPrivateKey
+          );
+          setLog(fetchedLog);
+          notifications.show({
+            title: "Success",
+            message:
+              "Transaction and key rotation confirmation submitted successfully.",
+            color: "green",
+          });
+        } else {
+          throw new Error("Transaction or confirmation submission failed");
+        }
+      } catch (error) {
+        throw new Error(`Failed to process transaction: ${error.message}`);
+      }
+    } catch (error) {
+      notifications.show({
+        title: "Error",
+        message:
+          error.message || "Failed to process QR code. Please try again.",
+        color: "red",
+      });
+      setIsScannerOpen(false);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async wrap(appContext, webcamRef, wrapAmount, wrapAddress) {
+    const {
+      privateKey,
+      parsedData,
+      feeEstimate,
+      balance,
+      setIsTransactionFlow,
+      setIsScannerOpen,
+      setPrivateKey,
+      setWif,
+      setParsedData,
+      setLoading,
+      setLog,
+      setRecipients,
+    } = appContext;
+    const recipients = [
+      {
+        address: wrapAddress,
+        amount: wrapAmount,
+      },
+    ];
+
+    if (!privateKey || recipients.length === 0) {
+      notifications.show({
+        title: "Error",
+        message: "Please provide private key and at least one recipient",
+        color: "red",
+      });
+      return;
+    }
+
+    const invalidRecipient = recipients.find(
+      (r) =>
+        !r.address ||
+        !r.amount ||
+        isNaN(r.amount) ||
+        Number(r.amount) <= 0 ||
+        !ethers.isAddress(r.address)
+    );
+    if (invalidRecipient) {
+      notifications.show({
+        title: "Error",
+        message: "Your wrap address and amount must be valid",
+        color: "red",
+      });
+      return;
+    }
+
+    const totalAmount = recipients.reduce(
+      (sum, r) => sum + Number(r.amount),
+      0
+    );
+    const transactionFee =
+      feeEstimate?.status === "congested"
+        ? feeEstimate.fee_estimate.median_fee
+        : feeEstimate?.recommended_fee || 0.0;
+
+    try {
+      notifications.show({
+        title: "Key Rotation Required",
+        message: `Please rotate your key to rotation ${
+          parsedData.rotation + 1
+        } on your device and scan the new QR code to proceed with the transaction.`,
+        color: "yellow",
+      });
+      setIsTransactionFlow(true);
+      setIsScannerOpen(true);
+
+      let qrData;
+      let attempts = 0;
+      const maxAttempts = 100;
+
+      while (attempts < maxAttempts) {
+        try {
+          qrData = await capture(webcamRef);
+          break;
+        } catch (error) {
+          attempts++;
+          await new Promise((resolve) => setTimeout(resolve, 300));
+        }
+      }
+
+      if (!qrData) {
+        setIsScannerOpen(false);
+        throw new Error("No QR code scanned within time limit");
+      }
+
+      setIsScannerOpen(false);
+      const { newPrivateKey, newParsedData } = await this.processScannedQR(
+        appContext,
+        webcamRef,
+        qrData,
+        true
+      );
+
+      try {
+        const res = await axios.get(
+          `${import.meta.env.VITE_API_URL}/get-graph-wallet?address=${getP2PKH(
+            privateKey.publicKey
+          )}&amount_needed=${balance}`
+        );
+        const newUnspent = res.data.unspent_transactions.concat(
+          res.data.unspent_mempool_txns
+        );
+        const inputs = newUnspent.reduce(
+          (accumulator, utxo) => {
+            if (accumulator.total >= totalAmount + transactionFee)
+              return accumulator;
+            const utxoValue = utxo.outputs.reduce(
+              (sum, output) => sum + output.value,
+              0
+            );
+            accumulator.selected.push({ id: utxo.id });
+            accumulator.total += utxoValue;
+            return accumulator;
+          },
+          { selected: [], total: 0 }
+        );
+
+        if (inputs.total < totalAmount + transactionFee) {
+          throw new Error("Insufficient funds");
+        }
+
+        const transactionOutputs = [
+          {
+            to: "16U1gAmHazqqEkbRE9KFPShAperjJreMRA",
+            value: Number(recipients[0].amount),
+          },
+        ];
+
+        transactionOutputs.push({
+          to: parsedData.prerotatedKeyHash,
+          value: balance - totalAmount - transactionFee,
+        });
+
+        const actualTxn = new Transaction({
+          key: privateKey,
+          public_key: Buffer.from(privateKey.publicKey).toString("hex"),
+          twice_prerotated_key_hash: parsedData.twicePrerotatedKeyHash,
+          prerotated_key_hash: parsedData.prerotatedKeyHash,
+          inputs: inputs.selected,
+          outputs: transactionOutputs,
+          relationship: wrapAddress,
+          relationship_hash: await generateSHA256(wrapAddress),
           public_key_hash: getP2PKH(privateKey.publicKey),
           prev_public_key_hash: parsedData.prevPublicKeyHash,
           fee: transactionFee,

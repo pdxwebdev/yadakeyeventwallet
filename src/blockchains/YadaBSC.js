@@ -892,7 +892,8 @@ class YadaBSC {
       loading,
     } = appContext;
 
-    if (!privateKey || !selectedToken) return;
+    if (!privateKey || !selectedToken || !contractAddresses.bridgeAddress)
+      return;
 
     const signer = new ethers.Wallet(
       ethers.hexlify(privateKey.privateKey),
@@ -1556,6 +1557,7 @@ class YadaBSC {
       }
 
       if (
+        !isDeployment &&
         parseInt(rotation) !== (isTransactionFlow ? log.length + 1 : log.length)
       ) {
         throw new Error(
@@ -2181,6 +2183,139 @@ class YadaBSC {
       return { status: false, message: error.message };
     } finally {
       setLoading(false);
+    }
+  }
+
+  async transferBalanceToLatestKey(appContext, previousSigner, permits) {
+    const {
+      contractAddresses,
+      privateKey,
+      selectedToken,
+      tokenPairs,
+      selectedBlockchain,
+      supportedTokens,
+    } = appContext;
+
+    const signer = new ethers.Wallet(
+      ethers.hexlify(privateKey.privateKey),
+      localProvider
+    );
+    const bridge = new ethers.Contract(
+      contractAddresses.bridgeAddress,
+      BRIDGE_ABI,
+      signer
+    );
+    const publicKey = Buffer.from(
+      previousSigner.signingKey.publicKey.slice(2),
+      "hex"
+    ).slice(1);
+
+    if (selectedToken === ethers.ZeroAddress) {
+      // Send BNB
+      const balanceWei = await localProvider.getBalance(previousSigner.address);
+      const feeData = await localProvider.getFeeData();
+      const gasPrice = feeData.gasPrice;
+      const gasLimit = BigInt(21000); // Standard gas limit for a simple transfer
+      const gasCost = gasPrice * gasLimit;
+      const amountToSend = balanceWei - gasCost;
+
+      if (amountToSend <= 0) {
+        throw new Error(
+          `Insufficient BNB balance for gas: ${ethers.formatEther(
+            balanceWei
+          )} BNB available`
+        );
+      }
+
+      const nonce = await localProvider.getTransactionCount(
+        previousSigner.address,
+        "pending"
+      );
+
+      const nowSigner = new ethers.Wallet(
+        ethers.hexlify(privateKey.privateKey),
+        localProvider
+      );
+      const keyLogRegistry = new ethers.Contract(
+        contractAddresses.keyLogRegistryAddress,
+        KEYLOG_REGISTRY_ABI,
+        nowSigner
+      );
+      const result = await keyLogRegistry["getLatestChainEntry(bytes)"](
+        publicKey
+      );
+      if (!result[1]) {
+        throw new Error("No existing key log for scanned key");
+      }
+      const tx = await previousSigner.sendTransaction({
+        to: result[0].prerotatedKeyHash,
+        value: amountToSend - gasCost,
+        gasLimit,
+        gasPrice,
+        nonce,
+      });
+
+      const receipt = await tx.wait();
+
+      console.log({
+        transactionHash: receipt.transactionHash,
+        status: receipt.status,
+        to: receipt.to,
+        from: receipt.from,
+        gasUsed: receipt.gasUsed.toString(),
+      });
+
+      return { status: true };
+    } else {
+      // Send ERC20 or Wrapped token
+      const isWrapped = tokenPairs.some(
+        (pair) => pair.wrapped.toLowerCase() === selectedToken.toLowerCase()
+      );
+      const abi = isWrapped ? WRAPPED_TOKEN_ABI : ERC20_ABI;
+      const tokenContract = new ethers.Contract(selectedToken, abi, signer);
+
+      const balanceWei = await tokenContract.balanceOf(signer.address);
+      const decimals = await tokenContract.decimals();
+      const amountToSend = balanceWei;
+
+      if (amountToSend <= 0) {
+        throw new Error(
+          `Insufficient balance: ${ethers.formatUnits(balanceWei, decimals)} ${
+            balance.symbol
+          } available`
+        );
+      }
+
+      // Generate permit for the token transfer
+      const permits = [
+        await this.generatePermit(
+          {
+            selectedBlockchain,
+            contractAddresses,
+            supportedTokens,
+            tokenPairs,
+          }, // Pass context explicitly
+          selectedToken,
+          previousSigner,
+          amountToSend,
+          [
+            {
+              recipientAddress: ethers.ZeroAddress,
+              amount: amountToSend,
+              wrap: false,
+              unwrap: false,
+              mint: false,
+              burn: false,
+            },
+          ]
+        ),
+      ];
+
+      if (permits.length <= 0) {
+        throw new Error(`Permit generation failed for token ${selectedToken}`);
+      }
+      await bridge.transferBalanceToLatestKey(publicKey, permits);
+      return { status: true };
     }
   }
 

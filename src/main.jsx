@@ -16,7 +16,7 @@ import App from "./App.jsx";
 import ReactDOM from "react-dom/client";
 import { createTheme, MantineProvider } from "@mantine/core";
 import { AppProvider } from "./context/AppContext";
-import { createContext, useContext, useState } from "react";
+import { createContext, useState } from "react";
 import "@mantine/core/styles.css";
 import "@mantine/notifications/styles.css";
 import "@mantine/core/styles/Table.css";
@@ -99,5 +99,13 @@ function Root() {
 }
 
 // Render the app
-const root = ReactDOM.createRoot(document.getElementById("root"));
+const container = document.getElementById("root");
+console.log(container);
+console.log(container._reactRoot);
+// Store the root globally so it persists across hot reloads
+if (!container._reactRoot) {
+  container._reactRoot = ReactDOM.createRoot(container);
+}
+
+const root = container._reactRoot;
 root.render(<Root />);
