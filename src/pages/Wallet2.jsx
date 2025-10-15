@@ -85,6 +85,7 @@ const Wallet2 = () => {
     tokenPairsFetched,
     setTokenPairsFetched,
     blockchainColor,
+    sendWrapped,
   } = useAppContext();
 
   const webcamRef = useRef(null);
@@ -765,6 +766,7 @@ const Wallet2 = () => {
                 tokenSymbol={tokenSymbol}
                 wrappedTokenSymbol={wrappedTokenSymbol}
                 selectedBlockchain={selectedBlockchain}
+                sendWrapped={sendWrapped}
               />
 
               {isInitialized &&

@@ -12,6 +12,7 @@ const WalletBalance = ({
   tokenSymbol,
   wrappedTokenSymbol,
   selectedBlockchain,
+  sendWrapped,
 }) => {
   return (
     <Card mt="md" withBorder radius="md" p="md" style={styles.card}>
@@ -49,7 +50,12 @@ const WalletBalance = ({
         </>
       ) : (
         <Text size={25} lh={2} fw="bolder">
-          Balance: 0 {selectedBlockchain.isBridge ? tokenSymbol : "YDA"}
+          Balance: 0
+          {sendWrapped
+            ? "Y"
+            : "" + selectedBlockchain.isBridge
+            ? tokenSymbol
+            : "YDA"}
         </Text>
       )}
       <Group mt="md">

@@ -35,7 +35,9 @@ const SendBalanceForm = ({ appContext, webcamRef }) => {
     setLog,
     setLoading,
     selectedToken,
+    sendWrapped,
   } = appContext; // Call useAppContext at the top level
+  let selectedTokenAddress = selectedToken;
   const [isScannerOpen, setIsScannerOpen] = useState(false);
 
   const [scannedWallet, setScannedWallet] = useState(null);
@@ -44,14 +46,15 @@ const SendBalanceForm = ({ appContext, webcamRef }) => {
   const [wif, setWif] = useState("");
 
   const walletManager = walletManagerFactory(selectedBlockchain.id);
-
+  const pair = tokenPairs.find((t) => t.original === selectedTokenAddress);
+  if (tokenPairs.length > 0 && sendWrapped) selectedTokenAddress = pair.wrapped;
   // Get token symbol for display
   const getTokenSymbol = (tokenAddress) => {
     if (tokenAddress === ethers.ZeroAddress) return "BNB";
     const token = supportedTokens.find(
       (t) => t.address.toLowerCase() === tokenAddress.toLowerCase()
     );
-    return token ? token.symbol : "Unknown";
+    return sendWrapped ? "Y" : "" + token ? token.symbol : "Unknown";
   };
 
   // Create unique options for the Select component
@@ -172,7 +175,7 @@ const SendBalanceForm = ({ appContext, webcamRef }) => {
 
       setWif(wifString);
       setScannedWallet(signer);
-      await fetchBalance(signer, selectedToken);
+      await fetchBalance(signer, selectedTokenAddress);
 
       notifications.show({
         title: "Success",
@@ -227,17 +230,17 @@ const SendBalanceForm = ({ appContext, webcamRef }) => {
         localProvider
       );
       // Refresh balance after transaction
-      await fetchBalance(signer, selectedToken);
+      await fetchBalance(signer, selectedTokenAddress);
     } catch (error) {
       console.error(
-        `Error sending ${getTokenSymbol(selectedToken)} balance:`,
+        `Error sending ${getTokenSymbol(selectedTokenAddress)} balance:`,
         error
       );
       notifications.show({
         title: "Error",
         message:
           error.message ||
-          `Failed to send ${getTokenSymbol(selectedToken)} balance`,
+          `Failed to send ${getTokenSymbol(selectedTokenAddress)} balance`,
         color: "red",
       });
     } finally {

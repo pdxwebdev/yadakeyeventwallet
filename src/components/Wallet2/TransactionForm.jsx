@@ -42,14 +42,6 @@ const TransactionForm = ({
   return (
     <Card withBorder mt="md" radius="md" p="md" style={styles.form}>
       <Title order={5}>Send Transaction</Title>
-      {selectedBlockchain.isBridge && (
-        <Switch
-          mt="md"
-          label="Send secure"
-          checked={sendWrapped}
-          onChange={(event) => setSendWrapped(event.currentTarget.checked)}
-        />
-      )}
       {recipients.map((recipient, index) => (
         <Group key={index} mb="sm" mt="xs">
           <TextInput

@@ -2186,7 +2186,7 @@ class YadaBSC {
     }
   }
 
-  async transferBalanceToLatestKey(appContext, previousSigner, permits) {
+  async transferBalanceToLatestKey(appContext, previousSigner) {
     const {
       contractAddresses,
       privateKey,
@@ -2194,8 +2194,12 @@ class YadaBSC {
       tokenPairs,
       selectedBlockchain,
       supportedTokens,
+      sendWrapped,
     } = appContext;
-
+    let selectedTokenAddress = selectedToken;
+    const pair = tokenPairs.find((t) => t.original === selectedToken);
+    if (tokenPairs.length > 0 && sendWrapped)
+      selectedTokenAddress = pair.wrapped;
     const signer = new ethers.Wallet(
       ethers.hexlify(privateKey.privateKey),
       localProvider
@@ -2210,7 +2214,7 @@ class YadaBSC {
       "hex"
     ).slice(1);
 
-    if (selectedToken === ethers.ZeroAddress) {
+    if (selectedTokenAddress === ethers.ZeroAddress) {
       // Send BNB
       const balanceWei = await localProvider.getBalance(previousSigner.address);
       const feeData = await localProvider.getFeeData();
@@ -2269,12 +2273,17 @@ class YadaBSC {
     } else {
       // Send ERC20 or Wrapped token
       const isWrapped = tokenPairs.some(
-        (pair) => pair.wrapped.toLowerCase() === selectedToken.toLowerCase()
+        (pair) =>
+          pair.wrapped.toLowerCase() === selectedTokenAddress.toLowerCase()
       );
       const abi = isWrapped ? WRAPPED_TOKEN_ABI : ERC20_ABI;
-      const tokenContract = new ethers.Contract(selectedToken, abi, signer);
+      const tokenContract = new ethers.Contract(
+        selectedTokenAddress,
+        abi,
+        signer
+      );
 
-      const balanceWei = await tokenContract.balanceOf(signer.address);
+      const balanceWei = await tokenContract.balanceOf(previousSigner.address);
       const decimals = await tokenContract.decimals();
       const amountToSend = balanceWei;
 
@@ -2295,7 +2304,7 @@ class YadaBSC {
             supportedTokens,
             tokenPairs,
           }, // Pass context explicitly
-          selectedToken,
+          selectedTokenAddress,
           previousSigner,
           amountToSend,
           [
@@ -2312,7 +2321,9 @@ class YadaBSC {
       ];
 
       if (permits.length <= 0) {
-        throw new Error(`Permit generation failed for token ${selectedToken}`);
+        throw new Error(
+          `Permit generation failed for token ${selectedTokenAddress}`
+        );
       }
       await bridge.transferBalanceToLatestKey(publicKey, permits);
       return { status: true };
