@@ -45,6 +45,14 @@ const config = {
         count: 10,
       },
     },
+    bscMainnet: {
+      url: "https://bsc-dataseed1.binance.org/", // BSC Testnet RPC
+      chainId: 56, // Optional, for validation
+      accounts: {
+        mnemonic: "test test test test test test test test test test test junk",
+        count: 10,
+      },
+    },
   },
 };
 

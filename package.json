@@ -12,8 +12,10 @@
     "node": "rm -f deployments.json && npx hardhat node",
     "deploy": "npx hardhat run ./scripts/deploy.js --network localhost",
     "deploytest": "npx hardhat run ./scripts/deploy.js --network bscTestnet",
+    "deploymain": "npx hardhat run ./scripts/deploy.js --network bscMainnet",
     "upgrade": "npx hardhat run ./scripts/upgrade.js --network localhost",
     "upgradetest": "npx hardhat run ./scripts/upgrade.js --network bscTestnet",
+    "upgrademain": "npx hardhat run ./scripts/upgrade.js --network bscMainnet",
     "lint": "eslint .",
     "preview": "vite preview",
     "server": "node server.js"

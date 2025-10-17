@@ -111,11 +111,6 @@ export async function main() {
   let balance = await ethers.provider.getBalance(keyData.currentSigner.address);
 
   console.log("Deployer balance:", ethers.formatEther(balance));
-  if (network.name === "bscTestnet" && balance < ethers.parseEther("0.1")) {
-    throw new Error(
-      "Deployer wallet has insufficient BNB. Fund it using the BSC Testnet Faucet."
-    );
-  }
 
   if (network.name === "localhost") {
     // Fund deployer
@@ -284,7 +279,7 @@ export async function main() {
 
   // Register initial key log entry
   console.log("Registering initial key log entry...");
-  const gasCost = ethers.parseEther("0.1");
+  const gasCost = ethers.parseEther("0.0001");
   balance = await ethers.provider.getBalance(keyData.currentSigner.address);
   console.log("Deployer balance:", ethers.formatEther(balance));
 

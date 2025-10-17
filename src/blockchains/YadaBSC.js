@@ -1419,7 +1419,12 @@ class YadaBSC {
 
     try {
       const response = await axios.post("http://localhost:3001/deploy", {
-        deployEnv: DEPLOY_ENV === "localhost" ? "deploy" : "deploytest",
+        deployEnv:
+          DEPLOY_ENV === "mainnet"
+            ? "deploymain"
+            : DEPLOY_ENV === "testnet"
+            ? "deploytest"
+            : "deploy",
         wif1,
         wif2,
         wif3,
@@ -1470,7 +1475,12 @@ class YadaBSC {
       );
       console.log(signer.address);
       const response = await axios.post("http://localhost:3001/upgrade", {
-        upgradeEnv: DEPLOY_ENV === "localhost" ? "upgrade" : "upgradetest",
+        upgradeEnv:
+          DEPLOY_ENV === "mainnet"
+            ? "upgrademain"
+            : DEPLOY_ENV === "testnet"
+            ? "upgradetest"
+            : "upgrade",
         bridgeProxyAddress: contractAddresses.bridgeAddress,
         keyLogRegistryProxyAddress: contractAddresses.keyLogRegistryAddress,
         wrappedTokenProxyAddresses: [contractAddresses.yadaERC20Address],
