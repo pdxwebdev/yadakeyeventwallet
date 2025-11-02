@@ -28,10 +28,18 @@ import { styles } from "../shared/styles";
 import { fromWIF } from "../utils/hdWallet";
 import TokenSelector from "../components/Wallet2/TokenSelector";
 import { capture } from "../shared/capture";
-import { BLOCKCHAINS, BRIDGE_ABI, localProvider } from "../shared/constants";
+import {
+  BLOCKCHAINS,
+  BRIDGE_ABI,
+  localProvider,
+  PANCAKE_ROUTER_ABI,
+  PANCAKE_ROUTER_ADDRESS,
+} from "../shared/constants";
 import axios from "axios";
 import { ethers } from "ethers";
 import SendBalanceForm from "../components/Wallet2/SendBalanceForm";
+import { SwapForm } from "../components/Wallet2/SwapForm";
+import { LiquidityForm } from "../components/Wallet2/LiquidityForm";
 
 const ITEMS_PER_PAGE = 5;
 
@@ -681,6 +689,26 @@ const Wallet2 = () => {
     }
   };
 
+  const getPancakeRouter = useCallback(() => {
+    if (!privateKey || selectedBlockchain.id !== "bsc") return null;
+    const signer = new ethers.Wallet(
+      ethers.hexlify(privateKey.privateKey),
+      localProvider
+    );
+    return new ethers.Contract(
+      PANCAKE_ROUTER_ADDRESS,
+      PANCAKE_ROUTER_ABI,
+      signer
+    );
+  }, [privateKey, selectedBlockchain.id]);
+
+  const refreshAfterTx = async () => {
+    await walletManager.fetchBalance(appContext);
+    await walletManager.buildTransactionHistory(appContext);
+  };
+
+  appContext.getPancakeRouter = getPancakeRouter;
+
   const totalItems = combinedHistory.length;
   const totalPages = Math.ceil(totalItems / ITEMS_PER_PAGE);
   const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
@@ -958,6 +986,28 @@ const Wallet2 = () => {
                     appContext={appContext}
                     webcamRef={webcamRef}
                   />
+                  {selectedBlockchain.id === "bsc" && (
+                    <>
+                      <SwapForm
+                        appContext={appContext}
+                        webcamRef={webcamRef}
+                        walletManager={walletManager}
+                        supportedTokens={supportedTokens}
+                        balance={balance}
+                        tokenSymbol={tokenSymbol}
+                        wrappedTokenSymbol={wrappedTokenSymbol}
+                        refreshAfterTx={refreshAfterTx}
+                      />
+                      <LiquidityForm
+                        appContext={appContext}
+                        webcamRef={webcamRef}
+                        walletManager={walletManager}
+                        supportedTokens={supportedTokens}
+                        balance={balance}
+                        refreshAfterTx={refreshAfterTx}
+                      />
+                    </>
+                  )}
                 </>
               )}
               {isInitialized && parsedData.rotation === log.length && (

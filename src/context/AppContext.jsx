@@ -1,7 +1,12 @@
 // src/context/AppContext.js
 import { ethers } from "ethers";
-import { createContext, useContext, useMemo, useState } from "react";
-import { BLOCKCHAINS } from "../shared/constants";
+import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import {
+  BLOCKCHAINS,
+  localProvider,
+  PANCAKE_ROUTER_ADDRESS,
+  PANCAKE_ROUTER_ABI,
+} from "../shared/constants";
 
 const AppContext = createContext();
 
@@ -35,6 +40,32 @@ export const AppProvider = ({ children }) => {
   const [isDeployed, setIsDeployed] = useState(false); // New state for deployment status
   const [sendWrapped, setSendWrapped] = useState(false);
   const [tokenPairsFetched, setTokenPairsFetched] = useState(false);
+  const [pancakeRouter, setPancakeRouter] = useState(null);
+  const [useLpToken, setUseLpToken] = useState(false);
+
+  useEffect(() => {
+    if (
+      !privateKey ||
+      selectedBlockchain.id !== "bsc" ||
+      !privateKey.privateKey
+    ) {
+      setPancakeRouter(null);
+      return;
+    }
+
+    const wallet = new ethers.Wallet(
+      ethers.hexlify(privateKey.privateKey),
+      localProvider
+    );
+    const router = new ethers.Contract(
+      PANCAKE_ROUTER_ADDRESS,
+      PANCAKE_ROUTER_ABI,
+      wallet
+    );
+
+    setPancakeRouter(router);
+  }, [privateKey, selectedBlockchain.id]);
+
   const value = useMemo(
     () => ({
       selectedBlockchain,
@@ -95,6 +126,10 @@ export const AppProvider = ({ children }) => {
       setSendWrapped,
       tokenPairsFetched,
       setTokenPairsFetched,
+      pancakeRouter,
+      setPancakeRouter,
+      useLpToken,
+      setUseLpToken,
     }),
     [
       selectedBlockchain,
@@ -126,6 +161,8 @@ export const AppProvider = ({ children }) => {
       isOwner,
       sendWrapped,
       tokenPairsFetched,
+      pancakeRouter,
+      useLpToken,
     ]
   );
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

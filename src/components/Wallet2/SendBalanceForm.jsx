@@ -7,11 +7,12 @@ import {
   Card,
   Select,
   Title,
+  Switch,
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { useAppContext } from "../../context/AppContext";
 import { decompressPublicKey, fromWIF } from "../../utils/hdWallet";
-import { ethers } from "ethers";
+import { ethers, keccak256 } from "ethers";
 import QRScannerModal from "./QRScannerModal";
 import { capture } from "../../shared/capture";
 import { styles } from "../../shared/styles";
@@ -19,8 +20,27 @@ import {
   localProvider,
   ERC20_ABI,
   WRAPPED_TOKEN_ABI,
+  LP_ADDRESS,
+  addresses,
+  USDT_ADDRESS,
+  PANCAKESWAP_V2_FACTORY,
+  INIT_CODE_HASH,
 } from "../../shared/constants";
 import { walletManagerFactory } from "../../blockchains/WalletManagerFactory";
+
+const factory = new ethers.Contract(
+  "0xcA143Ce32Fe78f1f7019d7d551a6402fC5350c73",
+  [
+    "function getPair(address tokenA, address tokenB) external view returns (address pair)",
+  ],
+  localProvider
+);
+
+const getLpTokenAddress = async (tokenA, tokenB) => {
+  const pair = await factory.getPair(tokenA, tokenB);
+  console.log("LP Address:", pair);
+  return pair;
+};
 
 const SendBalanceForm = ({ appContext, webcamRef }) => {
   const {
@@ -36,8 +56,9 @@ const SendBalanceForm = ({ appContext, webcamRef }) => {
     setLoading,
     selectedToken,
     sendWrapped,
+    useLpToken,
+    setUseLpToken,
   } = appContext; // Call useAppContext at the top level
-  let selectedTokenAddress = selectedToken;
   const [isScannerOpen, setIsScannerOpen] = useState(false);
 
   const [scannedWallet, setScannedWallet] = useState(null);
@@ -46,10 +67,9 @@ const SendBalanceForm = ({ appContext, webcamRef }) => {
   const [wif, setWif] = useState("");
 
   const walletManager = walletManagerFactory(selectedBlockchain.id);
-  const pair = tokenPairs.find((t) => t.original === selectedTokenAddress);
-  if (tokenPairs.length > 0 && sendWrapped) selectedTokenAddress = pair.wrapped;
   // Get token symbol for display
   const getTokenSymbol = (tokenAddress) => {
+    if (tokenAddress === LP_ADDRESS) return "WYDA-USDT LP Token";
     if (tokenAddress === ethers.ZeroAddress) return "BNB";
     const token = supportedTokens.find(
       (t) => t.address.toLowerCase() === tokenAddress.toLowerCase()
@@ -173,9 +193,23 @@ const SendBalanceForm = ({ appContext, webcamRef }) => {
         localProvider
       );
 
+      const lpTokenAddress = await getLpTokenAddress(
+        addresses.yadaERC20Address,
+        USDT_ADDRESS
+      );
+      let finalTokenAddress = selectedToken;
+      if (useLpToken) {
+        finalTokenAddress = lpTokenAddress;
+      } else {
+        const pair = tokenPairs.find((t) => t.original === selectedToken);
+        if (tokenPairs.length > 0 && sendWrapped && pair) {
+          finalTokenAddress = pair.wrapped;
+        }
+      }
+
       setWif(wifString);
       setScannedWallet(signer);
-      await fetchBalance(signer, selectedTokenAddress);
+      await fetchBalance(signer, finalTokenAddress);
 
       notifications.show({
         title: "Success",
@@ -206,6 +240,19 @@ const SendBalanceForm = ({ appContext, webcamRef }) => {
       return;
     }
 
+    const lpTokenAddress = await getLpTokenAddress(
+      addresses.yadaERC20Address,
+      USDT_ADDRESS
+    );
+    let finalTokenAddress = selectedToken;
+    if (useLpToken) {
+      finalTokenAddress = lpTokenAddress;
+    } else {
+      const pair = tokenPairs.find((t) => t.original === selectedToken);
+      if (tokenPairs.length > 0 && sendWrapped && pair) {
+        finalTokenAddress = pair.wrapped;
+      }
+    }
     try {
       setIsLoading(true);
 
@@ -230,17 +277,17 @@ const SendBalanceForm = ({ appContext, webcamRef }) => {
         localProvider
       );
       // Refresh balance after transaction
-      await fetchBalance(signer, selectedTokenAddress);
+      await fetchBalance(signer, finalTokenAddress);
     } catch (error) {
       console.error(
-        `Error sending ${getTokenSymbol(selectedTokenAddress)} balance:`,
+        `Error sending ${getTokenSymbol(finalTokenAddress)} balance:`,
         error
       );
       notifications.show({
         title: "Error",
         message:
           error.message ||
-          `Failed to send ${getTokenSymbol(selectedTokenAddress)} balance`,
+          `Failed to send ${getTokenSymbol(finalTokenAddress)} balance`,
         color: "red",
       });
     } finally {
@@ -268,6 +315,13 @@ const SendBalanceForm = ({ appContext, webcamRef }) => {
         >
           Scan QR Code
         </Button>
+        <Switch
+          label="Send WYDA-USDT LP Token"
+          checked={useLpToken}
+          onChange={(e) => setUseLpToken(e.currentTarget.checked)}
+          mt="md"
+          styles={styles.switch}
+        />
         {scannedWallet && balance && (
           <Text>
             Wallet Address: {scannedWallet.address} <br />

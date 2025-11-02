@@ -118,3 +118,29 @@ export const addresses =
       };
 
 export const deployed = true;
+
+export const PANCAKE_ROUTER_ADDRESS =
+  "0x10ED43C718714eb63d5aA57B78B54704E256024E"; // PancakeSwap V2 Router
+export const USDT_ADDRESS = "0x55d398326f99059fF775485246999027B3197955"; // BSC USDT
+export const PANCAKESWAP_V2_FACTORY =
+  "0xcA143Ce32Fe78f1f7019d7d551a6402fC5350c73";
+export const INIT_CODE_HASH =
+  "0x00fb7f630766e6a3661694c255c275e23d2c7f538d16a7f3b0a0d4d5f0b8d8d8"; // BSC mainnet
+
+export const LP_ADDRESS = "0xb48F5Da9C91280D2063975Ac0b06D0893DdDc815";
+
+export const PANCAKE_ROUTER_ABI = [
+  // === Swap Functions ===
+  "function swapExactETHForTokens(uint amountOutMin, address[] path, address to, uint deadline) payable returns (uint[] amounts)",
+  "function swapExactTokensForETH(uint amountIn, uint amountOutMin, address[] path, address to, uint deadline) returns (uint[] amounts)",
+  "function swapExactTokensForTokens(uint amountIn, uint amountOutMin, address[] path, address to, uint deadline) returns (uint[] amounts)",
+
+  // === Liquidity ===
+  "function addLiquidityETH (address token, uint amountTokenDesired, uint amountTokenMin, uint amountETHMin, address to, uint deadline) payable returns (uint amountToken, uint amountETH, uint liquidity)",
+  "function addLiquidity(address tokenA, address tokenB, uint amountADesired, uint amountBDesired, uint amountAMin, uint amountBMin, address to, uint deadline) returns (uint amountA, uint amountB, uint liquidity)",
+  "function removeLiquidityETH(address token, uint liquidity, uint amountTokenMin, uint amountETHMin, address to, uint deadline) returns (uint amountToken, uint amountETH)",
+  "function removeLiquidity(address tokenA, address tokenB, uint liquidity, uint amountAMin, uint amountBMin, address to, uint deadline) returns (uint amountA, uint amountB)",
+
+  // === CRITICAL: Add this line ===
+  "function getAmountsOut(uint amountIn, address[] calldata path) external view returns (uint[] memory amounts)",
+];

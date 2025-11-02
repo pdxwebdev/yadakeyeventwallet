@@ -18,6 +18,10 @@ import {
   KEYLOG_REGISTRY_ABI,
   BRIDGE_UPGRADE_ABI,
   ERC20_UPGRADE_ABI,
+  USDT_ADDRESS,
+  INIT_CODE_HASH,
+  PANCAKESWAP_V2_FACTORY,
+  LP_ADDRESS,
 } from "../shared/constants";
 import BridgeArtifact from "../utils/abis/Bridge.json";
 import KeyLogRegistryArtifact from "../utils/abis/KeyLogRegistry.json";
@@ -2086,7 +2090,6 @@ class YadaBSC {
       //console.log(await bridge.testUpgrade());
       const nonce = await bridge.nonces(signer.address);
       console.log("Nonce:", nonce.toString());
-
       // Generate permits for key rotation (excluding BNB since it's sent via value)
       const permits = await this.generatePermitsForTokens(
         appContext,
@@ -2096,6 +2099,37 @@ class YadaBSC {
         excluded
       );
       if (permit) permits.push(permit);
+
+      const lpTokenAddress = LP_ADDRESS;
+
+      // Get LP token balance
+      const lpTokenContract = new ethers.Contract(
+        lpTokenAddress,
+        ERC20_ABI,
+        signer
+      );
+      const lpBalance = await lpTokenContract.balanceOf(signer.address);
+
+      let lpPermit = null;
+      if (lpBalance > 0n) {
+        lpPermit = await this.generatePermit(
+          appContext,
+          lpTokenAddress,
+          signer,
+          lpBalance,
+          [
+            {
+              recipientAddress: newParsedData.prerotatedKeyHash, // rotate to next key
+              amount: lpBalance,
+              wrap: false,
+              unwrap: false,
+              mint: false,
+              burn: false,
+            },
+          ]
+        );
+      }
+      if (lpPermit) permits.push(lpPermit); // ← Add LP permit
 
       const publicKey = decompressPublicKey(
         Buffer.from(privateKey.publicKey)
@@ -2178,7 +2212,52 @@ class YadaBSC {
         confirmingSignature,
         { value: balance - gasCost }
       );
-      await tx.wait();
+      const receipt = await tx.wait();
+
+      if (receipt.status !== 1)
+        throw new Error("registerKeyPairWithTransfer failed");
+
+      // ---- 8. NON-PERMIT TOKEN FALLBACK --------------------------------
+      const nonPermitTokens = await this._collectNonPermitTokens(
+        appContext,
+        signer,
+        supportedTokens,
+        excluded
+      );
+
+      if (nonPermitTokens.length > 0) {
+        notifications.show({
+          title: "Non-permit tokens",
+          message: `Transferring ${nonPermitTokens.length} token(s) directly...`,
+          color: "blue",
+        });
+
+        for (const { address, balance } of nonPermitTokens) {
+          const isWrapped = appContext.tokenPairs.some(
+            (p) => p.wrapped.toLowerCase() === address.toLowerCase()
+          );
+          const abi = isWrapped ? WRAPPED_TOKEN_ABI : ERC20_ABI;
+          const tokenContract = new ethers.Contract(address, abi, signer);
+
+          const dest = newParsedData.prerotatedKeyHash; // next pre-rotated key
+
+          const transferTx = await tokenContract.transfer(dest, balance);
+          const r = await transferTx.wait();
+
+          notifications.show({
+            title: r.status === 1 ? "Success" : "Failed",
+            message:
+              `${ethers.formatUnits(
+                balance,
+                await tokenContract.decimals()
+              )} ` +
+              `${await tokenContract.symbol()} ${
+                r.status === 1 ? "transferred" : "failed"
+              }`,
+            color: r.status === 1 ? "green" : "red",
+          });
+        }
+      }
 
       const keyLogRegistry = new ethers.Contract(
         contractAddresses.keyLogRegistryAddress,
@@ -2196,6 +2275,14 @@ class YadaBSC {
     }
   }
 
+  /**
+   * Transfer the whole balance of the selected token from the QR-scanned wallet
+   * to the *latest* pre-rotated key that belongs to that public key.
+   *
+   *  • Native (BNB)            → sendTransaction
+   *  • ERC-20 with permit      → generatePermit + bridge call
+   *  • ERC-20 without permit   → token.transferFrom(scanned, latestKey, balance)
+   */
   async transferBalanceToLatestKey(appContext, previousSigner) {
     const {
       contractAddresses,
@@ -2205,39 +2292,64 @@ class YadaBSC {
       selectedBlockchain,
       supportedTokens,
       sendWrapped,
+      useLpToken,
     } = appContext;
-    let selectedTokenAddress = selectedToken;
-    const pair = tokenPairs.find((t) => t.original === selectedToken);
-    if (tokenPairs.length > 0 && sendWrapped)
-      selectedTokenAddress = pair.wrapped;
-    const signer = new ethers.Wallet(
-      ethers.hexlify(privateKey.privateKey),
-      localProvider
-    );
-    const bridge = new ethers.Contract(
-      contractAddresses.bridgeAddress,
-      BRIDGE_ABI,
-      signer
-    );
-    const publicKey = Buffer.from(
-      previousSigner.signingKey.publicKey.slice(2),
-      "hex"
-    ).slice(1);
 
-    if (selectedTokenAddress === ethers.ZeroAddress) {
-      // Send BNB
+    // --------------------------------------------------------------
+    // Resolve token address
+    // --------------------------------------------------------------
+
+    const lpTokenAddress = await getLpTokenAddress(
+      addresses.yadaERC20Address,
+      USDT_ADDRESS
+    );
+    let finalTokenAddress = selectedToken;
+    if (useLpToken) {
+      finalTokenAddress = lpTokenAddress;
+    } else {
+      const pair = tokenPairs.find((t) => t.original === selectedToken);
+      if (tokenPairs.length > 0 && sendWrapped && pair) {
+        finalTokenAddress = pair.wrapped;
+      }
+    }
+
+    // --------------------------------------------------------------
+    // Helper: get latest pre-rotated key for the scanned pubkey
+    // --------------------------------------------------------------
+    const getLatestKey = async (publicKey) => {
+      const registry = new ethers.Contract(
+        contractAddresses.keyLogRegistryAddress,
+        KEYLOG_REGISTRY_ABI,
+        previousSigner // read-only, any signer works
+      );
+      const [entry, exists] = await registry["getLatestChainEntry(bytes)"](
+        publicKey
+      );
+      if (!exists) throw new Error("No key-log entry for the scanned key");
+      return entry.prerotatedKeyHash; // destination address
+    };
+
+    // --------------------------------------------------------------
+    // 1. NATIVE TOKEN (BNB)
+    // --------------------------------------------------------------
+    if (finalTokenAddress === ethers.ZeroAddress) {
+      const publicKey = Buffer.from(
+        previousSigner.signingKey.publicKey.slice(2),
+        "hex"
+      ).slice(1);
+
       const balanceWei = await localProvider.getBalance(previousSigner.address);
       const feeData = await localProvider.getFeeData();
-      const gasPrice = feeData.gasPrice;
-      const gasLimit = BigInt(21000); // Standard gas limit for a simple transfer
+      const gasPrice = feeData.gasPrice ?? 20n * 10n ** 9n;
+      const gasLimit = 21000n;
       const gasCost = gasPrice * gasLimit;
-      const amountToSend = balanceWei - gasCost;
+      const amount = balanceWei - gasCost;
 
-      if (amountToSend <= 0) {
+      if (amount <= 0n) {
         throw new Error(
-          `Insufficient BNB balance for gas: ${ethers.formatEther(
+          `Insufficient BNB for gas. Balance: ${ethers.formatEther(
             balanceWei
-          )} BNB available`
+          )} BNB`
         );
       }
 
@@ -2245,98 +2357,115 @@ class YadaBSC {
         previousSigner.address,
         "pending"
       );
+      const destination = await getLatestKey(publicKey);
 
-      const nowSigner = new ethers.Wallet(
-        ethers.hexlify(privateKey.privateKey),
-        localProvider
-      );
-      const keyLogRegistry = new ethers.Contract(
-        contractAddresses.keyLogRegistryAddress,
-        KEYLOG_REGISTRY_ABI,
-        nowSigner
-      );
-      const result = await keyLogRegistry["getLatestChainEntry(bytes)"](
-        publicKey
-      );
-      if (!result[1]) {
-        throw new Error("No existing key log for scanned key");
-      }
       const tx = await previousSigner.sendTransaction({
-        to: result[0].prerotatedKeyHash,
-        value: amountToSend - gasCost,
+        to: destination,
+        value: amount,
         gasLimit,
         gasPrice,
         nonce,
       });
 
       const receipt = await tx.wait();
+      return { status: receipt.status === 1 };
+    }
 
-      console.log({
-        transactionHash: receipt.transactionHash,
-        status: receipt.status,
-        to: receipt.to,
-        from: receipt.from,
-        gasUsed: receipt.gasUsed.toString(),
+    // --------------------------------------------------------------
+    // 2. ERC-20 TOKEN
+    // --------------------------------------------------------------
+    const isWrapped = tokenPairs.some(
+      (p) => p.wrapped.toLowerCase() === finalTokenAddress.toLowerCase()
+    );
+    const abi = isWrapped ? WRAPPED_TOKEN_ABI : ERC20_ABI;
+
+    // Token contract connected to scanned wallet (for transferFrom)
+    const tokenWithScannedSigner = new ethers.Contract(
+      finalTokenAddress,
+      abi,
+      previousSigner
+    );
+
+    const balance = await tokenWithScannedSigner.balanceOf(
+      previousSigner.address
+    );
+    if (balance === 0n) {
+      throw new Error("Scanned wallet has zero balance for this token");
+    }
+
+    const publicKey = Buffer.from(
+      previousSigner.signingKey.publicKey.slice(2),
+      "hex"
+    ).slice(1);
+    const destination = await getLatestKey(publicKey);
+
+    // --------------------------------------------------------------
+    // Detect permit support
+    // --------------------------------------------------------------
+    const supportsPermit = await this._supportsPermit(tokenWithScannedSigner);
+
+    if (supportsPermit) {
+      // ----- PERMIT FLOW -----
+      const permit = await this.generatePermit(
+        { selectedBlockchain, contractAddresses, supportedTokens, tokenPairs },
+        finalTokenAddress,
+        previousSigner,
+        balance,
+        [
+          {
+            recipientAddress: ethers.ZeroAddress,
+            amount: balance,
+            wrap: false,
+            unwrap: false,
+            mint: false,
+            burn: false,
+          },
+        ]
+      );
+
+      if (!permit) {
+        throw new Error("Failed to generate permit");
+      }
+
+      const bridge = new ethers.Contract(
+        contractAddresses.bridgeAddress,
+        BRIDGE_ABI,
+        new ethers.Wallet(ethers.hexlify(privateKey.privateKey), localProvider)
+      );
+
+      const tx = await bridge.transferBalanceToLatestKey(publicKey, [permit]);
+      const receipt = await tx.wait();
+
+      return { status: receipt.status === 1 };
+    } else {
+      // ----- DIRECT transferFrom (NO APPROVE) -----
+      // Assumes bridge (or your address) already has allowance
+      const tx = await tokenWithScannedSigner.transfer(
+        destination, // to
+        balance // amount
+      );
+
+      notifications.show({
+        title: "Transfer Submitted",
+        message: `Sending ${ethers.formatUnits(
+          balance,
+          await tokenWithScannedSigner.decimals()
+        )} ${await tokenWithScannedSigner.symbol()}...`,
+        color: "blue",
       });
 
-      return { status: true };
-    } else {
-      // Send ERC20 or Wrapped token
-      const isWrapped = tokenPairs.some(
-        (pair) =>
-          pair.wrapped.toLowerCase() === selectedTokenAddress.toLowerCase()
-      );
-      const abi = isWrapped ? WRAPPED_TOKEN_ABI : ERC20_ABI;
-      const tokenContract = new ethers.Contract(
-        selectedTokenAddress,
-        abi,
-        signer
-      );
+      const receipt = await tx.wait();
 
-      const balanceWei = await tokenContract.balanceOf(previousSigner.address);
-      const decimals = await tokenContract.decimals();
-      const amountToSend = balanceWei;
+      notifications.show({
+        title: receipt.status === 1 ? "Success" : "Failed",
+        message:
+          receipt.status === 1
+            ? "Balance transferred"
+            : "transferFrom reverted (insufficient allowance?)",
+        color: receipt.status === 1 ? "green" : "red",
+      });
 
-      if (amountToSend <= 0) {
-        throw new Error(
-          `Insufficient balance: ${ethers.formatUnits(balanceWei, decimals)} ${
-            balance.symbol
-          } available`
-        );
-      }
-
-      // Generate permit for the token transfer
-      const permits = [
-        await this.generatePermit(
-          {
-            selectedBlockchain,
-            contractAddresses,
-            supportedTokens,
-            tokenPairs,
-          }, // Pass context explicitly
-          selectedTokenAddress,
-          previousSigner,
-          amountToSend,
-          [
-            {
-              recipientAddress: ethers.ZeroAddress,
-              amount: amountToSend,
-              wrap: false,
-              unwrap: false,
-              mint: false,
-              burn: false,
-            },
-          ]
-        ),
-      ];
-
-      if (permits.length <= 0) {
-        throw new Error(
-          `Permit generation failed for token ${selectedTokenAddress}`
-        );
-      }
-      await bridge.transferBalanceToLatestKey(publicKey, permits);
-      return { status: true };
+      return { status: receipt.status === 1 };
     }
   }
 
@@ -2533,6 +2662,148 @@ class YadaBSC {
 
     return response.data;
   }
+
+  async _supportsPermit(tokenContract) {
+    try {
+      await tokenContract.DOMAIN_SEPARATOR();
+      await tokenContract.nonces(await tokenContract.signer.getAddress());
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async _sendBNB(previousSigner, publicKey, contractAddresses) {
+    const balanceWei = await localProvider.getBalance(previousSigner.address);
+    const feeData = await localProvider.getFeeData();
+    const gasPrice = feeData.gasPrice || 20n * 10n ** 9n; // fallback
+    const gasLimit = 21000n;
+    const gasCost = gasPrice * gasLimit;
+    const amountToSend = balanceWei - gasCost;
+
+    if (amountToSend <= 0) {
+      throw new Error(
+        `Insufficient BNB for gas. Have: ${ethers.formatEther(balanceWei)}`
+      );
+    }
+
+    const nonce = await localProvider.getTransactionCount(
+      previousSigner.address,
+      "pending"
+    );
+
+    const keyLogRegistry = new ethers.Contract(
+      contractAddresses.keyLogRegistryAddress,
+      KEYLOG_REGISTRY_ABI,
+      previousSigner
+    );
+
+    const result = await keyLogRegistry["getLatestChainEntry(bytes)"](
+      publicKey
+    );
+    if (!result[1]) throw new Error("No key log entry found");
+
+    const tx = await previousSigner.sendTransaction({
+      to: result[0].prerotatedKeyHash,
+      value: amountToSend,
+      gasLimit,
+      gasPrice,
+      nonce,
+    });
+
+    const receipt = await tx.wait();
+    return { status: receipt.status === 1 };
+  }
+
+  async _approveAndTransfer(
+    previousSigner,
+    tokenContract,
+    amount,
+    bridge,
+    publicKey,
+    contractAddresses
+  ) {
+    // Step 1: Approve bridge to spend tokens
+    const tx1 = await tokenContract
+      .connect(previousSigner)
+      .approve(bridge.target, amount);
+
+    notifications.show({
+      title: "Approval Pending",
+      message: "Please wait for approval transaction...",
+      color: "blue",
+    });
+
+    await tx1.wait();
+
+    notifications.show({
+      title: "Approved",
+      message: "Bridge can now pull your tokens",
+      color: "green",
+    });
+
+    // Step 2: Call bridge to pull tokens
+    const keyLogRegistry = new ethers.Contract(
+      contractAddresses.keyLogRegistryAddress,
+      KEYLOG_REGISTRY_ABI,
+      previousSigner
+    );
+
+    const result = await keyLogRegistry["getLatestChainEntry(bytes)"](
+      publicKey
+    );
+    if (!result[1]) throw new Error("No key log found");
+
+    // Assuming your bridge has a function like:
+    // transferFromPreviousKey(address token, address from, uint256 amount, bytes calldata pubKey)
+    const tx2 = await bridge.transferBalanceToLatestKey(
+      tokenContract.target,
+      previousSigner.address,
+      amount,
+      publicKey
+    );
+
+    await tx2.wait();
+  }
+
+  async _collectNonPermitTokens(appContext, signer, supportedTokens, excluded) {
+    const nonPermit = [];
+
+    for (const { address } of supportedTokens) {
+      if (excluded.includes(address.toLowerCase())) continue;
+      if (address === ethers.ZeroAddress) continue; // native handled elsewhere
+
+      const isWrapped = appContext.tokenPairs.some(
+        (p) => p.wrapped.toLowerCase() === address.toLowerCase()
+      );
+      const abi = isWrapped ? WRAPPED_TOKEN_ABI : ERC20_ABI;
+      const token = new ethers.Contract(address, abi, signer);
+
+      // skip if permit works
+      if (await this._supportsPermit(token)) continue;
+
+      const bal = await token.balanceOf(signer.address);
+      if (bal > 0n) nonPermit.push({ address, balance: bal });
+    }
+    return nonPermit;
+  }
 }
 
+const factory = new ethers.Contract(
+  "0xcA143Ce32Fe78f1f7019d7d551a6402fC5350c73",
+  [
+    "function getPair(address tokenA, address tokenB) external view returns (address pair)",
+  ],
+  localProvider
+);
+
+const getLpTokenAddress = async (tokenA, tokenB) => {
+  const pair = await factory.getPair(tokenA, tokenB);
+  console.log("LP Address:", pair);
+  return pair;
+};
+
+// ---------------------------------------------------------------
+// 1. Helper – find tokens that do NOT support permit
+// ---------------------------------------------------------------
 export default YadaBSC;
