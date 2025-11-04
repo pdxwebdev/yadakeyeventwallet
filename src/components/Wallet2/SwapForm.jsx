@@ -14,21 +14,32 @@ import { notifications } from "@mantine/notifications";
 import { ethers } from "ethers";
 import { useEffect, useState, useCallback } from "react";
 import { styles } from "../../shared/styles";
-import { addresses } from "../../shared/constants";
+import { addresses, localProvider } from "../../shared/constants";
 
-const WYDA = addresses.yadaERC20Address; // Replace with actual WYDA token address
-const USDT = "0x55d398326f99059fF775485246999027B3197955"; // USDT address on BSC (example)
+const WYDA = addresses.yadaERC20Address;
+const USDT = "0x55d398326f99059fF775485246999027B3197955"; // USDT on BSC
+const WBNB = "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c"; // WBNB
+const NATIVE = "0x0000000000000000000000000000000000000000"; // Represents BNB
 
-// === ON-CHAIN QUOTE via Router Contract ===
+// === GET QUOTE (WYDA↔USDT, WYDA↔BNB, BNB↔WYDA) ===
 const getQuote = async (router, fromToken, toToken, amountIn) => {
   if (!router || !amountIn || parseFloat(amountIn) === 0) return null;
 
   try {
     const amountInWei = ethers.parseUnits(amountIn, 18);
-    const path = [fromToken, toToken]; // Direct path: WYDA ↔ USDT
+
+    // Build path: always go through WBNB when one side is native
+    let path;
+    if (fromToken === NATIVE) {
+      path = [WBNB, toToken]; // BNB → Token
+    } else if (toToken === NATIVE) {
+      path = [fromToken, WBNB]; // Token → BNB
+    } else {
+      path = [fromToken, toToken]; // Token → Token
+    }
 
     const amounts = await router.getAmountsOut(amountInWei, path);
-    return ethers.formatUnits(amounts[1], 18); // Output amount
+    return ethers.formatUnits(amounts[amounts.length - 1], 18);
   } catch (e) {
     console.warn("Quote failed:", e);
     return null;
@@ -39,13 +50,12 @@ export const SwapForm = ({ appContext, walletManager }) => {
   const { pancakeRouter, parsedData, webcamRef, selectedBlockchain } =
     appContext;
 
-  // Define token options for WYDA and USDT only
   const tokenOptions = [
     { value: WYDA, label: "WYDA" },
     { value: USDT, label: "USDT" },
+    { value: NATIVE, label: "BNB" },
   ];
 
-  // Helper: Refresh balance/history
   const refreshAfterTx = async () => {
     await walletManager.fetchBalance(appContext);
     await walletManager.buildTransactionHistory(appContext);
@@ -58,7 +68,7 @@ export const SwapForm = ({ appContext, walletManager }) => {
   const [quoting, setQuoting] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  // === 1. Quote on change ===
+  // === DEBOUNCED QUOTE ===
   const quote = useCallback(async () => {
     if (!fromToken || !toToken || !amountIn || parseFloat(amountIn) === 0) {
       setAmountOut("");
@@ -71,41 +81,126 @@ export const SwapForm = ({ appContext, walletManager }) => {
   }, [pancakeRouter, fromToken, toToken, amountIn]);
 
   useEffect(() => {
-    const timer = setTimeout(quote, 400); // Debounce
+    const timer = setTimeout(quote, 400);
     return () => clearTimeout(timer);
   }, [quote]);
 
-  // === 2. Execute Swap ===
+  // ------------------------------------------------------------------
+  //  EXECUTE SWAP – works with ethers v6, signer + provider
+  // ------------------------------------------------------------------
   const executeSwap = async () => {
     if (!pancakeRouter || !amountIn || !toToken || !amountOut) return;
+    const { privateKey } = appContext;
 
     setLoading(true);
     try {
+      // --------------------------------------------------------------
+      // 1. GET SIGNER (adjust the line that matches your walletManager)
+      // --------------------------------------------------------------
+      const signer = new ethers.Wallet(
+        ethers.hexlify(privateKey.privateKey),
+        localProvider
+      );
+
+      if (!signer) throw new Error("Wallet not connected – no signer.");
+
+      // --------------------------------------------------------------
+      // 2. READ-ONLY router (provider) – for getAmountsOut, allowance…
+      // --------------------------------------------------------------
+      const routerReadOnly = pancakeRouter; // already on a provider
+      const routerWithSigner = pancakeRouter.connect(signer); // write-enabled
+
       const amountInWei = ethers.parseUnits(amountIn, 18);
       const amountOutWei = ethers.parseUnits(amountOut, 18);
-      const amountOutMinWei = (amountOutWei * 995n) / 1000n; // 0.5% slippage
+      const amountOutMinWei = (amountOutWei * 995n) / 1000n; // 0.5 % slippage
       const deadline = Math.floor(Date.now() / 1000) + 1200;
       const to = parsedData?.publicKeyHash;
 
-      const token = new ethers.Contract(
-        fromToken,
-        ["function approve(address,uint256)"],
-        pancakeRouter.runner
-      );
-      await (await token.approve(pancakeRouter.target, amountInWei)).wait();
+      // --------------------------------------------------------------
+      // 3. APPROVE helper – uses **provider** for allowance check
+      // --------------------------------------------------------------
+      const approveIfNeeded = async (token) => {
+        if (token === NATIVE) return; // BNB never needs approve
 
-      const tx = await pancakeRouter.swapExactTokensForTokens(
-        amountInWei,
-        amountOutMinWei,
-        [fromToken, toToken],
-        to,
-        deadline
-      );
+        // ERC-20 contract with **provider** (read-only)
+        const erc20Read = new ethers.Contract(
+          token,
+          [
+            "function allowance(address owner, address spender) view returns (uint256)",
+          ],
+          routerReadOnly.runner // provider
+        );
 
-      //await walletManager.signTransaction({ parsedData }, webcamRef, tx);
+        const owner = await signer.getAddress();
+        const allowance = await erc20Read.allowance(
+          owner,
+          routerWithSigner.target
+        );
+
+        if (allowance >= amountInWei) return; // already enough
+
+        // ERC-20 contract with **signer** (write)
+        const erc20Write = new ethers.Contract(
+          token,
+          ["function approve(address spender, uint256 amount) returns (bool)"],
+          signer
+        );
+
+        const approveTx = await erc20Write.approve(
+          routerWithSigner.target,
+          amountInWei
+        );
+        await approveTx.wait();
+      };
+
+      // --------------------------------------------------------------
+      // 4. SWAP – pick the correct PancakeRouter method
+      // --------------------------------------------------------------
+      let tx;
+
+      if (fromToken === NATIVE && toToken !== NATIVE) {
+        // BNB → ERC-20
+        tx = await routerWithSigner.swapExactETHForTokens(
+          amountOutMinWei,
+          [WBNB, toToken],
+          to,
+          deadline,
+          { value: amountInWei }
+        );
+      } else if (fromToken !== NATIVE && toToken === NATIVE) {
+        // ERC-20 → BNB
+        await approveIfNeeded(fromToken);
+        tx = await routerWithSigner.swapExactTokensForETH(
+          amountInWei,
+          amountOutMinWei,
+          [fromToken, WBNB],
+          to,
+          deadline
+        );
+      } else {
+        // ERC-20 → ERC-20
+        await approveIfNeeded(fromToken);
+        tx = await routerWithSigner.swapExactTokensForTokens(
+          amountInWei,
+          amountOutMinWei,
+          [fromToken, toToken],
+          to,
+          deadline
+        );
+      }
+
+      // --------------------------------------------------------------
+      // 5. OPTIONAL webcam signing (keep your existing flow)
+      // --------------------------------------------------------------
+      // await walletManager.signTransaction({ parsedData }, webcamRef, tx);
+
+      console.log("Swap tx:", tx.hash);
+      await tx.wait();
       await refreshAfterTx();
-      notifications.show({ title: "Swap submitted", color: "green" });
+
+      notifications.show({ title: "Swap successful!", color: "green" });
     } catch (e) {
+      console.error("Swap error:", e);
       notifications.show({
         title: "Swap failed",
         message: e.message || "Unknown error",
@@ -116,7 +211,7 @@ export const SwapForm = ({ appContext, walletManager }) => {
     }
   };
 
-  // === 3. Guard: BSC + Router ===
+  // === GUARD: BSC + Router ===
   if (selectedBlockchain.id !== "bsc" || !pancakeRouter) {
     return (
       <Text color="dimmed" align="center" mt="md">
@@ -135,7 +230,7 @@ export const SwapForm = ({ appContext, walletManager }) => {
 
   return (
     <Card withBorder mt="md" radius="md" p="md" style={styles.card}>
-      <Title order={4}>Swap WYDA ↔ USDT</Title>
+      <Title order={4}>Swap WYDA ↔ USDT / BNB</Title>
 
       <Group mt="md" grow>
         <Select
@@ -144,8 +239,13 @@ export const SwapForm = ({ appContext, walletManager }) => {
           value={fromToken}
           onChange={(value) => {
             setFromToken(value);
-            // Automatically set the opposite token for "To"
-            setToToken(value === WYDA ? USDT : WYDA);
+            // Auto-switch "To" to a different token
+            const otherTokens = tokenOptions
+              .filter((t) => t.value !== value)
+              .map((t) => t.value);
+            if (!otherTokens.includes(toToken)) {
+              setToToken(otherTokens[0]);
+            }
           }}
         />
         <NumberInput

@@ -42,6 +42,29 @@ export let localProvider =
         chainId: 31337,
         name: "hardhat",
       });
+export let localSwapProvider =
+  DEPLOY_ENV === "mainnet"
+    ? new ethers.JsonRpcProvider(
+        "https://bscrpc.pancakeswap.finance/", // BSC Mainnet RPC URL
+        {
+          chainId: 56, // BSC Mainnet chain ID
+          name: "mainnet",
+        },
+        { batchMaxCount: 1 }
+      )
+    : DEPLOY_ENV === "testnet"
+    ? new ethers.JsonRpcProvider(
+        "https://data-seed-prebsc-1-s1.binance.org:8545/",
+        {
+          chainId: 97,
+          name: "testnet",
+        },
+        { batchMaxCount: 1 }
+      )
+    : new ethers.JsonRpcProvider("http://127.0.0.1:8545/", {
+        chainId: 31337,
+        name: "hardhat",
+      });
 
 export const HARDHAT_MNEMONIC =
   "test test test test test test test test test test test junk";

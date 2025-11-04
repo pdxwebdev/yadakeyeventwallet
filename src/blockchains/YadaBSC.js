@@ -2087,6 +2087,7 @@ class YadaBSC {
         BRIDGE_ABI,
         signer
       );
+      console.log(await bridge.owner());
       //console.log(await bridge.testUpgrade());
       const nonce = await bridge.nonces(signer.address);
       console.log("Nonce:", nonce.toString());
@@ -2268,7 +2269,38 @@ class YadaBSC {
       setLog(updatedLog);
       return { status: true };
     } catch (error) {
-      console.error("Error in buildAndExecuteTransaction:", error);
+      const errors = [
+        "error UpgradeFailed(address contractAddress, string reason)",
+        "error ZeroAddress()",
+        "error InvalidFeeCollector()",
+        "error TokenPairExists()",
+        "error TokenPairNotSupported()",
+        "error InvalidSignature()",
+        "error InvalidPrerotatedKeyHash()",
+        "error AmountTooLow()",
+        "error InsufficientPermits()",
+        "error TransferFailed()",
+        "error FeeTransferFailed()",
+        "error EthTransferFailed()",
+        "error BurnAmountZero()",
+        "error NoTokenPairs()",
+        "error InvalidPublicKey()",
+        "error InsufficientAllowance()",
+        "error InvalidFeeRate()",
+        "error InvalidRecipientAmount()",
+        "error PermitDeadlineExpired()",
+        "error MissingPermit()",
+        "error NotOwnerOfTarget(address contractAddress)",
+        "error InvalidOwnershipTransfer()",
+        "error InsufficientBalance()",
+        "error InvalidRecipientForNonMatchingSigner()",
+        "error InvalidPermits()",
+      ];
+
+      const iface = new ethers.Interface(errors.map((e) => e));
+      const revertData = error.data;
+      const parsed = iface.parseError(revertData);
+      console.error("Error in buildAndExecuteTransaction:", error, parsed);
       return { status: false, message: error.message };
     } finally {
       setLoading(false);
@@ -2574,6 +2606,7 @@ class YadaBSC {
         message: result.message,
         color: "red",
       });
+      throw new Error(result.message);
     }
   }
 

@@ -693,7 +693,7 @@ const Wallet2 = () => {
     if (!privateKey || selectedBlockchain.id !== "bsc") return null;
     const signer = new ethers.Wallet(
       ethers.hexlify(privateKey.privateKey),
-      localProvider
+      localSwapProvider
     );
     return new ethers.Contract(
       PANCAKE_ROUTER_ADDRESS,

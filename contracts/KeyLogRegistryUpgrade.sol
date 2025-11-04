@@ -271,7 +271,7 @@ contract KeyLogRegistryUpgrade is Initializable, OwnableUpgradeable, UUPSUpgrade
     }
 
     function _buildChainFromHash(address startHash) internal view returns (KeyLogEntry[] memory) {
-        KeyLogEntry[] memory log = new KeyLogEntry[](100);
+        KeyLogEntry[] memory log = new KeyLogEntry[](1000);
         uint256 logIndex = 0;
 
         address currentAddress = startHash;

@@ -797,10 +797,11 @@ class YadaCoin {
       );
 
       try {
+        const address = getP2PKH(privateKey.publicKey);
         const res = await axios.get(
-          `${import.meta.env.VITE_API_URL}/get-graph-wallet?address=${getP2PKH(
-            privateKey.publicKey
-          )}&amount_needed=${balance}`
+          `${
+            import.meta.env.VITE_API_URL
+          }/get-graph-wallet?address=${address}&amount_needed=${balance}`
         );
         const newUnspent = res.data.unspent_transactions.concat(
           res.data.unspent_mempool_txns
@@ -809,10 +810,11 @@ class YadaCoin {
           (accumulator, utxo) => {
             if (accumulator.total >= totalAmount + transactionFee)
               return accumulator;
-            const utxoValue = utxo.outputs.reduce(
-              (sum, output) => sum + output.value,
-              0
-            );
+
+            const utxoValue = utxo.outputs.reduce((sum, output) => {
+              if (output.to !== address) return sum;
+              return sum + output.value;
+            }, 0);
             accumulator.selected.push({ id: utxo.id });
             accumulator.total += utxoValue;
             return accumulator;
@@ -1018,10 +1020,11 @@ class YadaCoin {
       );
 
       try {
+        const address = getP2PKH(privateKey.publicKey);
         const res = await axios.get(
-          `${import.meta.env.VITE_API_URL}/get-graph-wallet?address=${getP2PKH(
-            privateKey.publicKey
-          )}&amount_needed=${balance}`
+          `${
+            import.meta.env.VITE_API_URL
+          }/get-graph-wallet?address=${address}&amount_needed=${balance}`
         );
         const newUnspent = res.data.unspent_transactions.concat(
           res.data.unspent_mempool_txns
@@ -1030,10 +1033,10 @@ class YadaCoin {
           (accumulator, utxo) => {
             if (accumulator.total >= totalAmount + transactionFee)
               return accumulator;
-            const utxoValue = utxo.outputs.reduce(
-              (sum, output) => sum + output.value,
-              0
-            );
+            const utxoValue = utxo.outputs.reduce((sum, output) => {
+              if (output.to !== address) return sum;
+              return sum + output.value;
+            }, 0);
             accumulator.selected.push({ id: utxo.id });
             accumulator.total += utxoValue;
             return accumulator;
