@@ -32,6 +32,7 @@ import {
   BLOCKCHAINS,
   BRIDGE_ABI,
   localProvider,
+  localSwapProvider,
   PANCAKE_ROUTER_ABI,
   PANCAKE_ROUTER_ADDRESS,
 } from "../shared/constants";
