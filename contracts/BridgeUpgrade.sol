@@ -242,7 +242,7 @@ contract BridgeUpgrade is Initializable, OwnableUpgradeable, UUPSUpgradeable, Re
                 }
             }
 
-            if (permit.token != address(0) && !isMint && !isBurn) {
+            if (permit.token != address(0) && !isMint && !isBurn && permit.v != 0) {
                 if (permit.deadline < block.timestamp) revert PermitDeadlineExpired();
 
                 // Verify permit signature matches the current public key

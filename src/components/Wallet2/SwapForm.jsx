@@ -230,7 +230,10 @@ export const SwapForm = ({ appContext, walletManager }) => {
 
   return (
     <Card withBorder mt="md" radius="md" p="md" style={styles.card}>
-      <Title order={4}>Swap WYDA ↔ USDT / BNB</Title>
+      <Title order={4}>
+        Swap {tokenOptions.find((i) => i.value === fromToken).label} /{" "}
+        {tokenOptions.find((i) => i.value === toToken).label} via PancakeSwap
+      </Title>
 
       <Group mt="md" grow>
         <Select
@@ -290,7 +293,10 @@ export const SwapForm = ({ appContext, walletManager }) => {
         loading={loading}
         disabled={!canSwap}
       >
-        {loading ? "Submitting…" : "Swap"}
+        {loading
+          ? "Submitting…"
+          : `Swap ${tokenOptions.find((i) => i.value === fromToken).label}  for
+        ${tokenOptions.find((i) => i.value === toToken).label}`}
       </Button>
     </Card>
   );

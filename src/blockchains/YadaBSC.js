@@ -120,16 +120,81 @@ class YadaBSC {
         if (typeof token.nonces === "function") {
           nonce = await token.nonces(signer.address);
         } else {
+          // Faux permit for non-EIP-2612 tokens: signals to contract to skip permit call
+          // and use transferFrom (assumes prior approve if needed)
           console.warn(
-            `Token ${tokenAddress} does not support EIP-2612 (nonces function missing). Skipping permit generation.`
+            `Token ${tokenAddress} does not support EIP-2612 (nonces function missing). Generating faux permit.`
           );
-          return null;
+          // notifications.show({
+          //   title: "Warning",
+          //   message: `Permit not supported for token ${tokenAddress}. Using fallback transferFrom (approve required separately).`,
+          //   color: "yellow",
+          // });
+
+          const tokenContract = new ethers.Contract(
+            tokenAddress,
+            ERC20_ABI,
+            signer
+          );
+          const approveTx = await tokenContract.approve(
+            contractAddresses.bridgeAddress,
+            totalAmount
+          );
+          await approveTx.wait();
+          return {
+            token: tokenAddress,
+            amount: totalAmount,
+            recipients: recipients.map((r) => ({
+              recipientAddress: r.recipientAddress,
+              amount: r.amount,
+              wrap: r.wrap || false,
+              unwrap: r.unwrap || false,
+              mint: r.mint || false,
+              burn: r.burn || false,
+            })),
+            deadline: 0, // Flag for contract: no real permit
+            v: 0,
+            r: ethers.ZeroHash,
+            s: ethers.ZeroHash,
+          };
         }
       } catch (error) {
+        // Faux permit on any error (e.g., nonces reverts)
         console.warn(
-          `Error checking nonces for ${tokenAddress}: ${error.message}. Skipping permit generation.`
+          `Error checking nonces for ${tokenAddress}: ${error.message}. Generating faux permit.`
         );
-        return null;
+        // notifications.show({
+        //   title: "Warning",
+        //   message: `Permit not supported for token ${tokenAddress}. Using fallback transferFrom (approve required separately).`,
+        //   color: "yellow",
+        // });
+
+        const tokenContract = new ethers.Contract(
+          tokenAddress,
+          ERC20_ABI,
+          signer
+        );
+        const approveTx = await tokenContract.approve(
+          contractAddresses.bridgeAddress,
+          totalAmount
+        );
+        await approveTx.wait();
+        return {
+          token: tokenAddress,
+          amount: totalAmount,
+          recipients: recipients.map((r) => ({
+            recipientAddress: r.recipientAddress,
+            amount: r.amount,
+            wrap: r.wrap || false,
+            unwrap: r.unwrap || false,
+            mint: r.mint || false,
+            burn: r.burn || false,
+          })),
+          deadline: 0, // Flag for contract: no real permit
+          v: 0,
+          r: ethers.ZeroHash,
+          s: ethers.ZeroHash,
+        };
       }
 
       const domain = {
@@ -182,7 +247,23 @@ class YadaBSC {
         message: `Permit not supported for token ${tokenAddress}.`,
         color: "yellow",
       });
-      return null;
+      // Fallback to faux permit instead of null
+      return {
+        token: tokenAddress,
+        amount: totalAmount,
+        recipients: recipients.map((r) => ({
+          recipientAddress: r.recipientAddress,
+          amount: r.amount,
+          wrap: r.wrap || false,
+          unwrap: r.unwrap || false,
+          mint: r.mint || false,
+          burn: r.burn || false,
+        })),
+        deadline: 0, // Flag for contract: no real permit
+        v: 0,
+        r: ethers.ZeroHash,
+        s: ethers.ZeroHash,
+      };
     }
   }
 
@@ -1308,6 +1389,7 @@ class YadaBSC {
         message: result.message,
         color: "red",
       });
+      throw new Error(error.message);
     }
   }
 
@@ -2748,57 +2830,6 @@ class YadaBSC {
     return { status: receipt.status === 1 };
   }
 
-  async _approveAndTransfer(
-    previousSigner,
-    tokenContract,
-    amount,
-    bridge,
-    publicKey,
-    contractAddresses
-  ) {
-    // Step 1: Approve bridge to spend tokens
-    const tx1 = await tokenContract
-      .connect(previousSigner)
-      .approve(bridge.target, amount);
-
-    notifications.show({
-      title: "Approval Pending",
-      message: "Please wait for approval transaction...",
-      color: "blue",
-    });
-
-    await tx1.wait();
-
-    notifications.show({
-      title: "Approved",
-      message: "Bridge can now pull your tokens",
-      color: "green",
-    });
-
-    // Step 2: Call bridge to pull tokens
-    const keyLogRegistry = new ethers.Contract(
-      contractAddresses.keyLogRegistryAddress,
-      KEYLOG_REGISTRY_ABI,
-      previousSigner
-    );
-
-    const result = await keyLogRegistry["getLatestChainEntry(bytes)"](
-      publicKey
-    );
-    if (!result[1]) throw new Error("No key log found");
-
-    // Assuming your bridge has a function like:
-    // transferFromPreviousKey(address token, address from, uint256 amount, bytes calldata pubKey)
-    const tx2 = await bridge.transferBalanceToLatestKey(
-      tokenContract.target,
-      previousSigner.address,
-      amount,
-      publicKey
-    );
-
-    await tx2.wait();
-  }
-
   async _collectNonPermitTokens(appContext, signer, supportedTokens, excluded) {
     const nonPermit = [];
 
@@ -2836,7 +2867,4 @@ const getLpTokenAddress = async (tokenA, tokenB) => {
   return pair;
 };
 
-// ---------------------------------------------------------------
-// 1. Helper – find tokens that do NOT support permit
-// ---------------------------------------------------------------
 export default YadaBSC;

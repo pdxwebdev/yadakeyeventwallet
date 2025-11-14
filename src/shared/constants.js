@@ -115,6 +115,15 @@ export const BLOCKCHAINS = [
     hardwareInstruction: "Select YadaCoin on your device.",
     color: "teal",
   },
+  {
+    id: "btc",
+    name: "Bitcoin",
+    chainId: 657, // Ethereum mainnet
+    providerUrl: "https://blockchain.info", // Ethereum RPC URL
+    hardwareInstruction: "Bitcoin coming soon!",
+    color: "orange",
+    disabled: true,
+  },
 ];
 
 export const addresses =

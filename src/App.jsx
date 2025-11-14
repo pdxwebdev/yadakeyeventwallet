@@ -46,9 +46,9 @@ function App() {
           <Link to="/wallet" style={{ marginRight: "10px" }}>
             Wallet
           </Link> */}
-          <Link to="/" style={{ marginRight: "10px" }}>
+          {/* <Link to="/" style={{ marginRight: "10px" }}>
             Wallet
-          </Link>
+          </Link> */}
           {/* <Link to="/sandbox" style={{ marginRight: "10px" }}>
             Sandbox
           </Link> */}
@@ -58,9 +58,9 @@ function App() {
           {/* <Link to="/bridge" style={{ marginRight: "10px" }}>
             Bridge
           </Link> */}
-          <Link to="/bridge" style={{ marginRight: "10px" }}>
+          {/* <Link to="/bridge" style={{ marginRight: "10px" }}>
             Bridge
-          </Link>
+          </Link> */}
         </nav>
         <Routes>
           <Route path="/" element={<Wallet2 />} />
