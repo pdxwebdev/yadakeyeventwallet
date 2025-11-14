@@ -727,6 +727,10 @@ const Wallet2 = () => {
     }
   }, [isScannerOpen, isQRModalOpen, opened, toggle]);
 
+  useEffect(() => {
+    if (opened) toggle();
+  }, [selectedBlockchain]);
+
   return (
     <AppShell
       header={{ height: 60 }}

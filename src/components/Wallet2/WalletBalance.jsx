@@ -50,7 +50,7 @@ const WalletBalance = ({
         </>
       ) : (
         <Text size={25} lh={2} fw="bolder">
-          Balance: 0
+          Balance: 0.00{" "}
           {sendWrapped
             ? "Y"
             : "" + selectedBlockchain.isBridge
