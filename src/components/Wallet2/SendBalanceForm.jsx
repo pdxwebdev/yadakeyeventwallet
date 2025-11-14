@@ -315,13 +315,16 @@ const SendBalanceForm = ({ appContext, webcamRef }) => {
         >
           Scan QR Code
         </Button>
-        <Switch
-          label="Send WYDA-USDT LP Token"
-          checked={useLpToken}
-          onChange={(e) => setUseLpToken(e.currentTarget.checked)}
-          mt="md"
-          styles={styles.switch}
-        />
+
+        {selectedBlockchain.isBridge && (
+          <Switch
+            label="Send WYDA-USDT LP Token"
+            checked={useLpToken}
+            onChange={(e) => setUseLpToken(e.currentTarget.checked)}
+            mt="md"
+            styles={styles.switch}
+          />
+        )}
         {scannedWallet && balance && (
           <Text>
             Wallet Address: {scannedWallet.address} <br />

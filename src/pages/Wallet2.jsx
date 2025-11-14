@@ -10,6 +10,7 @@ import {
   Grid,
   Title,
   TextInput,
+  Burger,
 } from "@mantine/core";
 import { notifications, Notifications } from "@mantine/notifications";
 import { useAppContext } from "../context/AppContext";
@@ -41,6 +42,7 @@ import { ethers } from "ethers";
 import SendBalanceForm from "../components/Wallet2/SendBalanceForm";
 import { SwapForm } from "../components/Wallet2/SwapForm";
 import { LiquidityForm } from "../components/Wallet2/LiquidityForm";
+import { useDisclosure } from "@mantine/hooks";
 
 const ITEMS_PER_PAGE = 5;
 
@@ -101,6 +103,8 @@ const Wallet2 = () => {
   const appContext = useAppContext();
   const isDeploymentChecked = useRef(false);
 
+  // Add disclosure hook for navbar opened state
+  const [opened, { toggle }] = useDisclosure(false);
   const [currentScanIndex, setCurrentScanIndex] = useState(0);
   const [wrapAmount, setWrapAmount] = useState("");
   const [unwrapAmount, setUnwrapAmount] = useState("");
@@ -716,15 +720,39 @@ const Wallet2 = () => {
   const endIndex = startIndex + ITEMS_PER_PAGE;
   const paginatedHistory = combinedHistory.slice(startIndex, endIndex);
 
+  // Close navbar when modals open
+  useEffect(() => {
+    if (isScannerOpen || isQRModalOpen) {
+      if (opened) toggle();
+    }
+  }, [isScannerOpen, isQRModalOpen, opened, toggle]);
+
   return (
     <AppShell
+      header={{ height: 60 }}
       navbar={{
         width: 300,
         breakpoint: "sm",
-        collapsed: { mobile: !isScannerOpen && !isQRModalOpen },
+        collapsed: { mobile: !opened },
       }}
       padding="md"
     >
+      <AppShell.Header>
+        <Group h="100%" px="md" align="center" position="apart">
+          <Burger
+            opened={opened}
+            onClick={toggle}
+            hiddenFrom="sm"
+            size="sm"
+            color="white"
+            mr="xl"
+          />
+          {/* You can add a title or logo here if desired */}
+          <Text size="lg" weight={500} color="white">
+            Wallet
+          </Text>
+        </Group>
+      </AppShell.Header>
       <AppShell.Navbar p="md">
         <BlockchainNav />
         <Text>Request new blockchain/token listings or get support:</Text>
@@ -736,12 +764,9 @@ const Wallet2 = () => {
         </Text>
       </AppShell.Navbar>
       <AppShell.Main>
+        <WalletHeader styles={styles} selectedBlockchain={selectedBlockchain} />
         <Container size="lg" py="xl">
           <Notifications position="top-center" />
-          <WalletHeader
-            styles={styles}
-            selectedBlockchain={selectedBlockchain}
-          />
           {!selectedBlockchain.disabled && (
             <>
               <WalletStateHandler
