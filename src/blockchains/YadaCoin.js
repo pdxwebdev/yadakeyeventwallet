@@ -833,7 +833,7 @@ class YadaCoin {
 
         transactionOutputs.push({
           to: parsedData.prerotatedKeyHash,
-          value: balance - totalAmount - transactionFee,
+          value: inputs.total - totalAmount - transactionFee,
         });
 
         const actualTxn = new Transaction({
@@ -854,7 +854,7 @@ class YadaCoin {
         let newTransactionOutputs = [
           {
             to: newParsedData.prerotatedKeyHash,
-            value: balance - totalAmount - transactionFee,
+            value: inputs.total - totalAmount - transactionFee,
           },
         ];
 
@@ -1057,7 +1057,7 @@ class YadaCoin {
 
         transactionOutputs.push({
           to: parsedData.prerotatedKeyHash,
-          value: balance - totalAmount - transactionFee,
+          value: inputs.total - totalAmount - transactionFee,
         });
 
         const actualTxn = new Transaction({
@@ -1078,7 +1078,7 @@ class YadaCoin {
         let newTransactionOutputs = [
           {
             to: newParsedData.prerotatedKeyHash,
-            value: balance - totalAmount - transactionFee,
+            value: inputs.total - totalAmount - transactionFee,
           },
         ];
 
