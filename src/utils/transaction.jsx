@@ -108,11 +108,12 @@ export class Transaction {
     this.prev_public_key_hash = options.prev_public_key_hash || "";
   }
 
-  async hashAndSign() {
+  async hashAndSign(selectedBlockchain) {
     await this.generateHash();
     this.id = await generateSignatureWithPrivateKey(
       this.key.privateKey,
-      this.hash
+      this.hash,
+      selectedBlockchain
     );
   }
 

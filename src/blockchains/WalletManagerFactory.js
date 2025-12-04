@@ -1,5 +1,6 @@
 import YadaBSC from "./YadaBSC";
 import YadaCoin from "./YadaCoin";
+// import YadaBitcoin from "./YadaBitcoin";
 
 export const walletManagerFactory = (blockchainId) => {
   switch (blockchainId) {

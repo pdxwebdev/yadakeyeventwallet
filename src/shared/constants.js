@@ -79,6 +79,7 @@ export const BLOCKCHAINS = [
         providerUrl: "https://bsc-dataseed1.binance.org/", // BSC Mainnet RPC URL
         hardwareInstruction: "Select BSC on your device.",
         color: "yellow",
+        isKeyEventLog: true,
       }
     : DEPLOY_ENV === "testnet"
     ? {
@@ -89,6 +90,7 @@ export const BLOCKCHAINS = [
         providerUrl: "https://data-seed-prebsc-1-s1.binance.org:8545", // BSC RPC URL
         hardwareInstruction: "Select BSC on your device.",
         color: "yellow",
+        isKeyEventLog: true,
       }
     : {
         id: "bsc",
@@ -98,6 +100,7 @@ export const BLOCKCHAINS = [
         providerUrl: "http://localhost:8545", // BSC RPC URL,
         hardwareInstruction: "Select BSC on your device.",
         color: "yellow",
+        isKeyEventLog: true,
       },
   // {
   //   id: 'eth',
@@ -114,6 +117,7 @@ export const BLOCKCHAINS = [
     providerUrl: "https://yadacoin.io", // Ethereum RPC URL
     hardwareInstruction: "Select YadaCoin on your device.",
     color: "teal",
+    isKeyEventLog: true,
   },
   {
     id: "btc",
@@ -122,6 +126,7 @@ export const BLOCKCHAINS = [
     providerUrl: "https://blockchain.info", // Ethereum RPC URL
     hardwareInstruction: "Bitcoin coming soon!",
     color: "orange",
+    isKeyEventLog: false,
     disabled: true,
   },
 ];

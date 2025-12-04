@@ -28,7 +28,10 @@ export const generateMnemonic = () => {
   return bip39.generateMnemonic(); // Returns a 12-word mnemonic
 };
 
-export const validateBitcoinAddress = (address, network = bitcoin.networks.bitcoin) => {
+export const validateBitcoinAddress = (
+  address,
+  network = bitcoin.networks.bitcoin
+) => {
   try {
     // Remove whitespace
     address = address.trim();
@@ -46,7 +49,7 @@ export const validateBitcoinAddress = (address, network = bitcoin.networks.bitco
       return false;
     }
   } catch (e) {
-    console.error('Address validation error:', e);
+    console.error("Address validation error:", e);
     return false;
   }
 };
@@ -55,6 +58,19 @@ export const getP2PKH = (publicKey) => {
   const { address } = bitcoin.payments.p2pkh({
     pubkey: publicKey,
   });
+  return address;
+};
+
+export const getP2WPKH = (publicKey, network = bitcoin.networks.bitcoin) => {
+  const { address } = bitcoin.payments.p2wpkh({
+    pubkey: publicKey,
+    network,
+  });
+
+  if (!address) {
+    throw new Error("Invalid public key or network");
+  }
+
   return address;
 };
 
@@ -78,21 +94,19 @@ export const generateSHA256 = async (input) => {
 
 export const generateSignatureWithPrivateKey = async (
   privateKeyBuffer,
-  message
+  message,
+  selectedBlockchain
 ) => {
   const ECPair = ECPairFactory.ECPairFactory(tinySecp256k1);
   const keyPair = ECPair.fromPrivateKey(privateKeyBuffer);
   const messageHash = await generateSHA256(message);
 
-  // Custom nonce
-  const customNonce = randomBytes(32); // Generate 32 random bytes
   // Signing the hash with the private key
-  const rawSignature = tinySecp256k1.sign(
-    Buffer.from(messageHash, "hex"),
-    keyPair.privateKey,
-    customNonce
-  );
+  const rawSignature = keyPair.sign(Buffer.from(messageHash, "hex"));
 
+  if (selectedBlockchain && selectedBlockchain.id === "btc") {
+    return rawSignature.toString("base64");
+  }
   // Manually encode the raw signature to DER format
   const r = rawSignature.slice(0, 32);
   const s = rawSignature.slice(32, 64);
@@ -156,7 +170,7 @@ export const syncWalletWithKel = async (wallet, mfa, key_event_log) => {
 };
 
 const deriveIndex = async (factor, level) => {
-  const hash = BigInt('0x' + await generateSHA256(factor + level));
+  const hash = BigInt("0x" + (await generateSHA256(factor + level)));
   const modulo = BigInt(2147483647);
   const remainder = hash % modulo;
   console.log(remainder.toString());
@@ -170,11 +184,13 @@ export const deriveSecurePath = async (root, secondFactor) => {
   // Fixed 4-level path
   for (let level = 0; level < 4; level++) {
     const index = await deriveIndex(secondFactor, level);
-    console.log(index)
+    console.log(index);
     currentNode = currentNode.deriveHardened(index);
   }
-  currentNode.uncompressedPublicKey = decompressPublicKey(Buffer.from(currentNode.publicKey))
-  console.log(getP2PKH(currentNode.publicKey))
+  currentNode.uncompressedPublicKey = decompressPublicKey(
+    Buffer.from(currentNode.publicKey)
+  );
+  console.log(getP2PKH(currentNode.publicKey));
   return currentNode;
 };
 
@@ -186,7 +202,7 @@ export function decompressPublicKey(compressedKey) {
   // Use bitcoinjs-lib's ECPair to handle key decompression
   const ECPair = ECPairFactory.default(tinySecp256k1);
   const keyPair = ECPair.fromPublicKey(compressedKey, { compressed: false });
-  
+
   // Get the uncompressed public key (65 bytes)
   const uncompressedPublicKey = keyPair.publicKey; // This will be uncompressed by default when compressed: false is implied
   return uncompressedPublicKey;

@@ -963,7 +963,7 @@ class YadaBSC {
   }
 
   // Fetches token balances
-  async fetchBalance(appContext) {
+  async fetchBalance(appContext, addressOverride, setStateVars = true) {
     const {
       privateKey,
       selectedToken,
@@ -985,9 +985,10 @@ class YadaBSC {
       localProvider
     );
     let alreadyLoading = !!loading;
+    let returnVars = {};
     try {
       setLoading(true);
-      const address = await signer.getAddress();
+      const address = addressOverride || (await signer.getAddress());
       let originalBalance = BigInt(0);
       let wrappedBalance = BigInt(0);
 
@@ -1031,11 +1032,15 @@ class YadaBSC {
           wrappedBalance = await wrappedContract.balanceOf(address);
         }
       }
-
-      setBalance({
-        original: ethers.formatEther(originalBalance),
-        wrapped: ethers.formatEther(wrappedBalance),
-      });
+      returnVars = {
+        original: originalBalance,
+        wrapped: wrappedBalance,
+      };
+      if (setStateVars)
+        setBalance({
+          original: ethers.formatEther(originalBalance),
+          wrapped: ethers.formatEther(wrappedBalance),
+        });
       notifications.show({
         title: "Success",
         message: `Balance refreshed for ${
@@ -1050,10 +1055,11 @@ class YadaBSC {
         message: "Failed to load wallet balance",
         color: "red",
       });
-      setBalance(null);
+      if (setStateVars) setBalance(null);
     } finally {
       if (!alreadyLoading) setLoading(false);
     }
+    return returnVars;
   }
 
   // Initializes key event log
@@ -2397,7 +2403,7 @@ class YadaBSC {
    *  • ERC-20 with permit      → generatePermit + bridge call
    *  • ERC-20 without permit   → token.transferFrom(scanned, latestKey, balance)
    */
-  async transferBalanceToLatestKey(appContext, previousSigner) {
+  async transferBalanceToLatestKey(appContext, previousKey) {
     const {
       contractAddresses,
       privateKey,
@@ -2446,6 +2452,10 @@ class YadaBSC {
     // --------------------------------------------------------------
     // 1. NATIVE TOKEN (BNB)
     // --------------------------------------------------------------
+    const previousSigner = new ethers.Wallet(
+      ethers.hexlify(previousKey.privateKey),
+      localProvider
+    );
     if (finalTokenAddress === ethers.ZeroAddress) {
       const publicKey = Buffer.from(
         previousSigner.signingKey.publicKey.slice(2),

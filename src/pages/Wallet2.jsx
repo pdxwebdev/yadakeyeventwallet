@@ -118,7 +118,10 @@ const Wallet2 = () => {
   // Derive token symbols for the selected token
   const { tokenSymbol, wrappedTokenSymbol } = useMemo(() => {
     if (!selectedBlockchain.isBridge)
-      return { tokenSymbol: "WYDA", wrappedTokenSymbol: "" };
+      return {
+        tokenSymbol: selectedBlockchain.id.toUpperCase(),
+        wrappedTokenSymbol: "",
+      };
     let tokenSymbol = "Token";
     let wrappedTokenSymbol = "WToken";
 
@@ -816,7 +819,9 @@ const Wallet2 = () => {
                         >
                           {balance <= 0
                             ? `Cannot initialize wallet (${
-                                selectedBlockchain.isBridge ? "BNB" : "YDA"
+                                selectedBlockchain.isBridge
+                                  ? "BNB"
+                                  : selectedBlockchain.id.toUpperCase()
                               } balance is 0)`
                             : "Initialize wallet"}
                         </Button>

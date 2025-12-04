@@ -47,7 +47,7 @@
     "axios": "^1.7.9",
     "bip32": "^5.0.0-rc.0",
     "bip39": "^3.1.0",
-    "bitcoinjs-lib": "^7.0.0-rc.0",
+    "bitcoinjs-lib": "^7.0.0",
     "browserify": "^17.0.1",
     "cors": "^2.8.5",
     "dayjs": "^1.11.13",

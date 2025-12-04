@@ -360,11 +360,11 @@ class YadaCoin {
     }
   }
 
-  async fetchBalance(appContext, webcamRef) {
+  async fetchBalance(appContext, addressOverride, setStateVars = true) {
     const { privateKey, isInitialized, setLoading, setBalance, setSymbol } =
       appContext;
-    setSymbol("yda");
-
+    if (setSymbol) setSymbol("yda");
+    let returnVars = 0;
     if (privateKey && isInitialized) {
       try {
         const { log: keyEventLog } = await this.getKeyLog(
@@ -372,17 +372,18 @@ class YadaCoin {
           privateKey
         );
         if (keyEventLog.length <= 0) return;
-        const address = keyEventLog[keyEventLog.length - 1].prerotated_key_hash;
+        const address =
+          addressOverride ||
+          keyEventLog[keyEventLog.length - 1].prerotated_key_hash;
 
         setLoading(true);
         const response = await axios.get(
           `${import.meta.env.VITE_API_URL}/get-graph-wallet?address=${address}`
         );
-
-        setBalance(
+        returnVars =
           parseFloat(response.data.chain_balance) +
-            parseFloat(response.data.pending_balance)
-        );
+          parseFloat(response.data.pending_balance);
+        if (setStateVars) setBalance();
         notifications.show({
           title: "Success",
           message: "Balance refreshed",
@@ -395,11 +396,12 @@ class YadaCoin {
           message: "Failed to load wallet balance",
           color: "red",
         });
-        setBalance(null);
+        if (setStateVars) setBalance(null);
       } finally {
         setLoading(false);
       }
     }
+    return returnVars;
   }
 
   async fetchTransactionsForKey(
@@ -833,7 +835,7 @@ class YadaCoin {
 
         transactionOutputs.push({
           to: parsedData.prerotatedKeyHash,
-          value: inputs.total - totalAmount - transactionFee,
+          value: balance - totalAmount - transactionFee,
         });
 
         const actualTxn = new Transaction({
@@ -854,7 +856,7 @@ class YadaCoin {
         let newTransactionOutputs = [
           {
             to: newParsedData.prerotatedKeyHash,
-            value: inputs.total - totalAmount - transactionFee,
+            value: balance - totalAmount - transactionFee,
           },
         ];
 
@@ -905,6 +907,131 @@ class YadaCoin {
               "Transaction and key rotation confirmation submitted successfully.",
             color: "green",
           });
+        } else {
+          throw new Error("Transaction or confirmation submission failed");
+        }
+      } catch (error) {
+        throw new Error(`Failed to process transaction: ${error.message}`);
+      }
+    } catch (error) {
+      notifications.show({
+        title: "Error",
+        message:
+          error.message || "Failed to process QR code. Please try again.",
+        color: "red",
+      });
+      setIsScannerOpen(false);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async transferBalanceToLatestKey(appContext, previousSigner, qrdata) {
+    const {
+      privateKey,
+      recipients,
+      parsedData,
+      feeEstimate,
+      balance,
+      setIsTransactionFlow,
+      setIsScannerOpen,
+      setPrivateKey,
+      setWif,
+      setParsedData,
+      setRecipients,
+      setLoading,
+      setLog,
+    } = appContext;
+
+    if (!privateKey) {
+      notifications.show({
+        title: "Error",
+        message: "Please provide private key",
+        color: "red",
+      });
+      return;
+    }
+
+    try {
+      try {
+        const { isValidKey, log: fetchedLog } = await this.getKeyLog(
+          appContext,
+          previousSigner
+        );
+        const parsedQRData = qrdata.split("|");
+        const address = getP2PKH(previousSigner.publicKey);
+        const res = await axios.get(
+          `${
+            import.meta.env.VITE_API_URL
+          }/get-graph-wallet?address=${address}&amount_needed=21000000`
+        );
+        const totalAmount = parseFloat(res.data.chain_balance);
+        const newUnspent = res.data.unspent_transactions.concat(
+          res.data.unspent_mempool_txns
+        );
+        const inputs = newUnspent.reduce(
+          (accumulator, utxo) => {
+            if (accumulator.total >= totalAmount) return accumulator;
+
+            const utxoValue = utxo.outputs.reduce((sum, output) => {
+              if (output.to !== address) return sum;
+              return sum + output.value;
+            }, 0);
+            accumulator.selected.push({ id: utxo.id });
+            accumulator.total += utxoValue;
+            return accumulator;
+          },
+          { selected: [], total: 0 }
+        );
+
+        if (parseFloat(inputs.total.toFixed(8)) < totalAmount) {
+          throw new Error("Insufficient funds");
+        }
+
+        const transactionOutputs = [];
+
+        const lastestLogEntry = fetchedLog[fetchedLog.length - 1];
+        transactionOutputs.push({
+          to: lastestLogEntry.prerotated_key_hash,
+          value: totalAmount,
+        });
+        const actualTxn = new Transaction({
+          key: previousSigner,
+          public_key: Buffer.from(previousSigner.publicKey).toString("hex"),
+          twice_prerotated_key_hash: parsedQRData[2],
+          prerotated_key_hash: parsedQRData[1],
+          inputs: inputs.selected,
+          outputs: transactionOutputs,
+          relationship: "",
+          relationship_hash: await generateSHA256(""),
+          public_key_hash: getP2PKH(previousSigner.publicKey),
+          prev_public_key_hash: parsedQRData[3],
+          fee: 0,
+        });
+        await actualTxn.hashAndSign();
+
+        setLoading(true);
+        const actualResponse = await axios.post(
+          `${import.meta.env.VITE_API_URL}/transaction?origin=${
+            window.location.origin
+          }&username_signature=1`,
+          [actualTxn.toJson()],
+          { headers: { "Content-Type": "application/json" } }
+        );
+
+        if (actualResponse.status === 200) {
+          localStorage.removeItem("walletPrivateKey");
+          localStorage.removeItem("walletWif");
+          localStorage.removeItem("walletParsedData");
+          localStorage.removeItem("walletIsInitialized");
+
+          notifications.show({
+            title: "Success",
+            message:
+              "Transaction and key rotation confirmation submitted successfully.",
+            color: "green",
+          });
+          return { status: 1 };
         } else {
           throw new Error("Transaction or confirmation submission failed");
         }
@@ -1031,7 +1158,7 @@ class YadaCoin {
         );
         const inputs = newUnspent.reduce(
           (accumulator, utxo) => {
-            if (accumulator.total >= totalAmount + transactionFee)
+            if (accumulator.total >= balance + transactionFee)
               return accumulator;
             const utxoValue = utxo.outputs.reduce((sum, output) => {
               if (output.to !== address) return sum;
@@ -1044,7 +1171,7 @@ class YadaCoin {
           { selected: [], total: 0 }
         );
 
-        if (inputs.total < totalAmount + transactionFee) {
+        if (parseFloat(inputs.total.toFixed(8)) < balance + transactionFee) {
           throw new Error("Insufficient funds");
         }
 
@@ -1057,7 +1184,7 @@ class YadaCoin {
 
         transactionOutputs.push({
           to: parsedData.prerotatedKeyHash,
-          value: inputs.total - totalAmount - transactionFee,
+          value: balance - totalAmount - transactionFee,
         });
 
         const actualTxn = new Transaction({
@@ -1078,7 +1205,7 @@ class YadaCoin {
         let newTransactionOutputs = [
           {
             to: newParsedData.prerotatedKeyHash,
-            value: inputs.total - totalAmount - transactionFee,
+            value: balance - totalAmount - transactionFee,
           },
         ];
 

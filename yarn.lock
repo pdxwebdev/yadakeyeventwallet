@@ -3295,10 +3295,10 @@ bindings@^1.3.0, bindings@^1.5.0:
   dependencies:
     file-uri-to-path "1.0.0"
 
-bip174@^3.0.0-rc.0:
-  version "3.0.0-rc.1"
-  resolved "https://registry.npmjs.org/bip174/-/bip174-3.0.0-rc.1.tgz"
-  integrity sha512-+8P3BpSairVNF2Nee6Ksdc1etIjWjBOi/MH0MwKtq9YaYp+S2Hk2uvup0e8hCT4IKlS58nXJyyQVmW92zPoD4Q==
+bip174@^3.0.0:
+  version "3.0.0"
+  resolved "https://registry.npmjs.org/bip174/-/bip174-3.0.0.tgz"
+  integrity sha512-N3vz3rqikLEu0d6yQL8GTrSkpYb35NQKWMR7Hlza0lOj6ZOlvQ3Xr7N9Y+JPebaCVoEUHdBeBSuLxcHr71r+Lw==
   dependencies:
     uint8array-tools "^0.0.9"
     varuint-bitcoin "^2.0.0"
@@ -3328,14 +3328,14 @@ bip66@^1.1.5:
   dependencies:
     safe-buffer "^5.0.1"
 
-bitcoinjs-lib@^7.0.0-rc.0:
-  version "7.0.0-rc.0"
-  resolved "https://registry.npmjs.org/bitcoinjs-lib/-/bitcoinjs-lib-7.0.0-rc.0.tgz"
-  integrity sha512-7CQgOIbREemKR/NT2uc3uO/fkEy+6CM0sLxboVVY6bv6DbZmPt3gg5Y/hhWgQFeZu5lfTbtVAv32MIxf7lMh4g==
+bitcoinjs-lib@^7.0.0:
+  version "7.0.0"
+  resolved "https://registry.npmjs.org/bitcoinjs-lib/-/bitcoinjs-lib-7.0.0.tgz"
+  integrity sha512-2W6dGXFd1KG3Bs90Bzb5+ViCeSKNIYkCUWZ4cvUzUgwnneiNNZ6Sk8twGNcjlesmxC0JyLc/958QycfpvXLg7A==
   dependencies:
     "@noble/hashes" "^1.2.0"
     bech32 "^2.0.0"
-    bip174 "^3.0.0-rc.0"
+    bip174 "^3.0.0"
     bs58check "^4.0.0"
     uint8array-tools "^0.0.9"
     valibot "^0.38.0"

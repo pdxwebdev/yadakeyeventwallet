@@ -11,7 +11,7 @@ import {
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { useAppContext } from "../../context/AppContext";
-import { decompressPublicKey, fromWIF } from "../../utils/hdWallet";
+import { decompressPublicKey, fromWIF, getP2PKH } from "../../utils/hdWallet";
 import { ethers, keccak256 } from "ethers";
 import QRScannerModal from "./QRScannerModal";
 import { capture } from "../../shared/capture";
@@ -60,11 +60,12 @@ const SendBalanceForm = ({ appContext, webcamRef }) => {
     setUseLpToken,
   } = appContext; // Call useAppContext at the top level
   const [isScannerOpen, setIsScannerOpen] = useState(false);
-
+  const [scannedData, setScannedData] = useState(false);
   const [scannedWallet, setScannedWallet] = useState(null);
   const [balance, setBalance] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   const [wif, setWif] = useState("");
+  const [address, setAddress] = useState(null);
 
   const walletManager = walletManagerFactory(selectedBlockchain.id);
   // Get token symbol for display
@@ -104,53 +105,59 @@ const SendBalanceForm = ({ appContext, webcamRef }) => {
   })();
 
   // Function to fetch the balance for the selected token
-  const fetchBalance = async (signer, tokenAddress) => {
+  const fetchBalance = async (address, tokenAddress) => {
     try {
       setIsLoading(true);
-      const address = await signer.getAddress();
+      if (selectedBlockchain.isBridge) {
+        let decimals = 18;
+        let symbol = "BNB";
+        const balanceRes = await walletManager.fetchBalance(
+          appContext,
+          address,
+          false
+        );
+        const balance = BigInt(
+          tokenAddress === ethers.ZeroAddress
+            ? balanceRes.original
+            : balanceRes.wrapped
+        );
+        setBalance({
+          value: ethers.formatUnits(balance, decimals),
+          decimals,
+          symbol,
+        });
 
-      let balance;
-      let decimals = 18; // Default for BNB and most tokens
-      let symbol = "BNB";
-
-      if (tokenAddress === ethers.ZeroAddress) {
-        // Fetch BNB balance
-        balance = await localProvider.getBalance(address);
+        notifications.show({
+          title: "Success",
+          message: `Balance fetched: ${ethers.formatUnits(
+            balance,
+            decimals
+          )} ${symbol}`,
+          color: "green",
+        });
       } else {
-        // Fetch ERC20 or Wrapped token balance
-        const isWrapped = tokenPairs.some(
-          (pair) => pair.wrapped.toLowerCase() === tokenAddress.toLowerCase()
+        const balance = await walletManager.fetchBalance(
+          appContext,
+          address,
+          false
         );
-        const abi = isWrapped ? WRAPPED_TOKEN_ABI : ERC20_ABI;
-        const tokenContract = new ethers.Contract(
-          tokenAddress,
-          abi,
-          localProvider
-        );
-        balance = await tokenContract.balanceOf(address);
-        decimals = await tokenContract.decimals();
-        symbol = await tokenContract.symbol();
+        setBalance({
+          value: balance,
+          decimals: 8,
+          symbol: "yda",
+        });
+
+        notifications.show({
+          title: "Success",
+          message: `Balance fetched: ${balance} YDA`,
+          color: "green",
+        });
       }
-
-      setBalance({
-        value: ethers.formatUnits(balance, decimals),
-        decimals,
-        symbol,
-      });
-
-      notifications.show({
-        title: "Success",
-        message: `Balance fetched: ${ethers.formatUnits(
-          balance,
-          decimals
-        )} ${symbol}`,
-        color: "green",
-      });
     } catch (error) {
-      console.error(`Error fetching balance for token ${tokenAddress}:`, error);
+      console.error(`Error fetching balance: `, error);
       notifications.show({
         title: "Error",
-        message: `Failed to fetch balance for ${getTokenSymbol(tokenAddress)}`,
+        message: `Failed to fetch balance `,
         color: "red",
       });
       setBalance(null);
@@ -188,10 +195,6 @@ const SendBalanceForm = ({ appContext, webcamRef }) => {
 
       // Convert WIF to wallet
       const wallet = fromWIF(wifString);
-      const signer = new ethers.Wallet(
-        ethers.hexlify(wallet.privateKey),
-        localProvider
-      );
 
       const lpTokenAddress = await getLpTokenAddress(
         addresses.yadaERC20Address,
@@ -206,10 +209,21 @@ const SendBalanceForm = ({ appContext, webcamRef }) => {
           finalTokenAddress = pair.wrapped;
         }
       }
-
+      setScannedData(qrData);
       setWif(wifString);
-      setScannedWallet(signer);
-      await fetchBalance(signer, finalTokenAddress);
+      setScannedWallet(wallet);
+      let address;
+      if (selectedBlockchain.isBridge) {
+        const signer = new ethers.Wallet(
+          ethers.hexlify(wallet.privateKey),
+          localProvider
+        );
+        address = await signer.getAddress();
+      } else {
+        address = getP2PKH(wallet.publicKey);
+      }
+      setAddress(address);
+      await fetchBalance(address, finalTokenAddress);
 
       notifications.show({
         title: "Success",
@@ -257,10 +271,12 @@ const SendBalanceForm = ({ appContext, webcamRef }) => {
       setIsLoading(true);
 
       // Execute the transaction using the bridge contract
-      const result = await walletManager.transferBalanceToLatestKey(
-        appContext,
-        scannedWallet
-      );
+      const result =
+        (await walletManager.transferBalanceToLatestKey(
+          appContext,
+          scannedWallet,
+          scannedData
+        )) || {};
 
       if (result.status) {
         notifications.show({
@@ -271,13 +287,19 @@ const SendBalanceForm = ({ appContext, webcamRef }) => {
       } else {
         throw new Error(result.message || "Failed to send token balance");
       }
-
-      const signer = new ethers.Wallet(
-        ethers.hexlify(privateKey.privateKey),
-        localProvider
-      );
       // Refresh balance after transaction
-      await fetchBalance(signer, finalTokenAddress);
+
+      let address;
+      if (selectedBlockchain.isBridge) {
+        const signer = new ethers.Wallet(
+          ethers.hexlify(privateKey.privateKey),
+          localProvider
+        );
+        address = await signer.getAddress();
+      } else {
+        address = getP2PKH(privateKey.publicKey);
+      }
+      await fetchBalance(address);
     } catch (error) {
       console.error(
         `Error sending ${getTokenSymbol(finalTokenAddress)} balance:`,
@@ -327,7 +349,7 @@ const SendBalanceForm = ({ appContext, webcamRef }) => {
         )}
         {scannedWallet && balance && (
           <Text>
-            Wallet Address: {scannedWallet.address} <br />
+            Wallet Address: {address} <br />
             Balance: {balance.value} {balance.symbol}
           </Text>
         )}

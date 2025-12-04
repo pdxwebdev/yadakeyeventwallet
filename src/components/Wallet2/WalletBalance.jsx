@@ -36,7 +36,7 @@ const WalletBalance = ({
           )}
           {!selectedBlockchain.isBridge && (
             <Text size={25} lh={1} c="grey" id="unprotected">
-              Balance: {balance} YDA
+              Balance: {balance} {selectedBlockchain.id.toUpperCase()}
             </Text>
           )}
           {selectedBlockchain.isBridge && wrappedTokenSymbol && (
@@ -55,7 +55,7 @@ const WalletBalance = ({
             ? "Y"
             : "" + selectedBlockchain.isBridge
             ? tokenSymbol
-            : "YDA"}
+            : selectedBlockchain.id.toUpperCase()}
         </Text>
       )}
       <Group mt="md">
