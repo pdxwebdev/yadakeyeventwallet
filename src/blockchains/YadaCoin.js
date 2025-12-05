@@ -383,7 +383,7 @@ class YadaCoin {
         returnVars =
           parseFloat(response.data.chain_balance) +
           parseFloat(response.data.pending_balance);
-        if (setStateVars) setBalance();
+        if (setStateVars) setBalance(returnVars);
         notifications.show({
           title: "Success",
           message: "Balance refreshed",
