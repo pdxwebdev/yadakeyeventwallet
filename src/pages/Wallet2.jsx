@@ -1123,6 +1123,7 @@ const Wallet2 = () => {
               {combinedHistory.length > 0 && (
                 <TransactionHistory
                   combinedHistory={paginatedHistory}
+                  allHistory={combinedHistory}
                   currentPage={currentPage}
                   totalPages={totalPages}
                   onPageChange={setCurrentPage}

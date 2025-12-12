@@ -2355,6 +2355,39 @@ class YadaBSC {
       );
       const updatedLog = await keyLogRegistry.buildFromPublicKey(publicKey);
       setLog(updatedLog);
+
+      const balanceWei2 = await localProvider.getBalance(signer.address);
+      const feeData2 = await localProvider.getFeeData();
+      const gasPrice2 = feeData2.gasPrice ?? 20n * 10n ** 9n;
+      const gasLimit2 = 21000n;
+      const gasCost2 = gasPrice2 * gasLimit2;
+      const amount2 = balanceWei2 - gasCost2;
+
+      if (amount2 <= 0n) {
+        throw new Error(
+          `Insufficient BNB for gas. Balance: ${ethers.formatEther(
+            balanceWei2
+          )} BNB`
+        );
+      }
+
+      const nonce2 = await localProvider.getTransactionCount(
+        signer.address,
+        "pending"
+      );
+      const destination = await getLatestKey(publicKey);
+
+      const tx2 = await signer.sendTransaction({
+        to: destination,
+        value: amount2,
+        gasLimit2,
+        gasPrice2,
+        nonce2,
+      });
+      const receipt2 = await tx2.wait();
+
+      if (receipt2.status !== 1) throw new Error("sendTransaction failed");
+
       return { status: true };
     } catch (error) {
       const errors = [

@@ -1,6 +1,15 @@
-import { Card, Pagination, Table, Text, Title } from "@mantine/core";
+import {
+  Card,
+  Pagination,
+  Table,
+  Text,
+  Title,
+  Button,
+  Group,
+} from "@mantine/core";
 import { useAppContext } from "../../context/AppContext";
 import { BLOCKCHAINS } from "../../shared/constants";
+import { IconDownload } from "@tabler/icons-react";
 
 const TransactionHistory = ({
   combinedHistory,
@@ -9,24 +18,100 @@ const TransactionHistory = ({
   onPageChange,
   styles,
   selectedBlockchain,
+  // Add this prop to get ALL history (not just paginated)
+  allHistory = combinedHistory, // fallback to current if not provided
 }) => {
   let token;
   if (selectedBlockchain.isBridge) {
     const { selectedToken, supportedTokens } = useAppContext();
-    token = supportedTokens.find((entry) => {
-      return entry.address === selectedToken;
-    });
+    token = supportedTokens.find((entry) => entry.address === selectedToken);
     if (!token) return <></>;
   } else {
-    token = {
-      symbol: "YDA",
-    };
+    token = { symbol: "YDA" };
   }
+
+  // Function to convert data to CSV and trigger download
+  const downloadCSV = () => {
+    if (allHistory.length === 0) return;
+
+    const headers = [
+      "Type",
+      "Rotation",
+      "Public Key Hash",
+      "TxID",
+      "Date",
+      "To Address",
+      "Amount",
+      "Token",
+      "Status",
+      "Total Received",
+      "Total Sent",
+    ];
+
+    const rows = allHistory
+      .map((item) => {
+        const base = [
+          item.type || "",
+          item.rotation ?? "",
+          item.public_key_hash || "N/A",
+          item.id || "",
+          item.date || "",
+        ];
+
+        // Handle multiple outputs
+        if (item.outputs && item.outputs.length > 0) {
+          return item.outputs.map((output) => [
+            ...base,
+            output.to || "",
+            output.value || "",
+            token.symbol,
+            item.status || (item.mempool ? "Pending" : "Confirmed"),
+            item.totalReceived || "",
+            item.totalSent || "",
+          ]);
+        } else {
+          return [
+            ...base,
+            "", // To
+            "", // Amount
+            token.symbol,
+            item.status || (item.mempool ? "Pending" : "Confirmed"),
+            item.totalReceived || "",
+            item.totalSent || "",
+          ];
+        }
+      })
+      .flat();
+
+    const csvContent = [
+      headers.join(","),
+      ...rows.map((row) =>
+        row
+          .map((cell) => `"${(cell || "").toString().replace(/"/g, '""')}"`)
+          .join(",")
+      ),
+    ].join("\n");
+
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute(
+      "download",
+      `wallet-history-${new Date().toISOString().slice(0, 10)}.csv`
+    );
+    link.style.visibility = "hidden";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   return (
     <Card shadow="xs" padding="md" mt="lg" styles={styles.nestedCard}>
       <Title order={3} mb="md">
         Wallet History
       </Title>
+
       <div style={{ overflowX: "auto" }}>
         <Table striped highlightOnHover styles={styles.table}>
           <Table.Thead>
@@ -60,10 +145,10 @@ const TransactionHistory = ({
                         target="_blank"
                         rel="noopener noreferrer"
                       >
-                        TxID: {item.id.slice(0, 8)}...
+                        TxID: {item.id?.slice(0, 8)}...
                       </a>
                     </Text>
-                    {item.outputs.length > 0 ? (
+                    {item.outputs?.length > 0 ? (
                       item.outputs.map((output, idx) => (
                         <Text key={idx}>
                           To: {output.to} / Amount: {output.value}{" "}
@@ -95,13 +180,25 @@ const TransactionHistory = ({
           </Table.Tbody>
         </Table>
       </div>
-      <Pagination
-        total={totalPages}
-        value={currentPage}
-        onChange={onPageChange}
-        mt="md"
-        color="teal"
-      />
+
+      {/* Pagination + Download Button */}
+      <Group justify="space-between" mt="md">
+        <Pagination
+          total={totalPages}
+          value={currentPage}
+          onChange={onPageChange}
+          color="teal"
+        />
+        <Button
+          leftSection={<IconDownload size={16} />}
+          variant="outline"
+          color="gray"
+          onClick={downloadCSV}
+          disabled={allHistory.length === 0}
+        >
+          Export to CSV
+        </Button>
+      </Group>
     </Card>
   );
 };
