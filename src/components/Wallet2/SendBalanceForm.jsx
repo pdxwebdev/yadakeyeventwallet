@@ -105,7 +105,7 @@ const SendBalanceForm = ({ appContext, webcamRef }) => {
   })();
 
   // Function to fetch the balance for the selected token
-  const fetchBalance = async (address, tokenAddress) => {
+  const fetchBalance = async (address, tokenAddress, changeState) => {
     try {
       setIsLoading(true);
       if (selectedBlockchain.isBridge) {
@@ -114,7 +114,7 @@ const SendBalanceForm = ({ appContext, webcamRef }) => {
         const balanceRes = await walletManager.fetchBalance(
           appContext,
           address,
-          false
+          changeState
         );
         const balance = BigInt(
           sendWrapped ? balanceRes.wrapped : balanceRes.original
@@ -137,7 +137,7 @@ const SendBalanceForm = ({ appContext, webcamRef }) => {
         const balance = await walletManager.fetchBalance(
           appContext,
           address,
-          false
+          changeState
         );
         setBalance({
           value: balance,
@@ -221,7 +221,7 @@ const SendBalanceForm = ({ appContext, webcamRef }) => {
         address = getP2PKH(wallet.publicKey);
       }
       setAddress(address);
-      await fetchBalance(address, finalTokenAddress);
+      await fetchBalance(address, finalTokenAddress, false);
 
       notifications.show({
         title: "Success",
@@ -297,7 +297,7 @@ const SendBalanceForm = ({ appContext, webcamRef }) => {
       } else {
         address = getP2PKH(privateKey.publicKey);
       }
-      await fetchBalance(address);
+      await fetchBalance(address, finalTokenAddress, true);
     } catch (error) {
       console.error(
         `Error sending ${getTokenSymbol(finalTokenAddress)} balance:`,
