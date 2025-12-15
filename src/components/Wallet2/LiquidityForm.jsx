@@ -8,6 +8,7 @@ import {
   PANCAKE_ROUTER_ADDRESS,
   USDT_ADDRESS,
 } from "../../shared/constants";
+import AmountInput from "./AmountInput";
 
 // === CONFIG: USDT & WYDA (Update these addresses if needed) ===
 const WYDA_ADDRESS = addresses.yadaERC20Address; // Replace with actual WYDA address
@@ -160,12 +161,12 @@ export const LiquidityForm = ({ appContext, webcamRef, walletManager }) => {
               <Text size="sm" weight={500}>
                 USDT Amount
               </Text>
-              <NumberInput
+              <AmountInput
                 value={amountUSDT}
                 onChange={(v) => setAmountUSDT(v?.toString() ?? "")}
                 placeholder="0.0"
                 min={0}
-                decimalScale={6}
+                decimalScale={18}
                 style={{ width: "100%" }}
               />
             </div>
@@ -173,12 +174,12 @@ export const LiquidityForm = ({ appContext, webcamRef, walletManager }) => {
               <Text size="sm" weight={500}>
                 WYDA Amount
               </Text>
-              <NumberInput
+              <AmountInput
                 value={amountWYDA}
                 onChange={(v) => setAmountWYDA(v?.toString() ?? "")}
                 placeholder="0.0"
                 min={0}
-                decimalScale={6}
+                decimalScale={18}
                 style={{ width: "100%" }}
               />
             </div>
@@ -202,14 +203,14 @@ export const LiquidityForm = ({ appContext, webcamRef, walletManager }) => {
         </>
       ) : (
         <>
-          <NumberInput
+          <AmountInput
             mt="md"
             label="LP Amount to Remove"
             value={lpAmount}
             onChange={(v) => setLpAmount(v?.toString() ?? "")}
             placeholder="0.0"
             min={0}
-            decimalScale={6}
+            decimalScale={18}
           />
 
           <Button

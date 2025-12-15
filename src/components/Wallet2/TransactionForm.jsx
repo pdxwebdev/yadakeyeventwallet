@@ -12,6 +12,8 @@ import {
 } from "@mantine/core";
 import { useAppContext } from "../../context/AppContext";
 import { BLOCKCHAINS } from "../../shared/constants";
+import { useState } from "react";
+import AmountInput from "./AmountInput";
 
 const TransactionForm = ({
   recipients,
@@ -42,35 +44,36 @@ const TransactionForm = ({
   return (
     <Card withBorder mt="md" radius="md" p="md" style={styles.form}>
       <Title order={5}>Send Transaction</Title>
-      {recipients.map((recipient, index) => (
-        <Group key={index} mb="sm" mt="xs">
-          <TextInput
-            placeholder="Recipient Address"
-            value={recipient.address}
-            onChange={(e) =>
-              onUpdateRecipient(index, "address", e.target.value)
-            }
-            style={{ flex: 1 }}
-          />
-          <NumberInput
-            placeholder="Amount"
-            value={recipient.amount}
-            onChange={(value) => onUpdateRecipient(index, "amount", value)}
-            style={{ width: 150 }}
-            min={0}
-            defaultValue={0}
-          />
-          {recipients.length > 1 && (
-            <Button
-              color="red"
-              variant="outline"
-              onClick={() => onRemoveRecipient(index)}
-            >
-              Remove
-            </Button>
-          )}
-        </Group>
-      ))}
+      {recipients.map((recipient, index) => {
+        return (
+          <Group key={index} mb="sm" mt="xs">
+            <TextInput
+              placeholder="Recipient Address"
+              value={recipient.address}
+              onChange={(e) =>
+                onUpdateRecipient(index, "address", e.target.value)
+              }
+              style={{ flex: 1 }}
+            />
+            <AmountInput
+              value={recipient.amount}
+              onChange={(value) => onUpdateRecipient(index, "amount", value)}
+              placeholder="Amount"
+              decimalScale={18}
+              style={{ width: 180 }}
+            />
+            {recipients.length > 1 && (
+              <Button
+                color="red"
+                variant="outline"
+                onClick={() => onRemoveRecipient(index)}
+              >
+                Remove
+              </Button>
+            )}
+          </Group>
+        );
+      })}
       <Group>
         <Button onClick={onAddRecipient} variant="outline">
           Add Recipient

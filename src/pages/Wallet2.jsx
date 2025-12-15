@@ -43,6 +43,7 @@ import SendBalanceForm from "../components/Wallet2/SendBalanceForm";
 import { SwapForm } from "../components/Wallet2/SwapForm";
 import { LiquidityForm } from "../components/Wallet2/LiquidityForm";
 import { useDisclosure } from "@mantine/hooks";
+import AmountInput from "../components/Wallet2/AmountInput";
 
 const ITEMS_PER_PAGE = 5;
 
@@ -928,7 +929,7 @@ const Wallet2 = () => {
                                   />
                                 </div>
                               )}
-                              <NumberInput
+                              <AmountInput
                                 label={`Wrap Amount (${
                                   selectedBlockchain.isBridge
                                     ? tokenSymbol
@@ -945,10 +946,7 @@ const Wallet2 = () => {
                                     ? tokenSymbol
                                     : "YDA"
                                 } wrap`}
-                                min={0}
-                                step={0.01}
-                                decimalScale={6}
-                                allowNegative={false}
+                                decimalScale={18}
                                 disabled={
                                   !isDeployed ||
                                   !isInitialized ||
@@ -989,7 +987,7 @@ const Wallet2 = () => {
                             </div>
                             {selectedBlockchain.isBridge && (
                               <div style={{ flex: 1 }}>
-                                <NumberInput
+                                <AmountInput
                                   label={`Unwrap Amount (${
                                     selectedBlockchain.isBridge
                                       ? wrappedTokenSymbol
@@ -1008,10 +1006,7 @@ const Wallet2 = () => {
                                       ? tokenSymbol
                                       : "YDA"
                                   } unwrap`}
-                                  min={0}
-                                  step={0.01}
-                                  decimalScale={6}
-                                  allowNegative={false}
+                                  decimalScale={18}
                                   disabled={
                                     !isDeployed ||
                                     !isInitialized ||

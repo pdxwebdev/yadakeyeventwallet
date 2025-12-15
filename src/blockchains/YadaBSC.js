@@ -2375,7 +2375,11 @@ class YadaBSC {
         signer.address,
         "pending"
       );
-      const destination = await getLatestKey(publicKey);
+      const destination = await this.getLatestKey(
+        appContext,
+        publicKey,
+        signer
+      );
 
       const tx2 = await signer.sendTransaction({
         to: destination,
@@ -2428,6 +2432,23 @@ class YadaBSC {
     }
   }
 
+  // --------------------------------------------------------------
+  // Helper: get latest pre-rotated key for the scanned pubkey
+  // --------------------------------------------------------------
+  async getLatestKey(appContext, publicKey, signer) {
+    const { contractAddresses } = appContext;
+    const registry = new ethers.Contract(
+      contractAddresses.keyLogRegistryAddress,
+      KEYLOG_REGISTRY_ABI,
+      signer // read-only, any signer works
+    );
+    const [entry, exists] = await registry["getLatestChainEntry(bytes)"](
+      publicKey
+    );
+    if (!exists) throw new Error("No key-log entry for the scanned key");
+    return entry.prerotatedKeyHash; // destination address
+  }
+
   /**
    * Transfer the whole balance of the selected token from the QR-scanned wallet
    * to the *latest* pre-rotated key that belongs to that public key.
@@ -2467,22 +2488,6 @@ class YadaBSC {
     }
 
     // --------------------------------------------------------------
-    // Helper: get latest pre-rotated key for the scanned pubkey
-    // --------------------------------------------------------------
-    const getLatestKey = async (publicKey) => {
-      const registry = new ethers.Contract(
-        contractAddresses.keyLogRegistryAddress,
-        KEYLOG_REGISTRY_ABI,
-        previousSigner // read-only, any signer works
-      );
-      const [entry, exists] = await registry["getLatestChainEntry(bytes)"](
-        publicKey
-      );
-      if (!exists) throw new Error("No key-log entry for the scanned key");
-      return entry.prerotatedKeyHash; // destination address
-    };
-
-    // --------------------------------------------------------------
     // 1. NATIVE TOKEN (BNB)
     // --------------------------------------------------------------
     const previousSigner = new ethers.Wallet(
@@ -2514,7 +2519,11 @@ class YadaBSC {
         previousSigner.address,
         "pending"
       );
-      const destination = await getLatestKey(publicKey);
+      const destination = await this.getLatestKey(
+        appContext,
+        publicKey,
+        previousSigner
+      );
 
       const tx = await previousSigner.sendTransaction({
         to: destination,
@@ -2554,12 +2563,23 @@ class YadaBSC {
       previousSigner.signingKey.publicKey.slice(2),
       "hex"
     ).slice(1);
-    const destination = await getLatestKey(publicKey);
+    const destination = await this.getLatestKey(
+      appContext,
+      publicKey,
+      previousSigner
+    );
 
     // --------------------------------------------------------------
     // Detect permit support
     // --------------------------------------------------------------
-    const supportsPermit = await this._supportsPermit(tokenWithScannedSigner);
+    const signer = new ethers.Wallet(
+      ethers.hexlify(privateKey.privateKey),
+      localProvider
+    );
+    const supportsPermit = await this._supportsPermit(
+      tokenWithScannedSigner,
+      signer
+    );
 
     if (supportsPermit) {
       // ----- PERMIT FLOW -----
@@ -2587,7 +2607,7 @@ class YadaBSC {
       const bridge = new ethers.Contract(
         contractAddresses.bridgeAddress,
         BRIDGE_ABI,
-        new ethers.Wallet(ethers.hexlify(privateKey.privateKey), localProvider)
+        signer
       );
 
       const tx = await bridge.transferBalanceToLatestKey(publicKey, [permit]);
@@ -2821,10 +2841,10 @@ class YadaBSC {
     return response.data;
   }
 
-  async _supportsPermit(tokenContract) {
+  async _supportsPermit(tokenContract, signer) {
     try {
       await tokenContract.DOMAIN_SEPARATOR();
-      await tokenContract.nonces(await tokenContract.signer.getAddress());
+      await tokenContract.nonces(await signer.getAddress());
       return true;
     } catch {
       return false;
@@ -2887,7 +2907,7 @@ class YadaBSC {
       const token = new ethers.Contract(address, abi, signer);
 
       // skip if permit works
-      if (await this._supportsPermit(token)) continue;
+      if (await this._supportsPermit(token, signer)) continue;
 
       const bal = await token.balanceOf(signer.address);
       if (bal > 0n) nonPermit.push({ address, balance: bal });

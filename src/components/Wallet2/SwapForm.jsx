@@ -15,6 +15,7 @@ import { ethers } from "ethers";
 import { useEffect, useState, useCallback } from "react";
 import { styles } from "../../shared/styles";
 import { addresses, localProvider } from "../../shared/constants";
+import AmountInput from "./AmountInput";
 
 const WYDA = addresses.yadaERC20Address;
 const USDT = "0x55d398326f99059fF775485246999027B3197955"; // USDT on BSC
@@ -251,13 +252,13 @@ export const SwapForm = ({ appContext, walletManager }) => {
             }
           }}
         />
-        <NumberInput
+        <AmountInput
           label="Amount"
           value={amountIn}
           onChange={(v) => setAmountIn(v?.toString() ?? "")}
           placeholder="0.0"
           min={0}
-          decimalScale={6}
+          decimalScale={18}
         />
       </Group>
 

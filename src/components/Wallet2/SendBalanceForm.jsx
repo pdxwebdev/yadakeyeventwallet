@@ -117,14 +117,12 @@ const SendBalanceForm = ({ appContext, webcamRef }) => {
           false
         );
         const balance = BigInt(
-          tokenAddress === ethers.ZeroAddress
-            ? balanceRes.original
-            : balanceRes.wrapped
+          sendWrapped ? balanceRes.wrapped : balanceRes.original
         );
         setBalance({
           value: ethers.formatUnits(balance, decimals),
           decimals,
-          symbol,
+          symbol: getTokenSymbol(tokenAddress),
         });
 
         notifications.show({
@@ -144,7 +142,7 @@ const SendBalanceForm = ({ appContext, webcamRef }) => {
         setBalance({
           value: balance,
           decimals: 8,
-          symbol: "yda",
+          symbol: "YDA",
         });
 
         notifications.show({

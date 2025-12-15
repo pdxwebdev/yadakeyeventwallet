@@ -2,6 +2,7 @@ import { NumberInput, Button, Group, TextInput } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { ethers } from "ethers";
 import React from "react";
+import AmountInput from "./AmountInput";
 
 const MintForm = ({
   walletManager,
@@ -72,17 +73,14 @@ const MintForm = ({
           placeholder="Enter recipient address"
           styles={styles.input}
         />
-        <NumberInput
+        <AmountInput
           label={`Mint Amount (${wrappedTokenSymbol})`}
           value={mintAmount}
           onChange={(value) =>
             setMintAmount(value === undefined ? "" : value.toString())
           }
           placeholder="Enter amount to mint"
-          min={0}
-          step={0.01}
-          decimalScale={6}
-          allowNegative={false}
+          decimalScale={18}
           disabled={!selectedToken}
           styles={styles.input}
         />
@@ -173,17 +171,14 @@ const BurnForm = ({
           placeholder="Enter account address to burn from"
           styles={styles.input}
         />
-        <NumberInput
+        <AmountInput
           label={`Burn Amount (${wrappedTokenSymbol})`}
           value={burnAmount}
           onChange={(value) =>
             setBurnAmount(value === undefined ? "" : value.toString())
           }
           placeholder="Enter amount to burn"
-          min={0}
-          step={0.01}
-          decimalScale={6}
-          allowNegative={false}
+          decimalScale={18}
           disabled={!selectedToken}
           styles={styles.input}
         />
