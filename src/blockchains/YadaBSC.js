@@ -2617,10 +2617,26 @@ class YadaBSC {
     } else {
       // ----- DIRECT transferFrom (NO APPROVE) -----
       // Assumes bridge (or your address) already has allowance
-      const tx = await tokenWithScannedSigner.transfer(
+      const previousSignerContract = new ethers.Contract(
+        finalTokenAddress,
+        ERC20_ABI,
+        previousSigner
+      );
+
+      const approval = await previousSignerContract.approve(
+        signer.address,
+        balance
+      );
+
+      console.log("Approve transaction sent:", approval.hash);
+      await approval.wait();
+      const tx = await tokenWithScannedSigner.transferFrom(
+        previousSigner.address,
         destination, // to
         balance // amount
       );
+
+      await tx.wait();
 
       notifications.show({
         title: "Transfer Submitted",

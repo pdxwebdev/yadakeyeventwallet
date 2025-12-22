@@ -37,10 +37,12 @@ const TokenSelector = ({ styles }) => {
   } = appContext;
 
   // Guard against undefined supportedTokens
-  const tokenOptions = (supportedTokens || []).map((token) => ({
-    value: token.address,
-    label: `${token.name} (${token.symbol})`,
-  }));
+  const tokenOptions = (supportedTokens || [])
+    .filter((token) => token.symbol !== "WBTC")
+    .map((token) => ({
+      value: token.address,
+      label: `${token.name} (${token.symbol})`,
+    }));
 
   return (
     <Card withBorder mt="md" radius="md" p="md" style={styles.card}>
