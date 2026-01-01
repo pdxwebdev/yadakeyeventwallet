@@ -11,6 +11,7 @@ import {
   Title,
   TextInput,
   Burger,
+  Image,
 } from "@mantine/core";
 import { notifications, Notifications } from "@mantine/notifications";
 import { useAppContext } from "../context/AppContext";
@@ -32,6 +33,7 @@ import { capture } from "../shared/capture";
 import {
   BLOCKCHAINS,
   BRIDGE_ABI,
+  BRIDGE_UPGRADE_ABI,
   localProvider,
   localSwapProvider,
   PANCAKE_ROUTER_ABI,
@@ -110,6 +112,9 @@ const Wallet2 = () => {
   const [wrapAmount, setWrapAmount] = useState("");
   const [unwrapAmount, setUnwrapAmount] = useState("");
   const [wrapAddress, setWrapAddress] = useState("");
+  const [isSecureUpgradeFlow, setIsSecureUpgradeFlow] = useState(false);
+  const [secureUpgradeScans, setSecureUpgradeScans] = useState([]); // Store scanned WIFs for unconfirmed + confirming
+  const [isNewBridgeVersion, setIsNewBridgeVersion] = useState(null); // null = checking, false = old, true = new
 
   const walletManager = useMemo(
     () => walletManagerFactory(selectedBlockchain.id),
@@ -594,15 +599,82 @@ const Wallet2 = () => {
     }
   };
 
-  const handleUpgradeContracts = async () => {
-    await walletManager.upgrade(appContext);
+  useEffect(() => {
+    const checkBridgeVersion = async () => {
+      if (!contractAddresses.bridgeAddress || !isDeployed) {
+        setIsNewBridgeVersion(false);
+        return;
+      }
+
+      try {
+        const bridge = new ethers.Contract(
+          contractAddresses.bridgeAddress,
+          BRIDGE_UPGRADE_ABI,
+          localProvider
+        );
+        await bridge.getTestString(); // This function only exists in BridgeUpgrade
+        setIsNewBridgeVersion(true);
+      } catch (error) {
+        setIsNewBridgeVersion(false);
+      }
+    };
+
+    checkBridgeVersion();
+  }, [contractAddresses.bridgeAddress, isDeployed]);
+
+  // === NEW: Secure Key-Rotation Upgrade Flow ===
+  const handleSecureUpgrade = async () => {
+    setIsSecureUpgradeFlow(true);
+    setCurrentScanIndex(0);
+    setIsScannerOpen(true);
 
     notifications.show({
-      title: "Upgrade Successful",
-      message: "Contracts upgraded.",
-      color: "green",
+      title: "Scan Confirming Key",
+      message: "Scan the NEXT key in your rotation to confirm the upgrade",
+      color: "blue",
     });
   };
+
+  const handleLegacyUpgrade = async () => {
+    // Directly call secureUpgrade with the single scanned key
+    await walletManager.upgrade(appContext);
+  };
+
+  // Handle QR scan during secure upgrade
+  useEffect(() => {
+    if (!isScannerOpen || !isSecureUpgradeFlow) return;
+
+    const handleScan = async () => {
+      try {
+        const qrData = await capture(webcamRef);
+        if (qrData) {
+          const [wifString] = qrData.split("|");
+          const { newPrivateKey, newParsedData } =
+            await walletManager.processScannedQR(
+              appContext,
+              qrData,
+              false,
+              true
+            );
+
+          setIsScannerOpen(false);
+
+          // Directly call secureUpgrade with the single scanned key
+          await walletManager.upgrade(appContext, {
+            wif: wifString,
+            parsed: newParsedData,
+          });
+
+          setIsSecureUpgradeFlow(false);
+        }
+      } catch (error) {
+        // Keep scanning on error
+      }
+    };
+
+    const interval = setInterval(handleScan, 500);
+    return () => clearInterval(interval);
+  }, [isScannerOpen, isSecureUpgradeFlow]);
 
   const handleRotateKey = useCallback(
     async (appContext) => {
@@ -755,9 +827,9 @@ const Wallet2 = () => {
             color="white"
             mr="xl"
           />
-          {/* You can add a title or logo here if desired */}
+          <Image height="45" src="/wallet/whale-wallet-logo.png"></Image>
           <Text size="lg" weight={500} color="white">
-            Wallet
+            Whale Wallet
           </Text>
         </Group>
       </AppShell.Header>
@@ -1096,21 +1168,66 @@ const Wallet2 = () => {
                   padding="lg"
                   radius="md"
                   withBorder
-                  styles={styles.card}
+                  style={styles.card}
                 >
-                  <Button
-                    color={blockchainColor}
-                    onClick={handleUpgradeContracts}
-                  >
-                    Upgrade contracts
-                  </Button>
+                  <Title order={4} mb="md">
+                    Admin Actions
+                  </Title>
+
+                  {isNewBridgeVersion === null ? (
+                    <Text>Checking bridge version...</Text>
+                  ) : isNewBridgeVersion ? (
+                    <>
+                      <Text size="sm" color="dimmed" mb="md">
+                        Secure upgrade mode active. Standard upgrades are
+                        disabled.
+                      </Text>
+                      <Button
+                        color="orange"
+                        onClick={handleSecureUpgrade}
+                        loading={isSecureUpgradeFlow}
+                        disabled={isScannerOpen}
+                      >
+                        {secureUpgradeScans.length > 0
+                          ? `Continue Secure Upgrade (${secureUpgradeScans.length}/2 keys scanned)`
+                          : "Upgrade Contracts (Secure Key Rotation)"}
+                      </Button>
+                      {secureUpgradeScans.length > 0 && (
+                        <Button
+                          variant="outline"
+                          color="red"
+                          ml="sm"
+                          onClick={() => {
+                            setSecureUpgradeScans([]);
+                            setIsSecureUpgradeFlow(false);
+                            setIsScannerOpen(false);
+                          }}
+                        >
+                          Cancel Upgrade
+                        </Button>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      <Text size="sm" color="dimmed" mb="md">
+                        Legacy upgrade available (one-time use before secure
+                        mode).
+                      </Text>
+                      <Button
+                        color={blockchainColor}
+                        onClick={handleLegacyUpgrade}
+                      >
+                        Upgrade Contracts (Legacy)
+                      </Button>
+                    </>
+                  )}
 
                   <Button
                     mt="md"
                     color={blockchainColor}
                     onClick={() => walletManager.emergencyRecover(appContext)}
                   >
-                    Recover tbnb from contract
+                    Recover tBNB from contract
                   </Button>
                 </Card>
               )}

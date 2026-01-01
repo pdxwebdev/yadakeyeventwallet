@@ -283,80 +283,72 @@ class YadaBSC {
     );
 
     // Generate permits for all tokens
-    const permits = await Promise.all(
-      filteredTokens.map(async ({ address: tokenAddress }) => {
-        if (
-          tokenAddress.toLowerCase() ===
-          "0x0000000000000000000000000000000000000000"
-        ) {
-          const balance = await localProvider.getBalance(signer.address);
-          // Skip BNB
-          return {
-            token: ethers.ZeroAddress,
-            amount: balance,
-            deadline: 0,
-            v: 0,
-            r: ethers.zeroPadBytes("0x", 32),
-            s: ethers.zeroPadBytes("0x", 32),
-            recipients: [
+    const permits = [];
+    for (const { address: tokenAddress } of filteredTokens) {
+      if (tokenAddress.toLowerCase() === ethers.ZeroAddress) {
+        const balance = await localProvider.getBalance(signer.address);
+        // Skip BNB
+        const permit = {
+          token: ethers.ZeroAddress,
+          amount: balance,
+          deadline: 0,
+          v: 0,
+          r: ethers.zeroPadBytes("0x", 32),
+          s: ethers.zeroPadBytes("0x", 32),
+          recipients: [
+            {
+              recipientAddress: defaultRecipient,
+              amount: balance,
+              wrap: false,
+              unwrap: false,
+              mint: false,
+              burn: false,
+            },
+          ],
+        };
+        permits.push(permit);
+        continue;
+      }
+      try {
+        // Determine if the token is wrapped using tokenPairs
+        const isWrapped = tokenPairs.some(
+          (pair) => pair.wrapped.toLowerCase() === tokenAddress.toLowerCase()
+        );
+        const abi = isWrapped ? WRAPPED_TOKEN_ABI : ERC20_ABI;
+        const tokenContract = new ethers.Contract(tokenAddress, abi, signer);
+        const balance = await tokenContract.balanceOf(signer.address);
+        const adjustment =
+          amountAdjustments.get(tokenAddress.toLowerCase()) || BigInt(0);
+        const adjustedAmount =
+          balance > adjustment ? balance - adjustment : BigInt(0);
+        if (adjustedAmount > 0n) {
+          const permit = await this.generatePermit(
+            appContext,
+            tokenAddress,
+            signer,
+            adjustedAmount,
+            [
               {
                 recipientAddress: defaultRecipient,
-                amount: balance,
+                amount: adjustedAmount,
                 wrap: false,
                 unwrap: false,
                 mint: false,
                 burn: false,
               },
-            ],
-          };
-        }
-        try {
-          // Determine if the token is wrapped using tokenPairs
-          const isWrapped = tokenPairs.some(
-            (pair) => pair.wrapped.toLowerCase() === tokenAddress.toLowerCase()
+            ]
           );
-          const abi = isWrapped ? WRAPPED_TOKEN_ABI : ERC20_ABI;
-          const tokenContract = new ethers.Contract(tokenAddress, abi, signer);
-          const balance = await tokenContract.balanceOf(signer.address);
-          const adjustment =
-            amountAdjustments.get(tokenAddress.toLowerCase()) || BigInt(0);
-          const adjustedAmount =
-            balance > adjustment ? balance - adjustment : BigInt(0);
-          if (adjustedAmount > 0n) {
-            const permit = await this.generatePermit(
-              appContext,
-              tokenAddress,
-              signer,
-              adjustedAmount,
-              [
-                {
-                  recipientAddress: defaultRecipient,
-                  amount: adjustedAmount,
-                  wrap: false,
-                  unwrap: false,
-                  mint: false,
-                  burn: false,
-                },
-              ]
-            );
-            if (permit) {
-              return permit;
-            } else {
-              console.warn(`Permit not supported for token ${tokenAddress}`);
-            }
-          }
-          return null;
-        } catch (error) {
-          console.warn(
-            `Error generating permit for token ${tokenAddress}:`,
-            error
-          );
-          return null;
+          if (permit) permits.push(permit);
         }
-      })
-    );
+      } catch (error) {
+        console.warn(
+          `Error generating permit for token ${tokenAddress}:`,
+          error
+        );
+      }
+    }
 
-    return permits.filter((permit) => permit !== null);
+    return permits;
   }
 
   // Builds transaction history from KeyLogRegistry and token transfer events
@@ -1551,73 +1543,81 @@ class YadaBSC {
   }
 
   // Deploy function to send POST request with three WIFs
-  async upgrade(appContext) {
-    const {
-      contractAddresses,
-      setIsDeployed,
-      wif,
-      privateKey,
-      setContractAddresses,
-    } = appContext;
+  async upgrade(appContext, scannedNextKey = null) {
+    const { contractAddresses, privateKey } = appContext;
 
-    try {
-      const signer = new ethers.Wallet(
-        ethers.hexlify(privateKey.privateKey),
-        localProvider
-      );
-      console.log(signer.address);
-      const response = await axios.post("http://localhost:3001/upgrade", {
-        upgradeEnv:
-          DEPLOY_ENV === "mainnet"
-            ? "upgrademain"
-            : DEPLOY_ENV === "testnet"
-            ? "upgradetest"
-            : "upgrade",
-        bridgeProxyAddress: contractAddresses.bridgeAddress,
-        keyLogRegistryProxyAddress: contractAddresses.keyLogRegistryAddress,
-        wrappedTokenProxyAddresses: [contractAddresses.yadaERC20Address],
-        wif: wif,
-      });
-      const { status, addresses, error } = response.data;
-
-      if (status && addresses) {
-        setContractAddresses({
-          ...contractAddresses,
-          bridgeAddress: contractAddresses.bridgeAddress,
-        });
-        setIsDeployed(true);
-        notifications.show({
-          title: "Upgrade Successful",
-          message: "Contracts upgraded successfully.",
-          color: "green",
-        });
-
-        const bridge = new ethers.Contract(
-          contractAddresses.bridgeAddress,
-          BRIDGE_UPGRADE_ABI,
-          signer
-        );
-        console.log(await bridge.getTestString());
-
-        const yadaERC20 = new ethers.Contract(
-          contractAddresses.yadaERC20Address,
-          ERC20_UPGRADE_ABI,
-          signer
-        );
-        console.log(await yadaERC20.getTestString());
-        return { status: true, addresses };
-      } else {
-        throw new Error(error || "Failed to deploy contracts");
-      }
-    } catch (error) {
-      console.error("Deployment error:", error);
-      notifications.show({
-        title: "Error",
-        message: error.message || "Failed to deploy contracts",
-        color: "red",
-      });
-      return { status: false, error: error.message };
+    if (!privateKey || !contractAddresses.bridgeAddress) {
+      throw new Error("Wallet not loaded or bridge not deployed");
     }
+
+    // Detect bridge version
+    const bridgeBase = new ethers.Contract(
+      contractAddresses.bridgeAddress,
+      BRIDGE_UPGRADE_ABI,
+      localProvider
+    );
+
+    let isNewVersion = false;
+    try {
+      await bridgeBase.getTestString(); // Only exists in BridgeUpgrade
+      isNewVersion = true;
+    } catch (error) {
+      isNewVersion = false;
+    }
+
+    // Prepare base payload for /upgrade endpoint
+    const payload = {
+      upgradeEnv:
+        DEPLOY_ENV === "mainnet"
+          ? "upgrademain"
+          : DEPLOY_ENV === "testnet"
+          ? "upgradetest"
+          : "upgrade",
+      bridgeProxyAddress: contractAddresses.bridgeAddress,
+      keyLogRegistryProxyAddress: contractAddresses.keyLogRegistryAddress,
+      wrappedTokenProxyAddresses: [contractAddresses.yadaERC20Address],
+      wif: appContext.wif,
+    };
+
+    // If new version → add scanned confirming key data
+    if (isNewVersion) {
+      if (!scannedNextKey || !scannedNextKey.parsed) {
+        throw new Error(
+          "SCAN_REQUIRED: Confirming key scan needed for secure upgrade"
+        );
+      }
+      ``;
+
+      payload.wif2 = scannedNextKey.parsed.wif;
+      payload.confirmingPrerotatedKeyHash =
+        scannedNextKey.parsed.prerotatedKeyHash;
+      payload.confirmingTwicePrerotatedKeyHash =
+        scannedNextKey.parsed.twicePrerotatedKeyHash;
+    }
+
+    // Call the single /upgrade endpoint
+    console.log(
+      isNewVersion
+        ? "Secure upgrade via /upgrade with scanned key"
+        : "Legacy upgrade via /upgrade"
+    );
+    const response = await axios.post("http://localhost:3001/upgrade", payload);
+
+    const { status, addresses, txHash, error } = response.data;
+
+    if (!status) {
+      throw new Error(error || "Upgrade failed");
+    }
+
+    notifications.show({
+      title: "Upgrade Successful",
+      message: isNewVersion
+        ? `Bridge upgraded securely via key rotation. Tx: ${txHash}`
+        : "Contracts upgraded (legacy method).",
+      color: "green",
+    });
+
+    return { status: true, addresses, txHash };
   }
 
   // Processes QR code in YadaCoin format: wifString|prerotatedKeyHash|twicePrerotatedKeyHash|prevPublicKeyHash|rotation

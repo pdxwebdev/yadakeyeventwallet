@@ -111,7 +111,7 @@ export async function main() {
   let balance = await ethers.provider.getBalance(keyData.currentSigner.address);
 
   console.log("Deployer balance:", ethers.formatEther(balance));
-
+  console.log("Network name: ", network.name);
   if (network.name === "localhost") {
     // Fund deployer
     const [hardhatAccount] = await ethers.getSigners();
@@ -279,7 +279,7 @@ export async function main() {
 
   // Register initial key log entry
   console.log("Registering initial key log entry...");
-  const gasCost = ethers.parseEther("0.0001");
+  const gasCost = ethers.parseEther("0.003");
   balance = await ethers.provider.getBalance(keyData.currentSigner.address);
   console.log("Deployer balance:", ethers.formatEther(balance));
 

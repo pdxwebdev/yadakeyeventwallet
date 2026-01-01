@@ -10,6 +10,11 @@ const config = {
       optimizer: {
         enabled: true,
         runs: 200,
+        details: {
+          yulDetails: {
+            optimizerSteps: "u", // ← Minimal steps: only unused pruning
+          },
+        },
       },
       outputSelection: {
         "*": {

@@ -18,7 +18,7 @@ export const WRAPPED_NATIVE_TOKEN_ABI = WrappedNativeTokenArtifact.abi;
 export const ERC20_ABI = MockERC20Artifact.abi;
 export const ERC20_UPGRADE_ABI = MockERC20UpgradeArtifact.abi;
 
-export const DEPLOY_ENV = "mainnet"; //import.meta.env.VITE_DEPLOY_ENV;
+export const DEPLOY_ENV = "localhost"; //import.meta.env.VITE_DEPLOY_ENV;
 export let localProvider =
   DEPLOY_ENV === "mainnet"
     ? new ethers.JsonRpcProvider(
@@ -154,7 +154,7 @@ export const addresses =
         configured: true,
       };
 
-export const deployed = true;
+export const deployed = false;
 
 export const PANCAKE_ROUTER_ADDRESS =
   "0x10ED43C718714eb63d5aA57B78B54704E256024E"; // PancakeSwap V2 Router

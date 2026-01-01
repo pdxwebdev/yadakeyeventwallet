@@ -142,6 +142,9 @@ app.post("/upgrade", async (req, res) => {
       keyLogRegistryProxyAddress,
       wrappedTokenProxyAddresses,
       wif,
+      wif2,
+      confirmingPrerotatedKeyHash,
+      confirmingTwicePrerotatedKeyHash,
     } = req.body;
 
     // Prepare npm run deploy command with arguments
@@ -152,6 +155,9 @@ app.post("/upgrade", async (req, res) => {
       KEY_LOG_REGISTRY_PROXY_ADDRESS: keyLogRegistryProxyAddress,
       WRAPPED_TOKEN_PROXY_ADDRESSES: wrappedTokenProxyAddresses,
       WIF: wif,
+      CONFIRMING_WIF: wif2,
+      CPRKH: confirmingPrerotatedKeyHash,
+      CTPRKH: confirmingTwicePrerotatedKeyHash,
     };
     console.log(env);
 

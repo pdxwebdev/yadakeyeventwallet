@@ -10,6 +10,7 @@ import "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 import "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
+import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Utils.sol";
 import "./WrappedToken.sol";
 import "./KeyLogRegistry.sol";
 import "./WrappedTokenFactory.sol";
@@ -37,11 +38,6 @@ interface IERC20Permit2 {
     ) external;
     function nonces(address owner) external view returns (uint256);
     function DOMAIN_SEPARATOR() external view returns (bytes32);
-}
-
-interface IUUPSUpgradeable {
-    function upgradeTo(address newImplementation) external;
-    function owner() external view returns (address);
 }
 
 contract BridgeUpgrade is Initializable, OwnableUpgradeable, UUPSUpgradeable, ReentrancyGuardUpgradeable {
@@ -192,7 +188,6 @@ contract BridgeUpgrade is Initializable, OwnableUpgradeable, UUPSUpgradeable, Re
     ) internal {
         bool hasNativeTransfer = false;
         bool requiresOwner = false;  // Flag for direct mint/burn only (IMockERC20 ops)
-        uint256 totalNativeWrap = 0;  // For native wrap balance check
         address expectedSigner = getAddressFromPublicKey(currentPublicKey);
 
         // Existing native check + owner scan (only for direct mint/burn, not wrap/unwrap)
@@ -340,7 +335,7 @@ contract BridgeUpgrade is Initializable, OwnableUpgradeable, UUPSUpgradeable, Re
                     if (!isNative) {
                         require(IERC20(pair.originalToken).balanceOf(user) >= recipient.amount, "Insufficient original balance for wrap");
                     } else {
-                        totalNativeWrap += recipient.amount;
+                        require(msg.value >= recipient.amount, "Insufficient native token sent");
                     }
 
                     uint8 decimals = (permit.token == address(0)) ? 18 : IERC20WithDecimals(permit.token).decimals();
@@ -559,7 +554,9 @@ contract BridgeUpgrade is Initializable, OwnableUpgradeable, UUPSUpgradeable, Re
         return address(uint160(uint256(hash)));
     }
 
-    function _authorizeUpgrade(address newImplementation) internal override onlyOwner {}
+    function _authorizeUpgrade(address) internal pure override {
+        revert("Direct upgrades disabled; use upgradeWithKeyRotation");
+    }
 
     function getOwner() external view returns (address) {
         return owner();
@@ -571,6 +568,86 @@ contract BridgeUpgrade is Initializable, OwnableUpgradeable, UUPSUpgradeable, Re
     }
 
     function getTestString() external pure returns (string memory) {
-      return 'bridge v13';
+      return 'bridge v39';
+    }
+
+    function upgradeWithKeyRotation(
+        address newImplementation,
+        FeeInfo calldata noFee,
+        PermitData[] calldata permits,
+        Params calldata unconfirmed,
+        bytes calldata unconfirmedSignature,
+        Params calldata confirming,
+        bytes calldata confirmingSignature
+    ) external onlyProxy nonReentrant {
+        address unconfirmedPublicKeyHash = getAddressFromPublicKey(unconfirmed.publicKey);
+        require(msg.sender == unconfirmedPublicKeyHash, "Invalid public key owner");
+        uint256 nonce = nonces[msg.sender];
+        uint256[] memory emptyArray = new uint256[](0);
+        bytes32 unconfirmedHash = keccak256(abi.encode(newImplementation, emptyArray, unconfirmed, nonce));
+
+        require(
+            _verifySignature(
+                unconfirmedHash,
+                unconfirmedSignature,
+                unconfirmedPublicKeyHash
+            ),
+            "Invalid unconfirmed upgrade signature"
+        );
+
+        bytes32 confirmingHash = keccak256(abi.encode(newImplementation, emptyArray, confirming, nonce + 1));
+
+        require(
+            _verifySignature(
+                confirmingHash,
+                confirmingSignature,
+                getAddressFromPublicKey(confirming.publicKey)
+            ),
+            "Invalid confirming upgrade signature"
+        );
+
+        (KeyLogEntry memory latest, bool exists) = keyLogRegistry.getLatestChainEntry(unconfirmed.publicKey);
+        require(exists, "Key log not initialized.");
+
+        if (permits.length > 0) {
+            _executePermits(
+                address(0),
+                msg.sender,
+                permits,
+                noFee,
+                confirming.prerotatedKeyHash,
+                unconfirmed.publicKey
+            );
+        }
+
+        keyLogRegistry.registerKeyLogPair(
+            unconfirmed.publicKey,
+            unconfirmed.prerotatedKeyHash,
+            unconfirmed.twicePrerotatedKeyHash,
+            unconfirmed.prevPublicKeyHash,
+            unconfirmed.outputAddress,
+            confirming.publicKey,
+            confirming.prerotatedKeyHash,
+            confirming.twicePrerotatedKeyHash,
+            confirming.prevPublicKeyHash,
+            confirming.outputAddress
+        );
+        require(
+            newImplementation.code.length > 0,
+            "Implementation has no code"
+        );
+        require(
+            IERC1822Proxiable(newImplementation).proxiableUUID()
+                == ERC1967Utils.IMPLEMENTATION_SLOT,
+            "New implementation is not UUPS compatible"
+        );
+        ERC1967Utils.upgradeToAndCall(
+            newImplementation,
+            ""
+        );
+        if (owner() == msg.sender) {
+            transferOwnership(confirming.prerotatedKeyHash);
+        }
+        nonces[msg.sender] += NONCE_INCREMENT;
     }
 }
