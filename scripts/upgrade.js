@@ -17,12 +17,42 @@ if (!fs.existsSync(deploymentsFile)) {
   throw new Error("deployments.json not found. Run deploy first.");
 }
 const deployments = JSON.parse(fs.readFileSync(deploymentsFile));
+function reviveBigInts(obj) {
+  if (typeof obj === "string") {
+    // Check if it's a numeric string (integer, possibly very large)
+    if (/^-?\d+$/.test(obj)) {
+      try {
+        return BigInt(obj);
+      } catch (e) {
+        // If too large for BigInt (extremely unlikely), fall back to string
+        return obj;
+      }
+    }
+    return obj; // regular string
+  }
 
+  if (Array.isArray(obj)) {
+    return obj.map(reviveBigInts);
+  }
+
+  if (obj && typeof obj === "object") {
+    const revived = {};
+    for (const [key, value] of Object.entries(obj)) {
+      revived[key] = reviveBigInts(value);
+    }
+    return revived;
+  }
+
+  return obj; // number, boolean, null, etc.
+}
 // Environment variables
 const CURRENT_WIF = process.env.WIF; // Current key (unconfirmed)
 const CONFIRMING_WIF = process.env.CONFIRMING_WIF; // Next key (confirming) - required for secure upgrade
 const confirmingPrerotatedKeyHash = process.env.CPRKH;
 const confirmingTwicePrerotatedKeyHash = process.env.CTPRKH;
+let permits = JSON.parse(process.env.PERMITS)
+permits = reviveBigInts(permits);
+console.log(permits)
 
 if (!CURRENT_WIF) {
   throw new Error("WIF environment variable not set (current key)");
@@ -134,10 +164,10 @@ async function main() {
       deployer.signingKey.publicKey.slice(2),
       "hex"
     ).slice(1);
-    const updatedLog = await keyLogRegistry.buildFromPublicKey(publicKey);
-    console.log(updatedLog[updatedLog.length - 1].publicKeyHash);
-    console.log(updatedLog[updatedLog.length - 1].prerotatedKeyHash === deployer.address);
-    console.log(updatedLog[updatedLog.length - 1].twicePrerotatedKeyHash === confirmingWallet.address);
+    const log = await keyLogRegistry.buildFromPublicKey(publicKey);
+    console.log(log[log.length - 1].publicKeyHash);
+    console.log(log[log.length - 1].prerotatedKeyHash === deployer.address);
+    console.log(log[log.length - 1].twicePrerotatedKeyHash === confirmingWallet.address);
     const nonce = await bridge.nonces(deployer.address);
     console.log("Current nonce:", nonce.toString());
 
@@ -146,7 +176,7 @@ async function main() {
       publicKey: deployer.uncompressedPublicKey,
       prerotatedKeyHash: confirmingWallet.address, // fill if known, or set correctly
       twicePrerotatedKeyHash: confirmingPrerotatedKeyHash,
-      prevPublicKeyHash: updatedLog[updatedLog.length - 1].publicKeyHash,
+      prevPublicKeyHash: log[log.length - 1].publicKeyHash,
       outputAddress: confirmingWallet.address, // typically next key
     };
 
@@ -201,15 +231,18 @@ async function main() {
         expires: 0,
         signature: "0x"
       },
+      permits,
       unconfirmedParams,
       unconfirmedSig,
       confirmingParams,
       confirmingSig
     );
+    const receipt = await tx.wait();
     console.log(await bridge.getTestString());
     console.log("Secure upgrade transaction sent:", tx.hash);
-    const receipt = await tx.wait();
     console.log("Secure upgrade confirmed in block:", receipt.blockNumber);
+
+    return { status: true };
   } else {
     console.log("Using LEGACY owner-based UUPS upgrade");
 
@@ -248,11 +281,15 @@ async function main() {
   console.log("deployments.json updated with new implementation address");
 
   console.log("Upgrade complete!");
+    return { status: true };
 }
 
 main()
-  .then(() => process.exit(0))
+  .then((output) => {
+    console.log(output);
+  })
   .catch((error) => {
+    console.log(permits);
     console.error("Upgrade failed:", error);
     process.exit(1);
   });

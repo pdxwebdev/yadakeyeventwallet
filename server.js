@@ -134,6 +134,34 @@ app.post("/check-deployment", async (req, res) => {
   }
 });
 
+function reviveBigInts(obj) {
+  if (typeof obj === "string") {
+    // Check if it's a numeric string (integer, possibly very large)
+    if (/^-?\d+$/.test(obj)) {
+      try {
+        return BigInt(obj);
+      } catch (e) {
+        // If too large for BigInt (extremely unlikely), fall back to string
+        return obj;
+      }
+    }
+    return obj; // regular string
+  }
+
+  if (Array.isArray(obj)) {
+    return obj.map(reviveBigInts);
+  }
+
+  if (obj && typeof obj === "object") {
+    const revived = {};
+    for (const [key, value] of Object.entries(obj)) {
+      revived[key] = reviveBigInts(value);
+    }
+    return revived;
+  }
+
+  return obj; // number, boolean, null, etc.
+}
 app.post("/upgrade", async (req, res) => {
   try {
     const {
@@ -145,6 +173,7 @@ app.post("/upgrade", async (req, res) => {
       wif2,
       confirmingPrerotatedKeyHash,
       confirmingTwicePrerotatedKeyHash,
+      permits = [],
     } = req.body;
 
     // Prepare npm run deploy command with arguments
@@ -159,7 +188,28 @@ app.post("/upgrade", async (req, res) => {
       CPRKH: confirmingPrerotatedKeyHash,
       CTPRKH: confirmingTwicePrerotatedKeyHash,
     };
+    // Pass permits as JSON string (safe for env var)
+    if (permits.length > 0) {
+      try {
+        const permits2 = reviveBigInts(permits);
+        console.log(permits2);
+        console.log(permits2[0].recipients);
+        env.PERMITS = JSON.stringify(permits);
+        console.log(`Received ${permits.length} permits for secure upgrade`);
+      } catch (e) {
+        return res.status(400).json({
+          status: false,
+          error: "Invalid permits format: must be JSON-serializable",
+        });
+      }
+    } else {
+      env.PERMITS = "[]"; // empty array
+    }
+
     console.log(env);
+    console.log(
+      `Command: WIF=${env.WIF} CONFIRMING_WIF=${env.CONFIRMING_WIF} CPRKH=${env.CPRKH} CTPRKH=${env.CTPRKH} BRIDGE_PROXY_ADDRESS=${env.BRIDGE_PROXY_ADDRESS} KEY_LOG_REGISTRY_PROXY_ADDRESS=${env.KEY_LOG_REGISTRY_PROXY_ADDRESS} WRAPPED_TOKEN_PROXY_ADDRESSES="${env.WRAPPED_TOKEN_PROXY_ADDRESSES}" PERMITS='${env.PERMITS}' npm run ${upgradeEnv}`
+    );
 
     // Spawn npm process
     const npmProcess = spawnSync("npm", args, {
@@ -182,11 +232,12 @@ app.post("/upgrade", async (req, res) => {
 
     console.log("NPM command succeeded:", stdout);
     // Extract the JSON-like object using a regex
-    const extracted = extractFirstJsonLike(stdout);
-    if (extracted) {
+    // Extract the JSON-like object using a regex
+    const match = stdout.match(/\{[\s\S]*?\}/);
+    if (match) {
       try {
         // Use Node's VM to safely evaluate the object-like string
-        jsonObj = vm.runInNewContext(`(${extracted})`);
+        jsonObj = vm.runInNewContext(`(${match[0]})`);
         console.log("Extracted JSON:", jsonObj);
       } catch (e) {
         console.error("Failed to parse output:", e);

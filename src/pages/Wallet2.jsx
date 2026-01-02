@@ -668,7 +668,7 @@ const Wallet2 = () => {
           setIsSecureUpgradeFlow(false);
         }
       } catch (error) {
-        // Keep scanning on error
+        console.log(error);
       }
     };
 

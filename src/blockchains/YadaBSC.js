@@ -1544,12 +1544,16 @@ class YadaBSC {
 
   // Deploy function to send POST request with three WIFs
   async upgrade(appContext, scannedNextKey = null) {
-    const { contractAddresses, privateKey } = appContext;
+    const { contractAddresses, privateKey, setLog } = appContext;
 
     if (!privateKey || !contractAddresses.bridgeAddress) {
       throw new Error("Wallet not loaded or bridge not deployed");
     }
 
+    const signer = new ethers.Wallet(
+      ethers.hexlify(privateKey.privateKey),
+      localProvider
+    );
     // Detect bridge version
     const bridgeBase = new ethers.Contract(
       contractAddresses.bridgeAddress,
@@ -1580,6 +1584,7 @@ class YadaBSC {
     };
 
     // If new version → add scanned confirming key data
+    let supportedTokens;
     if (isNewVersion) {
       if (!scannedNextKey || !scannedNextKey.parsed) {
         throw new Error(
@@ -1588,11 +1593,47 @@ class YadaBSC {
       }
       ``;
 
+      const confirmingWallet = fromWIF(scannedNextKey.parsed.wif);
+      const confirmingSigner = new ethers.Wallet(
+        ethers.hexlify(confirmingWallet.privateKey),
+        localProvider
+      );
+
+      // Fetch all token pairs and supported tokens
+      const tokenPairs = await this.fetchTokenPairs(appContext);
+      supportedTokens = [
+        ...tokenPairs.map((p) => ({ address: p.original })),
+        ...tokenPairs
+          .map((p) => ({ address: p.wrapped }))
+          .filter((a) => a.address !== ethers.ZeroAddress),
+        { address: ethers.ZeroAddress }, // BNB
+      ];
+
+      // Generate full permits (including BNB faux permit)
+      let permits = await this.generatePermitsForTokens(
+        appContext,
+        signer,
+        supportedTokens,
+        scannedNextKey.parsed.prerotatedKeyHash, // rotate to next key
+        [ethers.ZeroAddress] // no exclusions
+      );
+
+      permits = permits.map((permit) => ({
+        ...permit,
+        amount: permit.amount.toString(),
+        deadline: Number(permit.deadline), // safe: deadline is uint256 but small
+        recipients: permit.recipients.map((r) => ({
+          ...r,
+          amount: r.amount.toString(),
+        })),
+      }));
+
       payload.wif2 = scannedNextKey.parsed.wif;
       payload.confirmingPrerotatedKeyHash =
         scannedNextKey.parsed.prerotatedKeyHash;
       payload.confirmingTwicePrerotatedKeyHash =
         scannedNextKey.parsed.twicePrerotatedKeyHash;
+      payload.permits = permits;
     }
 
     // Call the single /upgrade endpoint
@@ -1608,16 +1649,82 @@ class YadaBSC {
     if (!status) {
       throw new Error(error || "Upgrade failed");
     }
+    if (isNewVersion) {
+      // Handle non-permit tokens (direct transfer fallback)
+      const nonPermitTokens = await this._collectNonPermitTokens(
+        appContext,
+        signer,
+        supportedTokens,
+        []
+      );
 
+      const nonPermitTransfers = [];
+      for (const { address, balance } of nonPermitTokens) {
+        const isWrapped = tokenPairs.some(
+          (p) => p.wrapped.toLowerCase() === address.toLowerCase()
+        );
+        const abi = isWrapped ? WRAPPED_TOKEN_ABI : ERC20_ABI;
+        const tokenContract = new ethers.Contract(address, abi, signer);
+
+        const tx = await tokenContract.transfer(
+          scannedNextKey.parsed.prerotatedKeyHash,
+          balance
+        );
+        await tx.wait();
+
+        nonPermitTransfers.push({
+          token: address,
+          amount: balance.toString(),
+          txHash: tx.hash,
+        });
+      }
+
+      const balanceWei2 = await localProvider.getBalance(signer.address);
+      const BUFFER = 10_000_000_000_000_000n; // 0.01 BNB — very safe
+      const amount2 = balanceWei2 - BUFFER;
+
+      if (amount2 <= 0n) {
+        throw new Error(
+          `Insufficient BNB for gas. Balance: ${ethers.formatEther(
+            balanceWei2
+          )} BNB`
+        );
+      }
+
+      const nonce2 = await localProvider.getTransactionCount(
+        signer.address,
+        "pending"
+      );
+
+      const tx2 = await signer.sendTransaction({
+        to: scannedNextKey.parsed.prerotatedKeyHash,
+        value: amount2,
+        nonce: nonce2,
+      });
+      const receipt2 = await tx2.wait();
+
+      if (receipt2.status !== 1) throw new Error("sendTransaction failed");
+
+      const keyLogRegistry = new ethers.Contract(
+        contractAddresses.keyLogRegistryAddress,
+        KEYLOG_REGISTRY_ABI,
+        signer
+      );
+      const publicKey = decompressPublicKey(
+        Buffer.from(privateKey.publicKey)
+      ).slice(1);
+      const updatedLog = await keyLogRegistry.buildFromPublicKey(publicKey);
+      setLog(updatedLog);
+    }
     notifications.show({
       title: "Upgrade Successful",
       message: isNewVersion
-        ? `Bridge upgraded securely via key rotation. Tx: ${txHash}`
+        ? `Bridge upgraded securely via key rotation.`
         : "Contracts upgraded (legacy method).",
       color: "green",
     });
 
-    return { status: true, addresses, txHash };
+    return { status: true };
   }
 
   // Processes QR code in YadaCoin format: wifString|prerotatedKeyHash|twicePrerotatedKeyHash|prevPublicKeyHash|rotation
