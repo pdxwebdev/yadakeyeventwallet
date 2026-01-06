@@ -61,7 +61,7 @@ async function main() {
   console.log("Beacon now points to:", currentImpl);
 
   // Optional: Test setBridge if you added it
-  // await beacon.setBridge("0xNewBridgeAddressHere");
+  await beacon.setBridge("0xBa61F5428aE4F43EE526aB5ED0d85018fA218577");
 
   console.log("WrappedTokenBeacon upgrade complete!");
 }

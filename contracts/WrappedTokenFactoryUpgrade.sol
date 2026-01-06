@@ -60,13 +60,5 @@ contract WrappedTokenFactoryUpgrade is OwnableUpgradeable, UUPSUpgradeable {
         return "Upgraded WrappedTokenFactory v5!";
     }
     
-    function setBridge(address newBridge) external {
-        require(newBridge != address(0), "New bridge cannot be zero address");
-        require(newBridge != bridge, "New bridge is same as current");
-
-        address oldBridge = bridge;
-        bridge = newBridge;
-
-        emit BridgeUpdated(oldBridge, newBridge);
-    }
+    uint256[50] private __gap;
 }

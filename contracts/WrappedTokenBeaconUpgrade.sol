@@ -27,13 +27,5 @@ contract WrappedTokenBeaconUpgrade is UpgradeableBeacon {
         return "Upgraded WrappedTokenBeacon v5!";
     }
     
-    function setBridge(address newBridge) external {
-        require(newBridge != address(0), "New bridge cannot be zero address");
-        require(newBridge != bridgeAddress, "New bridge is same as current");
-
-        address oldBridge = bridgeAddress;
-        bridgeAddress = newBridge;
-
-        emit BridgeUpdated(oldBridge, newBridge);
-    }
+    uint256[50] private __gap;
 }

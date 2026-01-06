@@ -56,14 +56,5 @@ contract MockERC20Upgrade is Initializable, ERC20Upgradeable, ERC20PermitUpgrade
         return "Upgraded MockERC20 v9!";
     }
     
-    function setBridge(address newBridge) external {
-        require(newBridge != address(0), "New bridge cannot be zero address");
-
-        address oldBridge = bridge;
-        bridge = newBridge;
-
-        emit BridgeUpdated(oldBridge, newBridge);
-    }
-    
     uint256[50] private __gap;
 }

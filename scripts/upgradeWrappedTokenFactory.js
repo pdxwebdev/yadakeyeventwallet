@@ -29,6 +29,11 @@ async function main() {
     deployer
   );
 
+  const BridgeOld = await ethers.getContractFactory(
+    "WrappedTokenFactoryUpgrade",
+    deployer
+  );
+  await upgrades.forceImport(factoryProxyAddress, BridgeOld, { kind: "uups" });
   // Optional: Validate upgrade safety first
   console.log("Validating upgrade...");
   await upgrades.validateUpgrade(
@@ -53,6 +58,7 @@ async function main() {
   console.log("Proxy address (unchanged):", upgradedFactory.target);
 
   // Verify new function works
+  await upgradedFactory.setBridge("0xBa61F5428aE4F43EE526aB5ED0d85018fA218577");
   const testString = await upgradedFactory.getTestString();
   console.log("Test result:", testString); // Should print "Upgraded WrappedTokenFactory v5!"
 

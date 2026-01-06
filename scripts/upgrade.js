@@ -229,6 +229,7 @@ async function main() {
     );
 
     // Execute secure upgrade
+    const balance = await ethers.provider.getBalance(deployer.address);
     const tx = await bridge.upgradeWithKeyRotation(
       newImplAddress,
       {
@@ -237,7 +238,7 @@ async function main() {
         expires: 0,
         signature: "0x"
       },
-      [],
+      permits,
       unconfirmedParams,
       unconfirmedSig,
       confirmingParams,

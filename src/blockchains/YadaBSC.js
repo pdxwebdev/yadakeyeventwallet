@@ -278,9 +278,19 @@ class YadaBSC {
     const { tokenPairs } = appContext;
 
     // Filter out excluded tokens
-    const filteredTokens = tokens.filter(
-      ({ address }) => !excludeTokens.includes(address.toLowerCase())
-    );
+    const filteredTokens = tokens
+      .filter(({ address }) => !excludeTokens.includes(address.toLowerCase()))
+      .reduce(
+        (unique, token) => {
+          const addr = token.address.toLowerCase();
+          if (!unique.seen.has(addr)) {
+            unique.seen.add(addr);
+            unique.result.push(token);
+          }
+          return unique;
+        },
+        { seen: new Set(), result: [] }
+      ).result;
 
     // Generate permits for all tokens
     const permits = [];
@@ -1570,70 +1580,51 @@ class YadaBSC {
     }
 
     // Prepare base payload for /upgrade endpoint
-    const payload = {
-      upgradeEnv:
-        DEPLOY_ENV === "mainnet"
-          ? "upgrademain"
-          : DEPLOY_ENV === "testnet"
-          ? "upgradetest"
-          : "upgrade",
-      bridgeProxyAddress: contractAddresses.bridgeAddress,
-      keyLogRegistryProxyAddress: contractAddresses.keyLogRegistryAddress,
-      wrappedTokenProxyAddresses: [contractAddresses.yadaERC20Address],
-      wif: appContext.wif,
-    };
+    const upgradeEnv =
+      DEPLOY_ENV === "mainnet"
+        ? "upgrademain"
+        : DEPLOY_ENV === "testnet"
+        ? "upgradetest"
+        : "upgrade";
 
-    // If new version → add scanned confirming key data
-    let supportedTokens;
-    if (isNewVersion) {
-      if (!scannedNextKey || !scannedNextKey.parsed) {
-        throw new Error(
-          "SCAN_REQUIRED: Confirming key scan needed for secure upgrade"
-        );
-      }
-      ``;
-
-      const confirmingWallet = fromWIF(scannedNextKey.parsed.wif);
-      const confirmingSigner = new ethers.Wallet(
-        ethers.hexlify(confirmingWallet.privateKey),
-        localProvider
-      );
-
-      // Fetch all token pairs and supported tokens
-      const tokenPairs = await this.fetchTokenPairs(appContext);
-      supportedTokens = [
-        ...tokenPairs.map((p) => ({ address: p.original })),
-        ...tokenPairs
-          .map((p) => ({ address: p.wrapped }))
-          .filter((a) => a.address !== ethers.ZeroAddress),
-        { address: ethers.ZeroAddress }, // BNB
-      ];
-
-      // Generate full permits (including BNB faux permit)
-      let permits = await this.generatePermitsForTokens(
-        appContext,
-        signer,
-        supportedTokens,
-        scannedNextKey.parsed.prerotatedKeyHash, // rotate to next key
-        [ethers.ZeroAddress] // no exclusions
-      );
-
-      permits = permits.map((permit) => ({
-        ...permit,
-        amount: permit.amount.toString(),
-        deadline: Number(permit.deadline), // safe: deadline is uint256 but small
-        recipients: permit.recipients.map((r) => ({
-          ...r,
-          amount: r.amount.toString(),
-        })),
-      }));
-
-      payload.wif2 = scannedNextKey.parsed.wif;
-      payload.confirmingPrerotatedKeyHash =
-        scannedNextKey.parsed.prerotatedKeyHash;
-      payload.confirmingTwicePrerotatedKeyHash =
-        scannedNextKey.parsed.twicePrerotatedKeyHash;
-      payload.permits = permits;
+    const payloads = [
+      {
+        upgradeEnv: upgradeEnv,
+        bridgeProxyAddress: contractAddresses.bridgeAddress,
+        keyLogRegistryProxyAddress: contractAddresses.keyLogRegistryAddress,
+        wrappedTokenProxyAddresses: [contractAddresses.yadaERC20Address],
+        wif: appContext.wif,
+      },
+    ];
+    if (DEPLOY_ENV === "mainnet") {
+      payloads.push({
+        upgradeEnv: "upgradewydamain",
+        bridgeProxyAddress: contractAddresses.bridgeAddress,
+        keyLogRegistryProxyAddress: contractAddresses.keyLogRegistryAddress,
+        wrappedTokenProxyAddresses: [contractAddresses.yadaERC20Address],
+        wif: appContext.wif,
+      });
+      payloads.push({
+        upgradeEnv: "upgradewrappedmain",
+        bridgeProxyAddress: contractAddresses.bridgeAddress,
+        keyLogRegistryProxyAddress: contractAddresses.keyLogRegistryAddress,
+        wrappedTokenProxyAddresses: [contractAddresses.yadaERC20Address],
+        wif: appContext.wif,
+      });
+      payloads.push({
+        upgradeEnv: "upgradebeaconmain",
+        bridgeProxyAddress: contractAddresses.bridgeAddress,
+        keyLogRegistryProxyAddress: contractAddresses.keyLogRegistryAddress,
+        wrappedTokenProxyAddresses: [contractAddresses.yadaERC20Address],
+        wif: appContext.wif,
+      });
+      payloads.push({
+        upgradeEnv: "upgradefactorymain",
+        bridgeProxyAddress: contractAddresses.bridgeAddress,
+        keyLogRegistryProxyAddress: contractAddresses.keyLogRegistryAddress,
+        wrappedTokenProxyAddresses: [contractAddresses.yadaERC20Address],
+        wif: appContext.wif,
+      });
     }
 
     // Call the single /upgrade endpoint
@@ -1642,12 +1633,70 @@ class YadaBSC {
         ? "Secure upgrade via /upgrade with scanned key"
         : "Legacy upgrade via /upgrade"
     );
-    const response = await axios.post("http://localhost:3001/upgrade", payload);
+    for (let i = 0; i < payloads.length; i++) {
+      let payload = payloads[i];
+      // If new version → add scanned confirming key data
+      let supportedTokens;
+      if (isNewVersion) {
+        if (!scannedNextKey || !scannedNextKey.parsed) {
+          throw new Error(
+            "SCAN_REQUIRED: Confirming key scan needed for secure upgrade"
+          );
+        }
+        ``;
 
-    const { status, addresses, txHash, error } = response.data;
+        const confirmingWallet = fromWIF(scannedNextKey.parsed.wif);
+        const confirmingSigner = new ethers.Wallet(
+          ethers.hexlify(confirmingWallet.privateKey),
+          localProvider
+        );
 
-    if (!status) {
-      throw new Error(error || "Upgrade failed");
+        // Fetch all token pairs and supported tokens
+        const tokenPairs = await this.fetchTokenPairs(appContext);
+        supportedTokens = [
+          ...tokenPairs.map((p) => ({ address: p.original })),
+          ...tokenPairs
+            .map((p) => ({ address: p.wrapped }))
+            .filter((a) => a.address !== ethers.ZeroAddress),
+          { address: ethers.ZeroAddress }, // BNB
+        ];
+
+        // Generate full permits (including BNB faux permit)
+        let permits = await this.generatePermitsForTokens(
+          appContext,
+          signer,
+          supportedTokens,
+          scannedNextKey.parsed.prerotatedKeyHash, // rotate to next key
+          [] // no exclusions
+        );
+
+        permits = permits.map((permit) => ({
+          ...permit,
+          amount: permit.amount.toString(),
+          deadline: Number(permit.deadline), // safe: deadline is uint256 but small
+          recipients: permit.recipients.map((r) => ({
+            ...r,
+            amount: r.amount.toString(),
+          })),
+        }));
+
+        payload.wif2 = scannedNextKey.parsed.wif;
+        payload.confirmingPrerotatedKeyHash =
+          scannedNextKey.parsed.prerotatedKeyHash;
+        payload.confirmingTwicePrerotatedKeyHash =
+          scannedNextKey.parsed.twicePrerotatedKeyHash;
+        payload.permits = [];
+      }
+      const response = await axios.post(
+        "http://localhost:3001/upgrade",
+        payload
+      );
+
+      const { status, addresses, txHash, error } = response.data;
+
+      if (!status) {
+        throw new Error(error || "Upgrade failed");
+      }
     }
     if (isNewVersion) {
       console.log(await bridgeBase.getTestString());

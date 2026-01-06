@@ -15,11 +15,22 @@ function createWalletFromWIF(wif) {
 
 async function main() {
   const deployer = createWalletFromWIF(CURRENT_WIF);
-  const proxyAddress = "0x105A494F92f2C736f774A7ED0CFC6EA3CB6499B7"; // <-- REPLACE with your actual proxy address
+  const proxyAddress = "0xD84B7E8b295d9Fa9656527AC33Bf4F683aE7d2C4"; // <-- REPLACE with your actual proxy address
 
   if (!ethers.isAddress(proxyAddress)) {
     throw new Error("Invalid proxy address provided");
   }
+
+  const mockErc20 = await ethers.getContractAt(
+    "MockERC20Upgrade",
+    proxyAddress,
+    deployer
+  );
+  console.log(await mockErc20.owner());
+  console.log(deployer.address);
+  await mockErc20.setBridge("0xBa61F5428aE4F43EE526aB5ED0d85018fA218577");
+  const testString = await mockErc20.getTestString();
+  console.log("Test function result:", testString); // Should print "Upgraded MockERC20 v7!"
 
   console.log("Preparing upgrade for MockERC20 proxy at:", proxyAddress);
 
@@ -51,15 +62,6 @@ async function main() {
   );
 
   // Verify the new function works
-  const mockErc20 = await ethers.getContractAt(
-    "MockERC20Upgrade",
-    proxyAddress,
-    deployer
-  );
-
-  await mockErc20.setBridge("0x3471134Bf6478993545bdf5C2a170A2150caB0c3");
-  const testString = await mockErc20.getTestString();
-  console.log("Test function result:", testString); // Should print "Upgraded MockERC20 v7!"
 
   console.log("Done!");
 }
