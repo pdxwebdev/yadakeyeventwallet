@@ -14,6 +14,8 @@ interface IBridge {
 contract MockERC20Upgrade is Initializable, ERC20Upgradeable, ERC20PermitUpgradeable, UUPSUpgradeable, OwnableUpgradeable {
     address public bridge;
 
+    event BridgeUpdated(address indexed oldBridge, address indexed newBridge);
+
     function initialize(
         string memory name,
         string memory symbol,
@@ -51,6 +53,17 @@ contract MockERC20Upgrade is Initializable, ERC20Upgradeable, ERC20PermitUpgrade
 
     // New function for testing
     function getTestString() external pure returns (string memory) {
-        return "Upgraded MockERC20 v7!";
+        return "Upgraded MockERC20 v9!";
     }
+    
+    function setBridge(address newBridge) external {
+        require(newBridge != address(0), "New bridge cannot be zero address");
+
+        address oldBridge = bridge;
+        bridge = newBridge;
+
+        emit BridgeUpdated(oldBridge, newBridge);
+    }
+    
+    uint256[50] private __gap;
 }

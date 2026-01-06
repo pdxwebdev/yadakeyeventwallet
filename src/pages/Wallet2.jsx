@@ -638,6 +638,7 @@ const Wallet2 = () => {
   const handleLegacyUpgrade = async () => {
     // Directly call secureUpgrade with the single scanned key
     await walletManager.upgrade(appContext);
+    setIsNewBridgeVersion(true);
   };
 
   // Handle QR scan during secure upgrade

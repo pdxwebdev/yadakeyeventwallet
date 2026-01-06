@@ -22,6 +22,8 @@ contract WrappedTokenFactoryUpgrade is OwnableUpgradeable, UUPSUpgradeable {
     address public bridge;
     address public beacon;
 
+    event BridgeUpdated(address indexed oldBridge, address indexed newBridge);
+
     event TokenDeployed(address proxy);
 
     function initialize(address _beacon, address _owner, address _bridge) public initializer {
@@ -56,5 +58,15 @@ contract WrappedTokenFactoryUpgrade is OwnableUpgradeable, UUPSUpgradeable {
 
     function getTestString() external pure returns (string memory) {
         return "Upgraded WrappedTokenFactory v5!";
+    }
+    
+    function setBridge(address newBridge) external {
+        require(newBridge != address(0), "New bridge cannot be zero address");
+        require(newBridge != bridge, "New bridge is same as current");
+
+        address oldBridge = bridge;
+        bridge = newBridge;
+
+        emit BridgeUpdated(oldBridge, newBridge);
     }
 }

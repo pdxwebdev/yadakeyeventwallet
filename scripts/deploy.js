@@ -178,91 +178,91 @@ export async function main() {
   }
   const bridgeAddress = deployments.bridgeAddress;
 
-  // Deploy WrappedToken implementation
-  const WrappedToken = await ethers.getContractFactory(
-    "WrappedToken",
-    deployer
-  );
-  const wrappedTokenImpl = await WrappedToken.deploy();
-  await wrappedTokenImpl.waitForDeployment();
-  deployments.wrappedTokenImplementation = await wrappedTokenImpl.getAddress();
-  console.log(
-    "WrappedToken implementation:",
-    deployments.wrappedTokenImplementation
-  );
-  // Deploy WrappedTokenBeacon
-  const WrappedTokenBeacon = await ethers.getContractFactory(
-    "WrappedTokenBeacon",
-    deployer
-  );
-  let beacon;
-  if (deployments.beaconAddress && !clean) {
-    beacon = await WrappedTokenBeacon.attach(deployments.beaconAddress);
-    console.log(
-      "Using existing WrappedTokenBeacon:",
-      deployments.beaconAddress
-    );
-  } else {
-    beacon = await ethers.deployContract(
-      "WrappedTokenBeacon",
-      [deployments.wrappedTokenImplementation, deployments.bridgeAddress],
-      {
-        signer: deployer, // your ethers.Wallet or signer
-      }
-    );
-    await beacon.waitForDeployment();
-    const beaconAddress = await beacon.getAddress();
-    const beaconContract = await ethers.getContractAt(
-      "WrappedTokenBeacon",
-      beaconAddress,
-      deployer
-    );
+  // // Deploy WrappedToken implementation
+  // const WrappedToken = await ethers.getContractFactory(
+  //   "WrappedToken",
+  //   deployer
+  // );
+  // const wrappedTokenImpl = await WrappedToken.deploy();
+  // await wrappedTokenImpl.waitForDeployment();
+  // deployments.wrappedTokenImplementation = await wrappedTokenImpl.getAddress();
+  // console.log(
+  //   "WrappedToken implementation:",
+  //   deployments.wrappedTokenImplementation
+  // );
+  // // Deploy WrappedTokenBeacon
+  // const WrappedTokenBeacon = await ethers.getContractFactory(
+  //   "WrappedTokenBeacon",
+  //   deployer
+  // );
+  // let beacon;
+  // if (deployments.beaconAddress && !clean) {
+  //   beacon = await WrappedTokenBeacon.attach(deployments.beaconAddress);
+  //   console.log(
+  //     "Using existing WrappedTokenBeacon:",
+  //     deployments.beaconAddress
+  //   );
+  // } else {
+  //   beacon = await ethers.deployContract(
+  //     "WrappedTokenBeacon",
+  //     [deployments.wrappedTokenImplementation, deployments.bridgeAddress],
+  //     {
+  //       signer: deployer, // your ethers.Wallet or signer
+  //     }
+  //   );
+  //   await beacon.waitForDeployment();
+  //   const beaconAddress = await beacon.getAddress();
+  //   const beaconContract = await ethers.getContractAt(
+  //     "WrappedTokenBeacon",
+  //     beaconAddress,
+  //     deployer
+  //   );
 
-    console.log(deployments.bridgeAddress);
-    console.log(deployments.wrappedTokenImplementation);
-    const currentImplementation = await beaconContract.implementation();
-    console.log(
-      "WrappedTokenBeacon already initialized with implementation:",
-      currentImplementation
-    );
+  //   console.log(deployments.bridgeAddress);
+  //   console.log(deployments.wrappedTokenImplementation);
+  //   const currentImplementation = await beaconContract.implementation();
+  //   console.log(
+  //     "WrappedTokenBeacon already initialized with implementation:",
+  //     currentImplementation
+  //   );
 
-    const beaconOwner = await beaconContract.owner();
-    console.log("beaconOwner: ", beaconOwner);
-    await beacon.waitForDeployment();
-    deployments.beaconAddress = await beacon.getAddress();
-    console.log("WrappedTokenBeacon deployed to:", deployments.beaconAddress);
-  }
-  console.log("Beacon bridge address:", await beacon.bridgeAddress());
-  const beaconAddress = deployments.beaconAddress;
+  //   const beaconOwner = await beaconContract.owner();
+  //   console.log("beaconOwner: ", beaconOwner);
+  //   await beacon.waitForDeployment();
+  //   deployments.beaconAddress = await beacon.getAddress();
+  //   console.log("WrappedTokenBeacon deployed to:", deployments.beaconAddress);
+  // }
+  // console.log("Beacon bridge address:", await beacon.bridgeAddress());
+  // const beaconAddress = deployments.beaconAddress;
   await bridge.connect(deployer).setWrappedTokenBeacon(beaconAddress);
-  console.log("Updated Bridge with WrappedTokenBeacon address:", beaconAddress);
+  // console.log("Updated Bridge with WrappedTokenBeacon address:", beaconAddress);
 
-  // Deploy WrappedTokenFactory
-  const WrappedTokenFactory = await ethers.getContractFactory(
-    "WrappedTokenFactory",
-    deployer
-  );
-  let factory;
-  if (deployments.factoryAddress && !clean) {
-    console.log(
-      "Using existing WrappedTokenFactory:",
-      deployments.factoryAddress
-    );
-  } else {
-    factory = await upgrades.deployProxy(
-      WrappedTokenFactory,
-      [beaconAddress, deployer.address, deployments.bridgeAddress],
-      {
-        initializer: "initialize",
-        kind: "uups",
-        deployer: deployer,
-      }
-    );
-    await factory.waitForDeployment();
-    deployments.factoryAddress = await factory.getAddress();
-    console.log("WrappedTokenFactory deployed to:", deployments.factoryAddress);
-  }
-  const factoryAddress = deployments.factoryAddress;
+  // // Deploy WrappedTokenFactory
+  // const WrappedTokenFactory = await ethers.getContractFactory(
+  //   "WrappedTokenFactory",
+  //   deployer
+  // );
+  // let factory;
+  // if (deployments.factoryAddress && !clean) {
+  //   console.log(
+  //     "Using existing WrappedTokenFactory:",
+  //     deployments.factoryAddress
+  //   );
+  // } else {
+  //   factory = await upgrades.deployProxy(
+  //     WrappedTokenFactory,
+  //     [beaconAddress, deployer.address, deployments.bridgeAddress],
+  //     {
+  //       initializer: "initialize",
+  //       kind: "uups",
+  //       deployer: deployer,
+  //     }
+  //   );
+  //   await factory.waitForDeployment();
+  //   deployments.factoryAddress = await factory.getAddress();
+  //   console.log("WrappedTokenFactory deployed to:", deployments.factoryAddress);
+  // }
+  // const factoryAddress = deployments.factoryAddress;
   // Set KeyLogRegistry authorized caller
   const currentAuthorized = await keyLogRegistry.authorizedCaller();
   if (currentAuthorized !== bridgeAddress) {

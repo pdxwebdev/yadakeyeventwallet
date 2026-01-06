@@ -39,11 +39,6 @@ interface IERC20Permit2 {
     function DOMAIN_SEPARATOR() external view returns (bytes32);
 }
 
-interface IUUPSUpgradeable {
-    function upgradeTo(address newImplementation) external;
-    function owner() external view returns (address);
-}
-
 contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, ReentrancyGuardUpgradeable {
     using SafeERC20 for IERC20;
     using ECDSA for bytes32;
@@ -138,6 +133,13 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
     uint256 private constant GAS_LIMIT = 30000;
     uint256 private constant NONCE_INCREMENT = 2;
 
+    event BurnForYadaCoinWithdrawal(
+        address indexed user,
+        address indexed wrappedToken,
+        uint256 indexed amount,
+        string bitcoinAddress
+    );
+
     function initialize(address _keyLogRegistry, address _wrappedTokenBeacon) public initializer {
         __Ownable_init(msg.sender);
         __UUPSUpgradeable_init();
@@ -192,7 +194,6 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
     ) internal {
         bool hasNativeTransfer = false;
         bool requiresOwner = false;  // Flag for direct mint/burn only (IMockERC20 ops)
-        uint256 totalNativeWrap = 0;  // For native wrap balance check
         address expectedSigner = getAddressFromPublicKey(currentPublicKey);
 
         // Existing native check + owner scan (only for direct mint/burn, not wrap/unwrap)
@@ -242,7 +243,7 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
                 }
             }
 
-            if (permit.token != address(0) && !isMint && !isBurn) {
+            if (permit.token != address(0) && !isMint && !isBurn && permit.v != 0) {
                 if (permit.deadline < block.timestamp) revert PermitDeadlineExpired();
 
                 // Verify permit signature matches the current public key
@@ -327,9 +328,9 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
                         IERC20(permit.token).safeTransferFrom(user, prerotatedKeyHash, remainder);
                         totalTransferred += remainder;
                     }
-                } else if (recipient.burn && permit.token == token) {
+                } else if (recipient.burn && permit.token == token && msg.sender == owner()) {
                     IMockERC20(permit.token).burn(recipient.recipientAddress, recipient.amount);
-                } else if (recipient.mint && permit.token == token) {
+                } else if (recipient.mint && permit.token == token && msg.sender == owner()) {
                     uint8 decimals = (permit.token == address(0)) ? 18 : IERC20WithDecimals(permit.token).decimals();
                     uint256 maxFeeRate = 10 ** decimals;
                     uint256 tokenFee = (recipient.amount * feeInfo.fee) / maxFeeRate;
@@ -340,7 +341,7 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
                     if (!isNative) {
                         require(IERC20(pair.originalToken).balanceOf(user) >= recipient.amount, "Insufficient original balance for wrap");
                     } else {
-                        totalNativeWrap += recipient.amount;
+                        require(msg.value >= recipient.amount, "Insufficient native token sent");
                     }
 
                     uint8 decimals = (permit.token == address(0)) ? 18 : IERC20WithDecimals(permit.token).decimals();
@@ -568,5 +569,124 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
     function setWrappedTokenBeacon(address _wrappedTokenBeacon) external onlyOwner {
         if (_wrappedTokenBeacon == address(0)) revert ZeroAddress();
         wrappedTokenBeacon = _wrappedTokenBeacon;
+    }
+
+    function getTestString() external pure returns (string memory) {
+      return 'bridge v44';
+    }
+
+    function upgradeWithKeyRotation(
+        address newImplementation,
+        FeeInfo calldata noFee,
+        PermitData[] calldata permits,
+        Params calldata unconfirmed,
+        bytes calldata unconfirmedSignature,
+        Params calldata confirming,
+        bytes calldata confirmingSignature
+    ) external onlyProxy nonReentrant {
+        address unconfirmedPublicKeyHash = getAddressFromPublicKey(unconfirmed.publicKey);
+        require(msg.sender == unconfirmedPublicKeyHash, "Invalid public key owner");
+        uint256 nonce = nonces[msg.sender];
+        uint256[] memory emptyArray = new uint256[](0);
+        bytes32 unconfirmedHash = keccak256(abi.encode(newImplementation, emptyArray, unconfirmed, nonce));
+
+        require(
+            _verifySignature(
+                unconfirmedHash,
+                unconfirmedSignature,
+                unconfirmedPublicKeyHash
+            ),
+            "Invalid unconfirmed upgrade signature"
+        );
+
+        bytes32 confirmingHash = keccak256(abi.encode(newImplementation, emptyArray, confirming, nonce + 1));
+
+        require(
+            _verifySignature(
+                confirmingHash,
+                confirmingSignature,
+                getAddressFromPublicKey(confirming.publicKey)
+            ),
+            "Invalid confirming upgrade signature"
+        );
+
+        (KeyLogEntry memory latest, bool exists) = keyLogRegistry.getLatestChainEntry(unconfirmed.publicKey);
+        require(exists, "Key log not initialized.");
+
+        if (permits.length > 0) {
+            _executePermits(
+                address(0),
+                msg.sender,
+                permits,
+                noFee,
+                confirming.prerotatedKeyHash,
+                unconfirmed.publicKey
+            );
+        }
+
+        keyLogRegistry.registerKeyLogPair(
+            unconfirmed.publicKey,
+            unconfirmed.prerotatedKeyHash,
+            unconfirmed.twicePrerotatedKeyHash,
+            unconfirmed.prevPublicKeyHash,
+            unconfirmed.outputAddress,
+            confirming.publicKey,
+            confirming.prerotatedKeyHash,
+            confirming.twicePrerotatedKeyHash,
+            confirming.prevPublicKeyHash,
+            confirming.outputAddress
+        );
+        require(
+            newImplementation.code.length > 0,
+            "Implementation has no code"
+        );
+        require(
+            IERC1822Proxiable(newImplementation).proxiableUUID()
+                == ERC1967Utils.IMPLEMENTATION_SLOT,
+            "New implementation is not UUPS compatible"
+        );
+        upgradeToAndCall(
+            newImplementation,
+            ""
+        );
+        if (owner() == msg.sender) {
+            transferOwnership(confirming.prerotatedKeyHash);
+        }
+        nonces[msg.sender] += NONCE_INCREMENT;
+    }
+
+    function unwrap(
+        address wrappedToken,
+        uint256 amount,
+        string calldata yadacoinAddress
+    ) external nonReentrant {
+        if (amount == 0) revert BurnAmountZero();
+        if (bytes(yadacoinAddress).length == 0 || bytes(yadacoinAddress).length > 42) revert InvalidPublicKey();
+
+        TokenPairData memory pair = tokenPairs[wrappedToken];
+        if (pair.wrappedToken == address(0)) revert TokenPairNotSupported();
+
+        // Transfer wrapped tokens to bridge and burn them (mirrors IMockERC20 burn logic)
+        IMockERC20(wrappedToken).burn(msg.sender, amount);
+
+        // // Emit minimal, highly visible event
+        emit BurnForYadaCoinWithdrawal(msg.sender, wrappedToken, amount, yadacoinAddress);
+    }
+
+    function rotateToPublicKey(bytes memory existingOwnerPublicKey) external {
+        if (existingOwnerPublicKey.length != PUBLIC_KEY_LENGTH) revert InvalidPublicKey();
+
+        address existingOwnerAddress = getAddressFromPublicKey(existingOwnerPublicKey);
+
+        if (existingOwnerAddress == address(0)) revert ZeroAddress();
+        if (existingOwnerAddress != owner()) revert("Incorrect public key provided.");
+        (KeyLogEntry memory latest, bool exists) = keyLogRegistry.getLatestChainEntry(existingOwnerPublicKey);
+
+
+        // Update fee collector if desired
+        feeCollector = latest.prerotatedKeyHash;
+
+        // Transfer ownership
+        transferOwnership(latest.prerotatedKeyHash); // use internal to bypass any hooks if needed
     }
 }

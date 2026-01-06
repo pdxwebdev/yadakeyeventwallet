@@ -16,6 +16,10 @@
     "upgrade": "npx hardhat run ./scripts/upgrade.js --network localhost",
     "upgradetest": "npx hardhat run ./scripts/upgrade.js --network bscTestnet",
     "upgrademain": "npx hardhat run ./scripts/upgrade.js --network bscMainnet",
+    "upgradewydamain": "npx hardhat run ./scripts/upgradeWYDA.js --network bscMainnet",
+    "upgradewrappedmain": "npx hardhat run ./scripts/upgradeWrappedTokens.js --network bscMainnet",
+    "upgradebeaconmain": "npx hardhat run ./scripts/upgradeWrappedTokenBeacon.js --network bscMainnet",
+    "upgradefactorymain": "npx hardhat run ./scripts/upgradeWrappedTokenFactory.js --network bscMainnet",
     "lint": "eslint .",
     "preview": "vite preview",
     "server": "node server.js"

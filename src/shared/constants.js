@@ -18,7 +18,7 @@ export const WRAPPED_NATIVE_TOKEN_ABI = WrappedNativeTokenArtifact.abi;
 export const ERC20_ABI = MockERC20Artifact.abi;
 export const ERC20_UPGRADE_ABI = MockERC20UpgradeArtifact.abi;
 
-export const DEPLOY_ENV = "localhost"; //import.meta.env.VITE_DEPLOY_ENV;
+export const DEPLOY_ENV = "mainnet"; //import.meta.env.VITE_DEPLOY_ENV;
 export let localProvider =
   DEPLOY_ENV === "mainnet"
     ? new ethers.JsonRpcProvider(
@@ -85,7 +85,7 @@ export const BLOCKCHAINS = [
     ? {
         id: "bsc",
         name: "Binance Smart Chain (BSC)",
-        chainId: 97, // BSC mainnet
+        chainId: 97, // BSC testnet
         isBridge: true, // Replace with actual BSC bridge address
         providerUrl: "https://data-seed-prebsc-1-s1.binance.org:8545", // BSC RPC URL
         hardwareInstruction: "Select BSC on your device.",
@@ -134,13 +134,13 @@ export const BLOCKCHAINS = [
 export const addresses =
   DEPLOY_ENV === "mainnet"
     ? {
-        keyLogRegistryAddress: "0x123772E8c6fA9A64eBFFD17Adadde6f7a89b73f4",
-        bridgeAddress: "0x3471134Bf6478993545bdf5C2a170A2150caB0c3",
+        keyLogRegistryAddress: "0xB00915d9Ea033d9f3918A0F54d416EB7A12EDb03",
+        bridgeAddress: "0xBa61F5428aE4F43EE526aB5ED0d85018fA218577",
         wrappedTokenImplementation:
           "0x469ae1ca5fedB3f3a0151BD4cc6291F4b6B98953",
         beaconAddress: "0x54De45901EE4202979cf0A2b131aC795B805AF8F",
         factoryAddress: "0x707C03d34957bF600C17b8596BD48438E2B2a58f",
-        yadaERC20Address: "0x105A494F92f2C736f774A7ED0CFC6EA3CB6499B7",
+        yadaERC20Address: "0xD84B7E8b295d9Fa9656527AC33Bf4F683aE7d2C4",
         configured: true,
       }
     : {
@@ -154,7 +154,7 @@ export const addresses =
         configured: true,
       };
 
-export const deployed = false;
+export const deployed = true;
 
 export const PANCAKE_ROUTER_ADDRESS =
   "0x10ED43C718714eb63d5aA57B78B54704E256024E"; // PancakeSwap V2 Router

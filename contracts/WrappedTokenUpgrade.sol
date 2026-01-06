@@ -14,6 +14,8 @@ interface IBridge2 {
 contract WrappedTokenUpgrade is Initializable, ERC20Upgradeable, ERC20PermitUpgradeable, UUPSUpgradeable, OwnableUpgradeable {
     address public bridge;
 
+    event BridgeUpdated(address indexed oldBridge, address indexed newBridge);
+
     function initialize(
         string memory name,
         string memory symbol,
@@ -54,6 +56,18 @@ contract WrappedTokenUpgrade is Initializable, ERC20Upgradeable, ERC20PermitUpgr
     function _authorizeUpgrade(address newImplementation) internal override onlyOwner {}
 
     function getTestString() external pure returns (string memory) {
-        return "Upgraded WrappedToken v5!";
+        return "Upgraded WrappedToken v10!";
     }
+    
+    function setBridge(address newBridge) external {
+        require(newBridge != address(0), "New bridge cannot be zero address");
+        require(newBridge != bridge, "New bridge is same as current");
+
+        address oldBridge = bridge;
+        bridge = newBridge;
+
+        emit BridgeUpdated(oldBridge, newBridge);
+    }
+    
+    uint256[50] private __gap;
 }

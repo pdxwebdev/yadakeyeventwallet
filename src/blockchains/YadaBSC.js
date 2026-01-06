@@ -1650,6 +1650,7 @@ class YadaBSC {
       throw new Error(error || "Upgrade failed");
     }
     if (isNewVersion) {
+      console.log(await bridgeBase.getTestString());
       // Handle non-permit tokens (direct transfer fallback)
       const nonPermitTokens = await this._collectNonPermitTokens(
         appContext,
@@ -1989,6 +1990,7 @@ class YadaBSC {
         BRIDGE_ABI,
         localProvider
       );
+      console.log(await bridge.owner());
       // Fetch supported tokens from the contract
       const supportedTokens = await bridge.getSupportedTokens();
       console.log("Supported original tokens:", supportedTokens);
@@ -2810,43 +2812,79 @@ class YadaBSC {
   async mintTokens(
     appContext,
     webcamRef,
-    wrappedToken,
-    recipientAddress,
-    amount
+    wrappedToken, // not used directly, kept for compatibility
+    recipients // NEW: array of { address: string, amount: string }
   ) {
     const { selectedToken, privateKey } = appContext;
+
+    // Fetch token pair info
     const tokenPairs = await this.fetchTokenPairs(appContext);
     const selectedTokenPair = tokenPairs.find(
       (t) => t.original === selectedToken
     );
 
+    if (!selectedTokenPair) {
+      throw new Error("Selected token pair not found");
+    }
+
+    // Fetch fee for the original token
     const tokenFee = await this.fetchTokenFee(
       appContext,
       selectedTokenPair.original
     );
 
-    const amountToMint = ethers.parseUnits(amount, selectedTokenPair.decimals);
+    // Convert each amount to the correct decimals and prepare the recipients array for the permit
+    let totalAmount = 0n;
+    const permitRecipients = recipients
+      .map((r) => {
+        if (!ethers.isAddress(r.address)) {
+          throw new Error(`Invalid address: ${r.address}`);
+        }
+        if (
+          !r.amount ||
+          isNaN(parseFloat(r.amount)) ||
+          parseFloat(r.amount) <= 0
+        ) {
+          throw new Error(`Invalid amount for ${r.address}: ${r.amount}`);
+        }
 
-    const signer = new ethers.Wallet(
-      ethers.hexlify(privateKey.privateKey),
-      localProvider
-    );
-    const permit = await this.generatePermit(
-      appContext,
-      selectedTokenPair.original,
-      signer,
-      amountToMint,
-      [
-        {
-          recipientAddress: recipientAddress, // Tokens to be wrapped or transferred
-          amount: amountToMint,
+        const amountBigInt = ethers.parseUnits(
+          r.amount,
+          selectedTokenPair.decimals
+        );
+        totalAmount += amountBigInt;
+
+        return {
+          recipientAddress: r.address,
+          amount: amountBigInt,
           wrap: false,
           unwrap: false,
           mint: true,
           burn: false,
-        },
-      ].filter((r) => r.amount > 0)
+        };
+      })
+      .filter((r) => r.amount > 0); // safety filter
+
+    if (permitRecipients.length === 0) {
+      throw new Error("No valid recipients provided");
+    }
+
+    // Create signer
+    const signer = new ethers.Wallet(
+      ethers.hexlify(privateKey.privateKey),
+      localProvider
     );
+
+    // Generate permit with the full list of recipients
+    const permit = await this.generatePermit(
+      appContext,
+      selectedTokenPair.original,
+      signer,
+      totalAmount, // total amount not needed separately anymore – backend uses the list
+      permitRecipients
+    );
+
+    // Build and execute the transaction
     const result = await this.buildAndExecuteTransaction(
       appContext,
       webcamRef,
@@ -2861,63 +2899,111 @@ class YadaBSC {
       }, []),
       permit
     );
+
     if (result.status === true) {
+      const totalRecipients = permitRecipients.length;
+      const totalAmount = permitRecipients.reduce(
+        (sum, r) => sum + r.amount,
+        0n
+      );
+      const formattedTotal = ethers.formatUnits(
+        totalAmount,
+        selectedTokenPair.decimals
+      );
+
       notifications.show({
         title: "Success",
-        message: `${amount} tokens minted added successfully!`,
+        message: `Successfully minted ${formattedTotal} tokens to ${totalRecipients} recipient(s)!`,
         color: "green",
       });
-      console.log(`${amount} token pairs added successfully!`);
+      console.log(
+        `Minted ${formattedTotal} tokens to ${totalRecipients} recipients`
+      );
     } else {
       notifications.show({
         title: "Error",
-        message: result.message,
+        message: result.message || "Transaction failed",
         color: "red",
       });
-      throw new Error(result.message);
+      throw new Error(result.message || "Transaction failed");
     }
   }
 
   async burnTokens(
     appContext,
     webcamRef,
-    wrappedToken,
-    accountAddress,
-    amount
+    wrappedToken, // kept for compatibility
+    accounts // NEW: array of { address: string, amount: string }
   ) {
     const { selectedToken, privateKey } = appContext;
+
+    // Fetch token pair info
     const tokenPairs = await this.fetchTokenPairs(appContext);
     const selectedTokenPair = tokenPairs.find(
       (t) => t.original === selectedToken
     );
 
+    if (!selectedTokenPair) {
+      throw new Error("Selected token pair not found");
+    }
+
+    // Fetch fee for the original token
     const tokenFee = await this.fetchTokenFee(
       appContext,
       selectedTokenPair.original
     );
 
-    const amountToBurn = ethers.parseUnits(amount, selectedTokenPair.decimals);
+    // Validate and prepare the list of burn actions for the permit
+    let totalAmount = 0n;
+    const permitActions = accounts
+      .map((a) => {
+        if (!ethers.isAddress(a.address)) {
+          throw new Error(`Invalid address: ${a.address}`);
+        }
+        if (
+          !a.amount ||
+          isNaN(parseFloat(a.amount)) ||
+          parseFloat(a.amount) <= 0
+        ) {
+          throw new Error(`Invalid amount for ${a.address}: ${a.amount}`);
+        }
+        const amountBigInt = ethers.parseUnits(
+          a.amount,
+          selectedTokenPair.decimals
+        );
+        totalAmount += amountBigInt;
 
-    const signer = new ethers.Wallet(
-      ethers.hexlify(privateKey.privateKey),
-      localProvider
-    );
-    const permit = await this.generatePermit(
-      appContext,
-      selectedTokenPair.original,
-      signer,
-      amountToBurn,
-      [
-        {
-          recipientAddress: accountAddress, // Tokens to be wrapped or transferred
-          amount: amountToBurn,
+        return {
+          recipientAddress: a.address,
+          amount: amountBigInt,
           wrap: false,
           unwrap: false,
           mint: false,
           burn: true,
-        },
-      ].filter((r) => r.amount > 0)
+        };
+      })
+      .filter((action) => action.amount > 0);
+
+    if (permitActions.length === 0) {
+      throw new Error("No valid accounts to burn from");
+    }
+
+    // Create signer
+    const signer = new ethers.Wallet(
+      ethers.hexlify(privateKey.privateKey),
+      localProvider
     );
+
+    // Generate permit with multiple burn actions
+    const permit = await this.generatePermit(
+      appContext,
+      selectedTokenPair.original,
+      signer,
+      totalAmount,
+      permitActions
+    );
+
+    // Build and execute the transaction
     const result = await this.buildAndExecuteTransaction(
       appContext,
       webcamRef,
@@ -2932,19 +3018,33 @@ class YadaBSC {
       }, []),
       permit
     );
+
     if (result.status === true) {
+      const totalAccounts = permitActions.length;
+      const totalAmount = permitActions.reduce(
+        (sum, action) => sum + action.amount,
+        0n
+      );
+      const formattedTotal = ethers.formatUnits(
+        totalAmount,
+        selectedTokenPair.decimals
+      );
+
       notifications.show({
         title: "Success",
-        message: `${amount} tokens minted added successfully!`,
+        message: `Successfully burned ${formattedTotal} tokens from ${totalAccounts} account(s)!`,
         color: "green",
       });
-      console.log(`${amount} token pairs added successfully!`);
+      console.log(
+        `Burned ${formattedTotal} tokens from ${totalAccounts} accounts`
+      );
     } else {
       notifications.show({
         title: "Error",
-        message: result.message,
+        message: result.message || "Burn transaction failed",
         color: "red",
       });
+      throw new Error(result.message || "Burn transaction failed");
     }
   }
 

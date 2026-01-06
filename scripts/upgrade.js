@@ -77,7 +77,7 @@ async function main() {
   }
 
   // Connect to current Bridge proxy
-  let bridge = await ethers.getContractAt(
+  let bridge2 = await ethers.getContractAt(
     "Bridge",
     bridgeProxyAddress,
     deployer
@@ -123,7 +123,7 @@ async function main() {
     supportsKeyRotationUpgrade = false;
   }
 
-  if (supportsKeyRotationUpgrade) {
+  if (true) {
     console.log("Using SECURE upgradeWithKeyRotation method");
 
     if (!CONFIRMING_WIF) {
@@ -156,7 +156,7 @@ async function main() {
     const confirmingPublicKey = confirmingWallet.signingKey.publicKey.slice(2);
 
     const keyLogRegistry = new ethers.Contract(
-      "0x37c3dBF6c28abEAf4D21c66F9D47347bDf4f0D70",
+      deployments.keyLogRegistryAddress,
       KEYLOG_REGISTRY_ABI,
       deployer
     );
@@ -168,6 +168,12 @@ async function main() {
     console.log(log[log.length - 1].publicKeyHash);
     console.log(log[log.length - 1].prerotatedKeyHash === deployer.address);
     console.log(log[log.length - 1].twicePrerotatedKeyHash === confirmingWallet.address);
+
+    const bridge = await ethers.getContractAt(
+      "BridgeUpgrade",
+      bridgeProxyAddress,
+      deployer
+    );
     const nonce = await bridge.nonces(deployer.address);
     console.log("Current nonce:", nonce.toString());
 
@@ -231,7 +237,7 @@ async function main() {
         expires: 0,
         signature: "0x"
       },
-      permits,
+      [],
       unconfirmedParams,
       unconfirmedSig,
       confirmingParams,
@@ -247,36 +253,45 @@ async function main() {
     console.log("Using LEGACY owner-based UUPS upgrade");
 
     // Verify ownership
-    const owner = await bridge.owner();
+    const owner = await bridge2.owner();
     console.log("Current owner:", owner);
+    console.log("Current deployer:", deployer.address);
     if (owner.toLowerCase() !== deployer.address.toLowerCase()) {
       throw new Error(
         "Deployer is not the owner - cannot perform legacy upgrade"
       );
     }
+    const BridgeOld = await ethers.getContractFactory("Bridge", deployer);
+    await upgrades.forceImport(bridgeProxyAddress, BridgeOld, { kind: "uups" });
 
-    // await upgrades.forceImport(bridgeProxyAddress, BridgeNew, {
-    //   kind: "uups",
-    //   unsafeAllow: ["delegatecall", "struct-definition"],
-    // });
-    // Perform standard UUPS upgrade
+    // 2️⃣ Get the upgraded factory
+    const BridgeUpgrade2 = await ethers.getContractFactory("BridgeUpgrade", deployer);
+
+    // 3️⃣ Upgrade the proxy (OpenZeppelin will deploy new implementation internally)
     const upgraded = await upgrades.upgradeProxy(
       bridgeProxyAddress,
-      BridgeNew,
-      {
-        kind: "uups",
-        unsafeAllow: ["delegatecall", "struct-definition"],
-      }
+      BridgeUpgrade2,
+      { kind: "uups" }
     );
-    //console.log(await bridge.getTestString());
-    console.log(
-      "Legacy upgrade successful. Proxy now points to:",
-      newImplAddress
-    );
+
+    // 4️⃣ Required in ethers v6
+    await upgraded.waitForDeployment();
+
+    // 5️⃣ Reattach new ABI
+    const bridge = await ethers.getContractAt("BridgeUpgrade", bridgeProxyAddress);
+
+    // ✅ Check version
+    console.log(await bridge.getTestString());
+
+    // 6️⃣ Check implementation slot
+    const bridgeImplAddress = await upgrades.erc1967.getImplementationAddress(bridgeProxyAddress);
+    const code = await ethers.provider.getCode(bridgeImplAddress);
+    console.log(bridgeImplAddress)
+    console.log(code.includes("_authorizeUpgrade") ? "Has authorizeUpgrade" : "No authorizeUpgrade");
+
+
   }
 
-  // Optional: Update deployments.json with new impl
-  deployments.bridgeImplementation = newImplAddress;
   fs.writeFileSync(deploymentsFile, JSON.stringify(deployments, null, 2));
   console.log("deployments.json updated with new implementation address");
 

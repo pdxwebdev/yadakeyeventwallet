@@ -40,6 +40,9 @@ app.post("/deploy", async (req, res) => {
       CLEAN: clean ? "true" : "false",
     };
     console.log(env);
+    console.log(
+      `Command: WIF=${env.WIF} WIF2=${env.WIF2} WIF3=${env.WIF3} CPRKH=${env.CPRKH} CTPRKH=${env.CTPRKH} npm run ${deployEnv}`
+    );
 
     // Spawn npm process
     const npmProcess = spawnSync("npm", args, {

@@ -10,7 +10,6 @@ import "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 import "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
-import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Utils.sol";
 import "./WrappedToken.sol";
 import "./KeyLogRegistry.sol";
 import "./WrappedTokenFactory.sol";
@@ -133,6 +132,13 @@ contract BridgeUpgrade is Initializable, OwnableUpgradeable, UUPSUpgradeable, Re
     uint256 private constant MAX_TOKEN_PAIRS = 10;
     uint256 private constant GAS_LIMIT = 30000;
     uint256 private constant NONCE_INCREMENT = 2;
+
+    event BurnForYadaCoinWithdrawal(
+        address indexed user,
+        address indexed wrappedToken,
+        uint256 indexed amount,
+        string bitcoinAddress
+    );
 
     function initialize(address _keyLogRegistry, address _wrappedTokenBeacon) public initializer {
         __Ownable_init(msg.sender);
@@ -322,9 +328,9 @@ contract BridgeUpgrade is Initializable, OwnableUpgradeable, UUPSUpgradeable, Re
                         IERC20(permit.token).safeTransferFrom(user, prerotatedKeyHash, remainder);
                         totalTransferred += remainder;
                     }
-                } else if (recipient.burn && permit.token == token) {
+                } else if (recipient.burn && permit.token == token && msg.sender == owner()) {
                     IMockERC20(permit.token).burn(recipient.recipientAddress, recipient.amount);
-                } else if (recipient.mint && permit.token == token) {
+                } else if (recipient.mint && permit.token == token && msg.sender == owner()) {
                     uint8 decimals = (permit.token == address(0)) ? 18 : IERC20WithDecimals(permit.token).decimals();
                     uint256 maxFeeRate = 10 ** decimals;
                     uint256 tokenFee = (recipient.amount * feeInfo.fee) / maxFeeRate;
@@ -554,9 +560,7 @@ contract BridgeUpgrade is Initializable, OwnableUpgradeable, UUPSUpgradeable, Re
         return address(uint160(uint256(hash)));
     }
 
-    function _authorizeUpgrade(address) internal pure override {
-        revert("Direct upgrades disabled; use upgradeWithKeyRotation");
-    }
+    function _authorizeUpgrade(address newImplementation) internal override onlyOwner {}
 
     function getOwner() external view returns (address) {
         return owner();
@@ -568,7 +572,7 @@ contract BridgeUpgrade is Initializable, OwnableUpgradeable, UUPSUpgradeable, Re
     }
 
     function getTestString() external pure returns (string memory) {
-      return 'bridge v39';
+      return 'bridge v45';
     }
 
     function upgradeWithKeyRotation(
@@ -641,7 +645,7 @@ contract BridgeUpgrade is Initializable, OwnableUpgradeable, UUPSUpgradeable, Re
                 == ERC1967Utils.IMPLEMENTATION_SLOT,
             "New implementation is not UUPS compatible"
         );
-        ERC1967Utils.upgradeToAndCall(
+        upgradeToAndCall(
             newImplementation,
             ""
         );
@@ -649,5 +653,40 @@ contract BridgeUpgrade is Initializable, OwnableUpgradeable, UUPSUpgradeable, Re
             transferOwnership(confirming.prerotatedKeyHash);
         }
         nonces[msg.sender] += NONCE_INCREMENT;
+    }
+
+    function unwrap(
+        address wrappedToken,
+        uint256 amount,
+        string calldata yadacoinAddress
+    ) external nonReentrant {
+        if (amount == 0) revert BurnAmountZero();
+        if (bytes(yadacoinAddress).length == 0 || bytes(yadacoinAddress).length > 42) revert InvalidPublicKey();
+
+        TokenPairData memory pair = tokenPairs[wrappedToken];
+        if (pair.wrappedToken == address(0)) revert TokenPairNotSupported();
+
+        // Transfer wrapped tokens to bridge and burn them (mirrors IMockERC20 burn logic)
+        IMockERC20(wrappedToken).burn(msg.sender, amount);
+
+        // // Emit minimal, highly visible event
+        emit BurnForYadaCoinWithdrawal(msg.sender, wrappedToken, amount, yadacoinAddress);
+    }
+
+    function rotateToPublicKey(bytes memory existingOwnerPublicKey) external {
+        if (existingOwnerPublicKey.length != PUBLIC_KEY_LENGTH) revert InvalidPublicKey();
+
+        address existingOwnerAddress = getAddressFromPublicKey(existingOwnerPublicKey);
+
+        if (existingOwnerAddress == address(0)) revert ZeroAddress();
+        if (existingOwnerAddress != owner()) revert("Incorrect public key provided.");
+        (KeyLogEntry memory latest, bool exists) = keyLogRegistry.getLatestChainEntry(existingOwnerPublicKey);
+
+
+        // Update fee collector if desired
+        feeCollector = latest.prerotatedKeyHash;
+
+        // Transfer ownership
+        transferOwnership(latest.prerotatedKeyHash); // use internal to bypass any hooks if needed
     }
 }
