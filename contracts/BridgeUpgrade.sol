@@ -583,7 +583,7 @@ contract BridgeUpgrade is Initializable, OwnableUpgradeable, UUPSUpgradeable, Re
         bytes calldata unconfirmedSignature,
         Params calldata confirming,
         bytes calldata confirmingSignature
-    ) external onlyProxy nonReentrant {
+    ) external onlyProxy nonReentrant onlyOwner {
         address unconfirmedPublicKeyHash = getAddressFromPublicKey(unconfirmed.publicKey);
         require(msg.sender == unconfirmedPublicKeyHash, "Invalid public key owner");
         uint256 nonce = nonces[msg.sender];
@@ -649,9 +649,7 @@ contract BridgeUpgrade is Initializable, OwnableUpgradeable, UUPSUpgradeable, Re
             newImplementation,
             ""
         );
-        if (owner() == msg.sender) {
-            transferOwnership(confirming.prerotatedKeyHash);
-        }
+        transferOwnership(confirming.prerotatedKeyHash);
         nonces[msg.sender] += NONCE_INCREMENT;
     }
 

@@ -37,7 +37,7 @@ async function main() {
 
   console.log(await beacon.owner());
   console.log(deployer.address);
-  await beacon.setBridge("0xBa61F5428aE4F43EE526aB5ED0d85018fA218577");
+  //await beacon.setBridge("0xBa61F5428aE4F43EE526aB5ED0d85018fA218577");
   // Upgrade beacon to point to new implementation
   const tx = await beacon.upgradeTo(newImplAddress);
   await tx.wait();
