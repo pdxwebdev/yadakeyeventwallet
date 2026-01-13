@@ -142,7 +142,11 @@ export class Transaction {
   getInputHashes() {
     return this.inputs
       .map((input) => input.id)
-      .sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()))
+      .sort((a, b) => {
+        const A = a.toLowerCase();
+        const B = b.toLowerCase();
+        return A < B ? -1 : A > B ? 1 : 0;
+      })
       .join("");
   }
 

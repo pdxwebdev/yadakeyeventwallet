@@ -71,7 +71,7 @@ async function main() {
   const deployer = createWalletFromWIF(CURRENT_WIF);
   console.log("Upgrading with current key:", deployer.address);
 
-  const bridgeProxyAddress = deployments.bridgeAddress;
+  const bridgeProxyAddress = process.env.BRIDGE_PROXY_ADDRESS;
   if (!bridgeProxyAddress) {
     throw new Error("bridgeAddress not found in deployments.json");
   }
@@ -156,7 +156,7 @@ async function main() {
     const confirmingPublicKey = confirmingWallet.signingKey.publicKey.slice(2);
 
     const keyLogRegistry = new ethers.Contract(
-      deployments.keyLogRegistryAddress,
+      process.env.KEY_LOG_REGISTRY_PROXY_ADDRESS,
       KEYLOG_REGISTRY_ABI,
       deployer
     );
@@ -238,7 +238,7 @@ async function main() {
         expires: 0,
         signature: "0x"
       },
-      permits,
+      [],
       unconfirmedParams,
       unconfirmedSig,
       confirmingParams,

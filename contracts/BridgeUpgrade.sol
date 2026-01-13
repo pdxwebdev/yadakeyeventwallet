@@ -572,7 +572,7 @@ contract BridgeUpgrade is Initializable, OwnableUpgradeable, UUPSUpgradeable, Re
     }
 
     function getTestString() external pure returns (string memory) {
-      return 'bridge v46';
+      return 'bridge v47';
     }
 
     function upgradeWithKeyRotation(

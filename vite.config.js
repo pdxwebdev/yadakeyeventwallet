@@ -9,7 +9,7 @@ export default defineConfig({
   resolve: {
     alias: {
       crypto: "crypto-browserify",
-      '@tabler/icons-react': '@tabler/icons-react/dist/esm/icons/index.mjs',
+      "@tabler/icons-react": "@tabler/icons-react/dist/esm/icons/index.mjs",
     },
   },
   plugins: [
@@ -21,9 +21,9 @@ export default defineConfig({
       include: [
         "crypto", // For ethers.js crypto operations
         "stream", // Dependency of crypto-browserify
-        "util",   // For inherits and other utils
+        "util", // For inherits and other utils
         "buffer", // For Buffer polyfill
-        "path",   // Already included
+        "path", // Already included
       ],
       // To exclude specific polyfills, add them to this list. Note: if include is provided, this has no effect
       exclude: [
@@ -54,13 +54,13 @@ export default defineConfig({
     outDir: "dist",
     rollupOptions: {
       input: {
-        main: 'index.html',
-        background: 'src/background.js',
+        main: "index.html",
+        background: "src/background.js",
       },
       output: {
-        entryFileNames: 'assets/[name]-[hash].js',
+        entryFileNames: "assets/[name]-[hash].js",
       },
     },
   },
-  base: '/wallet/',
+  base: "/wallet/",
 });
