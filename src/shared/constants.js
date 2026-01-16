@@ -164,7 +164,7 @@ export const PANCAKESWAP_V2_FACTORY =
 export const INIT_CODE_HASH =
   "0x00fb7f630766e6a3661694c255c275e23d2c7f538d16a7f3b0a0d4d5f0b8d8d8"; // BSC mainnet
 
-export const LP_ADDRESS = "0x928ec79c6DED91DEEB32D17e08a6D1337fe42229";
+export const LP_ADDRESS = "0x2E85E2f5842f51c6C2115525Eb752ECe8912DF52";
 
 export const PANCAKE_ROUTER_ABI = [
   // === Swap Functions ===
