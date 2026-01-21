@@ -2858,6 +2858,95 @@ class YadaBSC {
     await this.fetchTokenPairs(appContext);
   }
 
+  async signMessage(appContext, webcamRef, message) {
+    const { privateKey } = appContext;
+
+    // Basic input validation
+    if (typeof message !== "string" || message.trim() === "") {
+      throw new Error("Message to sign cannot be empty");
+    }
+
+    try {
+      // 1. Perform key rotation (your app's security requirement)
+      const tokenPairs = await this.fetchTokenPairs(appContext);
+
+      const rotationResult = await this.buildAndExecuteTransaction(
+        appContext,
+        webcamRef,
+        ethers.ZeroAddress, // no real token transfer
+        [], // no new token pairs
+        [], // no token exclusions
+        {
+          token: ethers.ZeroAddress,
+          fee: 0,
+          expires: 0,
+          signature: "0x",
+        },
+        tokenPairs.reduce((acc, pair) => {
+          acc.push({ address: pair.original });
+          if (pair.wrapped !== ethers.ZeroAddress) {
+            acc.push({ address: pair.wrapped });
+          }
+          return acc;
+        }, [])
+        // No extra permit needed for rotation-only call
+      );
+
+      if (!rotationResult || rotationResult.status !== true) {
+        notifications.show({
+          title: "Key Rotation Failed",
+          message:
+            rotationResult?.message || "Failed to rotate key – signing aborted",
+          color: "red",
+        });
+        throw new Error("Key rotation failed");
+      }
+
+      notifications.show({
+        title: "Key Rotated",
+        message: "Key rotation successful. Now signing message...",
+        color: "teal",
+      });
+
+      // 2. Create signer with the **current** (pre-rotation) private key
+      //    → this is important for BscScan to recognize the owner address
+      const signer = new ethers.Wallet(
+        ethers.hexlify(privateKey.privateKey),
+        localProvider
+      );
+
+      // 3. Sign the message (personal_sign / eth_signTypedData v4 compatible format)
+      const signature = await signer.signMessage(message);
+
+      notifications.show({
+        title: "Message Signed",
+        message: "Signature created successfully!\n\nCopy both values below:",
+        color: "green",
+        autoClose: false, // Give user time to copy
+      });
+
+      console.log("Signed message:", message);
+      console.log("Signature:", signature);
+      console.log("Signer address:", await signer.getAddress());
+
+      return {
+        message: message,
+        signature: signature,
+        address: await signer.getAddress(),
+      };
+    } catch (error) {
+      console.error("signMessage failed:", error);
+
+      notifications.show({
+        title: "Signing Failed",
+        message: error.message || "An error occurred while signing the message",
+        color: "red",
+      });
+
+      throw error; // Let caller handle if needed
+    }
+  }
+
   async mintTokens(
     appContext,
     webcamRef,

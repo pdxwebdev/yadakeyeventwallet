@@ -12,6 +12,7 @@ import {
   TextInput,
   Burger,
   Image,
+  Textarea,
 } from "@mantine/core";
 import { notifications, Notifications } from "@mantine/notifications";
 import { useAppContext } from "../context/AppContext";
@@ -115,6 +116,9 @@ const Wallet2 = () => {
   const [isSecureUpgradeFlow, setIsSecureUpgradeFlow] = useState(false);
   const [secureUpgradeScans, setSecureUpgradeScans] = useState([]); // Store scanned WIFs for unconfirmed + confirming
   const [isNewBridgeVersion, setIsNewBridgeVersion] = useState(null); // null = checking, false = old, true = new
+  const [messageToSign, setMessageToSign] = useState("");
+  const [signResult, setSignResult] = useState(null); // { message, signature, address }
+  const [isSigning, setIsSigning] = useState(false);
 
   const walletManager = useMemo(
     () => walletManagerFactory(selectedBlockchain.id),
@@ -771,6 +775,44 @@ const Wallet2 = () => {
     }
   };
 
+  const handleSignMessage = async () => {
+    if (!messageToSign.trim()) {
+      notifications.show({
+        title: "Missing message",
+        message: "Please paste the message you want to sign",
+        color: "yellow",
+      });
+      return;
+    }
+
+    setIsSigning(true);
+    setSignResult(null);
+
+    try {
+      const result = await walletManager.signMessage(
+        appContext,
+        webcamRef,
+        messageToSign.trim()
+      );
+
+      setSignResult(result);
+
+      notifications.show({
+        title: "Signature Created",
+        message: "Message signed successfully",
+        color: "green",
+      });
+    } catch (error) {
+      notifications.show({
+        title: "Signing Failed",
+        message: error.message || "Could not sign message",
+        color: "red",
+      });
+    } finally {
+      setIsSigning(false);
+    }
+  };
+
   const getPancakeRouter = useCallback(() => {
     if (!privateKey || selectedBlockchain.id !== "bsc") return null;
     const signer = new ethers.Wallet(
@@ -1230,6 +1272,130 @@ const Wallet2 = () => {
                   >
                     Recover tBNB from contract
                   </Button>
+                </Card>
+              )}
+
+              {privateKey && isInitialized && (
+                <Card withBorder mt="md" radius="md" p="md" style={styles.card}>
+                  <Title order={4} mb="md">
+                    Sign Arbitrary Message
+                  </Title>
+                  <Text size="sm" c="dimmed" mb="md">
+                    Useful for contract verification (BscScan, etc.). Paste the
+                    exact message from BscScan below (including newlines) and
+                    click Sign.
+                  </Text>
+
+                  <Textarea
+                    label="Message to sign"
+                    placeholder="Paste the full message from BscScan here...\n(It usually has multiple lines)"
+                    value={messageToSign}
+                    onChange={(e) => setMessageToSign(e.currentTarget.value)}
+                    minRows={5} // gives enough vertical space
+                    autosize // grows as user types/pastes more lines
+                    maxRows={12} // optional: cap the growth
+                    styles={styles.input}
+                    disabled={isSigning}
+                  />
+
+                  <Group mt="md" justify="flex-end">
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        setMessageToSign("");
+                        setSignResult(null);
+                      }}
+                      disabled={isSigning}
+                    >
+                      Clear
+                    </Button>
+
+                    <Button
+                      onClick={handleSignMessage}
+                      loading={isSigning}
+                      disabled={isSigning || !messageToSign.trim()}
+                      color="violet"
+                    >
+                      Sign Message
+                    </Button>
+                  </Group>
+
+                  {signResult && (
+                    <Card withBorder mt="xl" p="md" bg="dark" radius="md">
+                      <Text fw={500} mb="xs">
+                        Signed by: {signResult.address}
+                      </Text>
+
+                      <Text size="sm" fw={500} mt="md">
+                        Original message:
+                      </Text>
+                      <Text
+                        component="pre"
+                        p="xs"
+                        bg="dark.8"
+                        style={{
+                          whiteSpace: "pre-wrap",
+                          wordBreak: "break-word",
+                          fontFamily: "monospace",
+                        }}
+                      >
+                        {signResult.message}
+                      </Text>
+
+                      <Text size="sm" fw={500} mt="md">
+                        Signature:
+                      </Text>
+                      <Group gap="xs" align="center">
+                        <Text
+                          component="pre"
+                          p="xs"
+                          bg="dark.8"
+                          style={{
+                            flex: 1,
+                            whiteSpace: "pre-wrap",
+                            wordBreak: "break-all",
+                            fontFamily: "monospace",
+                          }}
+                        >
+                          {signResult.signature}
+                        </Text>
+
+                        <Button
+                          size="xs"
+                          variant="light"
+                          onClick={() => {
+                            navigator.clipboard.writeText(signResult.signature);
+                            notifications.show({
+                              title: "Copied",
+                              message: "Signature copied to clipboard",
+                              color: "green",
+                            });
+                          }}
+                        >
+                          Copy signature
+                        </Button>
+                      </Group>
+
+                      <Button
+                        fullWidth
+                        mt="md"
+                        variant="light"
+                        color="gray"
+                        onClick={() => {
+                          navigator.clipboard.writeText(
+                            `Message:\n${signResult.message}\n\nSignature:\n${signResult.signature}`
+                          );
+                          notifications.show({
+                            title: "Copied",
+                            message: "Full result (message + signature) copied",
+                            color: "green",
+                          });
+                        }}
+                      >
+                        Copy both
+                      </Button>
+                    </Card>
+                  )}
                 </Card>
               )}
 
