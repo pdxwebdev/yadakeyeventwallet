@@ -13,6 +13,10 @@ import {
   Burger,
   Image,
   Textarea,
+  Modal,
+  ScrollArea,
+  Accordion,
+  ActionIcon,
 } from "@mantine/core";
 import { notifications, Notifications } from "@mantine/notifications";
 import { useAppContext } from "../context/AppContext";
@@ -47,6 +51,8 @@ import { SwapForm } from "../components/Wallet2/SwapForm";
 import { LiquidityForm } from "../components/Wallet2/LiquidityForm";
 import { useDisclosure } from "@mantine/hooks";
 import AmountInput from "../components/Wallet2/AmountInput";
+import { IconBook, IconSearch, IconX } from "@tabler/icons-react";
+import { glossaryTerms } from "../shared/glossary";
 
 const ITEMS_PER_PAGE = 5;
 
@@ -119,6 +125,10 @@ const Wallet2 = () => {
   const [messageToSign, setMessageToSign] = useState("");
   const [signResult, setSignResult] = useState(null); // { message, signature, address }
   const [isSigning, setIsSigning] = useState(false);
+
+  const [glossaryOpen, { open: openGlossary, close: closeGlossary }] =
+    useDisclosure(false);
+  const [searchTerm, setSearchTerm] = useState("");
 
   const walletManager = useMemo(
     () => walletManagerFactory(selectedBlockchain.id),
@@ -874,6 +884,14 @@ const Wallet2 = () => {
           <Text size="lg" weight={500} color="white">
             Whale Wallet
           </Text>
+          <ActionIcon
+            variant="light"
+            size="lg"
+            onClick={openGlossary}
+            title="Open Glossary"
+          >
+            <IconBook size={20} />
+          </ActionIcon>
         </Group>
       </AppShell.Header>
       <AppShell.Navbar p="md">
@@ -1442,6 +1460,75 @@ const Wallet2 = () => {
               />
             </>
           )}
+          <Modal
+            opened={glossaryOpen}
+            onClose={closeGlossary}
+            title={
+              <Group position="apart" style={{ width: "100%" }}>
+                <Text weight={600}>Web3 / DeFi / Wallet Glossary</Text>
+                <ActionIcon onClick={closeGlossary}>
+                  <IconX size={18} />
+                </ActionIcon>
+              </Group>
+            }
+            withCloseButton={false}
+            size="xl"
+            padding="md"
+            scrollAreaComponent={ScrollArea.Autosize}
+          >
+            <TextInput
+              placeholder="Search terms..."
+              value={searchTerm}
+              onChange={(e) =>
+                setSearchTerm(e.currentTarget.value.toLowerCase())
+              }
+              icon={<IconSearch size={16} />}
+              mb="md"
+              styles={(theme) => ({
+                input: { backgroundColor: theme.colors.dark[7] },
+              })}
+            />
+
+            <Accordion
+              variant="separated"
+              multiple
+              styles={{
+                item: { backgroundColor: "transparent", border: "none" },
+                content: { paddingTop: 0 },
+              }}
+            >
+              {glossaryTerms
+                .filter(
+                  (item) =>
+                    !searchTerm ||
+                    item.term.toLowerCase().includes(searchTerm) ||
+                    item.definition.toLowerCase().includes(searchTerm)
+                )
+                .map((item, index) => (
+                  <Accordion.Item key={index} value={item.term}>
+                    <Accordion.Control>
+                      <Text weight={500}>{item.term}</Text>
+                    </Accordion.Control>
+                    <Accordion.Panel>
+                      <Text size="sm" color="dimmed">
+                        {item.definition}
+                      </Text>
+                    </Accordion.Panel>
+                  </Accordion.Item>
+                ))}
+
+              {glossaryTerms.filter(
+                (item) =>
+                  !searchTerm ||
+                  item.term.toLowerCase().includes(searchTerm) ||
+                  item.definition.toLowerCase().includes(searchTerm)
+              ).length === 0 && (
+                <Text color="dimmed" align="center" mt="xl">
+                  No terms found matching "{searchTerm}"
+                </Text>
+              )}
+            </Accordion>
+          </Modal>
         </Container>
       </AppShell.Main>
     </AppShell>
