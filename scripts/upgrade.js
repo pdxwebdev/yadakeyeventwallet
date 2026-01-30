@@ -76,6 +76,11 @@ async function main() {
     throw new Error("bridgeAddress not found in deployments.json");
   }
 
+  const keyLogRegistryProxyAddress = process.env.KEY_LOG_REGISTRY_PROXY_ADDRESS;
+  if (!keyLogRegistryProxyAddress) {
+    throw new Error("bridgeAddress not found in deployments.json");
+  }
+
   // Connect to current Bridge proxy
   let bridge2 = await ethers.getContractAt(
     "Bridge",
@@ -109,7 +114,7 @@ async function main() {
     supportsKeyRotationUpgrade = true;
 
     // Reattach bridge with new ABI for the rest of the script
-    bridge = await ethers.getContractAt(
+    const bridge = await ethers.getContractAt(
       "BridgeUpgrade",
       bridgeProxyAddress,
       deployer
@@ -123,7 +128,7 @@ async function main() {
     supportsKeyRotationUpgrade = false;
   }
 
-  if (true) {
+  if (false) {
     console.log("Using SECURE upgradeWithKeyRotation method");
 
     if (!CONFIRMING_WIF) {
@@ -262,42 +267,80 @@ async function main() {
         "Deployer is not the owner - cannot perform legacy upgrade"
       );
     }
-    const BridgeOld = await ethers.getContractFactory("Bridge", deployer);
-    await upgrades.forceImport(bridgeProxyAddress, BridgeOld, { kind: "uups" });
 
-    // 2️⃣ Get the upgraded factory
-    const BridgeUpgrade2 = await ethers.getContractFactory("BridgeUpgrade", deployer);
+    const registry = await ethers.getContractAt(
+      "KeyLogRegistry",
+      keyLogRegistryProxyAddress,
+      deployer
+    );
 
-    // 3️⃣ Upgrade the proxy (OpenZeppelin will deploy new implementation internally)
-    const upgraded = await upgrades.upgradeProxy(
-      bridgeProxyAddress,
-      BridgeUpgrade2,
+
+    const registryOwner = await registry.owner();
+    console.log("KeyLogRegistry owner:", registryOwner);
+    if (registryOwner.toLowerCase() !== deployer.address.toLowerCase()) {
+      throw new Error("Deployer is not KeyLogRegistry owner");
+    }
+
+
+    const KeyLogRegistryOld =
+        await ethers.getContractFactory("KeyLogRegistry", deployer);
+
+    await upgrades.forceImport(
+      keyLogRegistryProxyAddress,
+      KeyLogRegistryOld,
       { kind: "uups" }
     );
 
-    // 4️⃣ Required in ethers v6
-    await upgraded.waitForDeployment();
+    const KeyLogRegistryUpgrade =
+      await ethers.getContractFactory("KeyLogRegistryUpgrade", deployer);
 
-    // 5️⃣ Reattach new ABI
-    const bridge = await ethers.getContractAt("BridgeUpgrade", bridgeProxyAddress);
+    const upgradedRegistry = await upgrades.upgradeProxy(
+      keyLogRegistryProxyAddress,
+      KeyLogRegistryUpgrade,
+      { kind: "uups" }
+    );
 
-    // ✅ Check version
-    console.log(await bridge.getTestString());
+    await upgradedRegistry.waitForDeployment();
 
-    // 6️⃣ Check implementation slot
-    const bridgeImplAddress = await upgrades.erc1967.getImplementationAddress(bridgeProxyAddress);
-    const code = await ethers.provider.getCode(bridgeImplAddress);
-    console.log(bridgeImplAddress)
-    console.log(code.includes("_authorizeUpgrade") ? "Has authorizeUpgrade" : "No authorizeUpgrade");
+    const keylogregistrycontract = await ethers.getContractAt("BridgeUpgrade", bridgeProxyAddress);
+    console.log(await keylogregistrycontract.getTestString());
 
 
+    const keyLogImplAddress = await upgrades.erc1967.getImplementationAddress(keyLogRegistryProxyAddress);
+    console.log("key log registry imp address: ", keyLogImplAddress)
+    // const BridgeOld = await ethers.getContractFactory("Bridge", deployer);
+    // await upgrades.forceImport(bridgeProxyAddress, BridgeOld, { kind: "uups" });
+
+    // // 2️⃣ Get the upgraded factory
+    // const BridgeUpgrade2 = await ethers.getContractFactory("BridgeUpgrade", deployer);
+
+    // // 3️⃣ Upgrade the proxy (OpenZeppelin will deploy new implementation internally)
+    // const upgraded = await upgrades.upgradeProxy(
+    //   bridgeProxyAddress,
+    //   BridgeUpgrade2,
+    //   { kind: "uups" }
+    // );
+
+    // // 4️⃣ Required in ethers v6
+    // await upgraded.waitForDeployment();
+
+    // // 5️⃣ Reattach new ABI
+    // const bridge = await ethers.getContractAt("BridgeUpgrade", bridgeProxyAddress);
+
+    // // ✅ Check version
+    // console.log(await bridge.getTestString());
+
+    // // 6️⃣ Check implementation slot
+    // const bridgeImplAddress = await upgrades.erc1967.getImplementationAddress(bridgeProxyAddress);
+    // const code = await ethers.provider.getCode(bridgeImplAddress);
+    // console.log(bridgeImplAddress)
+    // console.log(code.includes("_authorizeUpgrade") ? "Has authorizeUpgrade" : "No authorizeUpgrade");
   }
-
   fs.writeFileSync(deploymentsFile, JSON.stringify(deployments, null, 2));
   console.log("deployments.json updated with new implementation address");
 
   console.log("Upgrade complete!");
-    return { status: true };
+  return { status: true };
 }
 
 main()

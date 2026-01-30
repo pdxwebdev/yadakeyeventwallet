@@ -6,28 +6,12 @@ const config = {
     version: "0.8.24",
     defaultNetwork: "hardhat",
     settings: {
-      viaIR: true,
+      viaIR: false,
       optimizer: {
         enabled: true,
         runs: 200,
-        details: {
-          yulDetails: {
-            optimizerSteps: "u", // ← Minimal steps: only unused pruning
-          },
-        },
       },
-      outputSelection: {
-        "*": {
-          "*": ["evm.bytecode"],
-        },
-      },
-      evmVersion: "istanbul", // Use a recent EVM version
-      metadata: {
-        useLiteralContent: true, // Optional: Reduces metadata size
-      },
-      debug: {
-        revertStrings: "strip", // Disable revert strings
-      },
+      evmVersion: "cancun",
     },
   },
   networks: {

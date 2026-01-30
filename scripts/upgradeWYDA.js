@@ -28,7 +28,7 @@ async function main() {
   );
   console.log(await mockErc20.owner());
   console.log(deployer.address);
-  await mockErc20.setBridge("0xBa61F5428aE4F43EE526aB5ED0d85018fA218577");
+  // await mockErc20.setBridge("0xBa61F5428aE4F43EE526aB5ED0d85018fA218577");
   const testString = await mockErc20.getTestString();
   console.log("Test function result:", testString); // Should print "Upgraded MockERC20 v7!"
 

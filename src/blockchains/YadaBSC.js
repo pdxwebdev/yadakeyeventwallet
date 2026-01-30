@@ -1159,26 +1159,28 @@ class YadaBSC {
       const gasPrice = feeData.gasPrice;
       console.log("Calling registerKeyWithTransfer with permits:", permits);
       const gasEstimate = await bridge.registerKeyPairWithTransfer.estimateGas(
-        ethers.ZeroAddress, //token
         {
           token: ethers.ZeroAddress,
-          fee: 0,
-          expires: 0,
-          signature: "0x",
-        }, //fee
-        [], //tokenpairs
-        permits,
-        unconfirmedKeyData,
-        unconfirmedSignature,
-        {
-          amount: 0,
-          publicKey: "0x",
-          prerotatedKeyHash: ethers.ZeroAddress,
-          twicePrerotatedKeyHash: ethers.ZeroAddress,
-          prevPublicKeyHash: ethers.ZeroAddress,
-          outputAddress: ethers.ZeroAddress,
+          fee: {
+            token: ethers.ZeroAddress,
+            fee: 0,
+            expires: 0,
+            signature: "0x",
+          }, //fee
+          newTokenPairs: [],
+          permits,
+          unconfirmed: unconfirmedKeyData,
+          unconfirmedSignature,
+          confirming: {
+            amount: 0,
+            publicKey: "0x",
+            prerotatedKeyHash: ethers.ZeroAddress,
+            twicePrerotatedKeyHash: ethers.ZeroAddress,
+            prevPublicKeyHash: ethers.ZeroAddress,
+            outputAddress: ethers.ZeroAddress,
+          },
+          confirmingSignature: "0x",
         },
-        "0x",
         { value: balance }
       );
       const gasCost = gasEstimate * gasPrice * 2n;
@@ -1197,26 +1199,28 @@ class YadaBSC {
       ).recipients[0].amount -= gasCost;
 
       const tx = await bridge.registerKeyPairWithTransfer(
-        ethers.ZeroAddress, //token
         {
           token: ethers.ZeroAddress,
-          fee: 0,
-          expires: 0,
-          signature: "0x",
-        }, //fee
-        [], //tokenpairs
-        permits,
-        unconfirmedKeyData,
-        unconfirmedSignature,
-        {
-          amount: 0,
-          publicKey: "0x",
-          prerotatedKeyHash: ethers.ZeroAddress,
-          twicePrerotatedKeyHash: ethers.ZeroAddress,
-          prevPublicKeyHash: ethers.ZeroAddress,
-          outputAddress: ethers.ZeroAddress,
+          fee: {
+            token: ethers.ZeroAddress,
+            fee: 0,
+            expires: 0,
+            signature: "0x",
+          }, //fee
+          newTokenPairs: [],
+          permits,
+          unconfirmed: unconfirmedKeyData,
+          unconfirmedSignature,
+          confirming: {
+            amount: 0,
+            publicKey: "0x",
+            prerotatedKeyHash: ethers.ZeroAddress,
+            twicePrerotatedKeyHash: ethers.ZeroAddress,
+            prevPublicKeyHash: ethers.ZeroAddress,
+            outputAddress: ethers.ZeroAddress,
+          },
+          confirmingSignature: "0x",
         },
-        "0x",
         { value: balance - gasCost }
       );
       await tx.wait();
@@ -1578,6 +1582,7 @@ class YadaBSC {
     } catch (error) {
       isNewVersion = false;
     }
+    isNewVersion = false;
 
     // Prepare base payload for /upgrade endpoint
     const upgradeEnv =
@@ -2429,14 +2434,16 @@ class YadaBSC {
 
       const balance = await localProvider.getBalance(signer.address);
       const gasEstimate = await bridge.registerKeyPairWithTransfer.estimateGas(
-        token, //token
-        tokenFee, //fee
-        tokenPairsToAdd,
-        permits,
-        unconfirmedKeyData,
-        unconfirmedSignature,
-        confirmingKeyData,
-        confirmingSignature,
+        {
+          token, //token
+          fee: tokenFee, //fee
+          newTokenPairs: tokenPairsToAdd,
+          permits,
+          unconfirmed: unconfirmedKeyData,
+          unconfirmedSignature,
+          confirming: confirmingKeyData,
+          confirmingSignature,
+        },
         { value: balance }
       );
 
@@ -2449,14 +2456,16 @@ class YadaBSC {
       ).recipients[0].amount -= gasCost;
 
       const tx = await bridge.registerKeyPairWithTransfer(
-        token, //token
-        tokenFee, //fee
-        tokenPairsToAdd,
-        permits,
-        unconfirmedKeyData,
-        unconfirmedSignature,
-        confirmingKeyData,
-        confirmingSignature,
+        {
+          token, //token
+          fee: tokenFee, //fee
+          newTokenPairs: tokenPairsToAdd,
+          permits,
+          unconfirmed: unconfirmedKeyData,
+          unconfirmedSignature,
+          confirming: confirmingKeyData,
+          confirmingSignature,
+        },
         { value: balance - gasCost }
       );
       const receipt = await tx.wait();

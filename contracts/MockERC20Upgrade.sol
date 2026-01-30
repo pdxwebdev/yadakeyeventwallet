@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: YadaCoin Open Source License (YOSL) v1.1
-pragma solidity ^0.8.0;
+pragma solidity 0.8.24;
 
 import "@openzeppelin/contracts-upgradeable/token/ERC20/ERC20Upgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/token/ERC20/extensions/ERC20PermitUpgradeable.sol";
@@ -53,8 +53,8 @@ contract MockERC20Upgrade is Initializable, ERC20Upgradeable, ERC20PermitUpgrade
 
     // New function for testing
     function getTestString() external pure returns (string memory) {
-        return "Upgraded MockERC20 v9!";
+        return "Upgraded MockERC20 v10!";
     }
-    
+
     uint256[50] private __gap;
 }

@@ -39,6 +39,77 @@ interface IERC20Permit2 {
     function DOMAIN_SEPARATOR() external view returns (bytes32);
 }
 
+struct FeeInfo {
+    address token;
+    uint256 fee;
+    uint256 expires;
+    bytes signature;
+}
+
+struct PermitContext {
+    address token;
+    address user;
+    FeeInfo feeInfo;
+    bytes publicKey;
+    address prerotatedKeyHash;
+    PermitData[] permits;
+}
+
+struct Recipient {
+    address recipientAddress;
+    uint256 amount;
+    bool wrap;
+    bool unwrap;
+    bool mint;
+    bool burn;
+}
+
+struct PermitData {
+    address token;
+    uint256 amount;
+    uint256 deadline;
+    uint8 v;
+    bytes32 r;
+    bytes32 s;
+    Recipient[] recipients;
+}
+
+struct Params {
+    uint256 amount;
+    bytes publicKey;
+    address prerotatedKeyHash;
+    address twicePrerotatedKeyHash;
+    address prevPublicKeyHash;
+    address outputAddress;
+}
+
+struct UpgradeContext {
+    address newImplementation;
+    PermitData[] permits;
+    Params unconfirmed;
+    bytes unconfirmedSignature;
+    Params confirming;
+    bytes confirmingSignature;
+}
+
+struct TokenPair {
+    address originalToken;
+    string tokenName;
+    string tokenSymbol;
+    address wrappedToken;
+}
+
+struct RegisterKeyPairContext {
+        address token;
+        FeeInfo fee;
+        TokenPair[] newTokenPairs;
+        PermitData[] permits;
+        Params unconfirmed;
+        bytes unconfirmedSignature;
+        Params confirming;
+        bytes confirmingSignature;
+}
+
 contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, ReentrancyGuardUpgradeable {
     using SafeERC20 for IERC20;
     using ECDSA for bytes32;
@@ -58,48 +129,6 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
     mapping(address => TokenPairData) public tokenPairs;
     mapping(address => uint256) public nonces;
     address[] public supportedOriginalTokens;
-
-    struct PermitData {
-        address token;
-        uint256 amount;
-        uint256 deadline;
-        uint8 v;
-        bytes32 r;
-        bytes32 s;
-        Recipient[] recipients;
-    }
-
-    struct Recipient {
-        address recipientAddress;
-        uint256 amount;
-        bool wrap;
-        bool unwrap;
-        bool mint;
-        bool burn;
-    }
-
-    struct Params {
-        uint256 amount;
-        bytes publicKey;
-        address prerotatedKeyHash;
-        address twicePrerotatedKeyHash;
-        address prevPublicKeyHash;
-        address outputAddress;
-    }
-
-    struct TokenPair {
-        address originalToken;
-        string tokenName;
-        string tokenSymbol;
-        address wrappedToken;
-    }
-
-    struct FeeInfo {
-        address token;
-        uint256 fee;
-        uint256 expires;
-        bytes signature;
-    }
 
     error UpgradeFailed(address contractAddress, string reason);
 
@@ -155,7 +184,7 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
         feeSigner = _signer;
     }
 
-    function _verifyFee(FeeInfo calldata feeInfo) internal view returns (uint256) {
+    function _verifyFee(FeeInfo memory feeInfo) internal view returns (uint256) {
         if (feeInfo.expires < block.timestamp) revert PermitDeadlineExpired();
         uint8 decimals = (feeInfo.token == address(0)) ? 18 : IERC20WithDecimals(feeInfo.token).decimals();
         uint256 maxFeeRate = 10 ** decimals;
@@ -185,24 +214,19 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
     }
 
     function _executePermits(
-        address token,
-        address user,
-        PermitData[] calldata permits,
-        FeeInfo calldata feeInfo,
-        address prerotatedKeyHash,
-        bytes memory currentPublicKey // Add current public key as parameter
+        PermitContext memory ectx
     ) internal {
         bool hasNativeTransfer = false;
         bool requiresOwner = false;  // Flag for direct mint/burn only (IMockERC20 ops)
-        address expectedSigner = getAddressFromPublicKey(currentPublicKey);
+        address expectedSigner = getAddressFromPublicKey(ectx.publicKey);
 
         // Existing native check + owner scan (only for direct mint/burn, not wrap/unwrap)
-        for (uint256 i = 0; i < permits.length; i++) {
-            PermitData memory permit = permits[i];
+        for (uint256 i = 0; i < ectx.permits.length; i++) {
+            PermitData memory permit = ectx.permits[i];
             if (permit.token == address(0)) {
                 hasNativeTransfer = true;
             }
-            if (permit.token == token) {
+            if (permit.token == ectx.token) {
                 for (uint256 j = 0; j < permit.recipients.length; j++) {
                     Recipient memory recipient = permit.recipients[j];
                     if (recipient.mint || recipient.burn) {  // Only direct ops require owner
@@ -216,22 +240,22 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
         if (!hasNativeTransfer) revert MissingPermit();
         if (requiresOwner && msg.sender != owner()) revert InvalidOwnershipTransfer();
 
-        for (uint256 i = 0; i < permits.length; i++) {
-            PermitData memory permit = permits[i];
+        for (uint256 i = 0; i < ectx.permits.length; i++) {
+            PermitData memory permit = ectx.permits[i];
 
             bool transferOnly = true;
             bool isMint = false;
             bool isBurn = false;
-            if (permit.token == token) {
+            if (permit.token == ectx.token) {
                 for (uint256 j = 0; j < permit.recipients.length; j++) {
                     Recipient memory recipient = permit.recipients[j];
                     if (recipient.wrap || recipient.mint || recipient.unwrap || recipient.burn) {
                         transferOnly = false;
 
                         if (
-                            token != address(0) &&
-                            feeInfo.token != tokenPairs[token].originalToken &&
-                            feeInfo.token != tokenPairs[token].wrappedToken
+                            ectx.token != address(0) &&
+                            ectx.feeInfo.token != tokenPairs[ectx.token].originalToken &&
+                            ectx.feeInfo.token != tokenPairs[ectx.token].wrappedToken
                         ) revert InvalidFeeRate();
                     }
                     if (recipient.mint) {
@@ -247,34 +271,19 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
                 if (permit.deadline < block.timestamp) revert PermitDeadlineExpired();
 
                 // Verify permit signature matches the current public key
-                bytes32 permitMessageHash = keccak256(
-                    abi.encodePacked(
-                        "\x19\x01",
-                        IERC20Permit2(permit.token).DOMAIN_SEPARATOR(),
-                        keccak256(
-                            abi.encode(
-                                keccak256("Permit(address owner,address spender,uint256 value,uint256 nonce,uint256 deadline)"),
-                                user,
-                                address(this),
-                                permit.amount,
-                                IERC20Permit2(permit.token).nonces(user),
-                                permit.deadline
-                            )
-                        )
-                    )
-                );
+                bytes32 permitMessageHash = _buildPermitHash(permit, ectx);
 
                 address permitSigner = permitMessageHash.recover(abi.encodePacked(permit.r, permit.s, permit.v));
                 if (permitSigner != expectedSigner) {
                     // If signer doesn't match, ensure all recipients are prerotatedKeyHash
                     for (uint256 j = 0; j < permit.recipients.length; j++) {
-                        if (permit.recipients[j].recipientAddress != prerotatedKeyHash) {
+                        if (permit.recipients[j].recipientAddress != ectx.prerotatedKeyHash) {
                             revert InvalidRecipientForNonMatchingSigner();
                         }
                     }
                 }
                 IERC20Permit2(permit.token).permit(
-                    user,
+                    ectx.user,
                     address(this),
                     permit.amount,
                     permit.deadline,
@@ -286,15 +295,15 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
 
             uint256 feeRate = 0;
             if (!transferOnly) {
-                feeRate = _verifyFee(feeInfo);
+                feeRate = _verifyFee(ectx.feeInfo);
             }
 
             bool isNative = permit.token == address(0);
-            
+
             uint256 totalTransferred = 0;
             for (uint256 j = 0; j < permit.recipients.length; j++) {
                 // here we are burning the entire amount requested of a Yada Wrapped Token (YWT)
-                // then we are sending the original token/coin amount back to the recipient minus a token fee 
+                // then we are sending the original token/coin amount back to the recipient minus a token fee
                 // then finally sending he remainder to the next key rotation
                 // no other recipients are allowed other than this contract, the next key rotation, and the fee collector
                 Recipient memory recipient = permit.recipients[j];
@@ -302,74 +311,19 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
                 if (recipient.amount == 0) continue;
                 if (recipient.amount > permit.amount) revert InvalidRecipientAmount();
 
-                if (recipient.unwrap && permit.token == token) {
-                    // Balance check for unwrap
-                    require(WrappedToken(permit.token).balanceOf(user) >= recipient.amount, "Insufficient wrapped balance for unwrap");
-
-                    IERC20(permit.token).safeTransferFrom(user, address(this), recipient.amount);
-                    WrappedToken(permit.token).burn(address(this), recipient.amount);
-
-                    TokenPairData memory pair = tokenPairs[permit.token];
-                    uint8 decimals = (permit.token == address(0)) ? 18 : IERC20WithDecimals(permit.token).decimals();
-                    uint256 maxFeeRate = 10 ** decimals;
-                    uint256 tokenFee = (recipient.amount * feeInfo.fee) / maxFeeRate;
-                    uint256 netAmount = recipient.amount - tokenFee;
-
-                    if (pair.originalToken == address(0)) {
-                        _transferNative(prerotatedKeyHash, netAmount);
-                        if (tokenFee > 0) _transferNative(feeCollector, tokenFee);
-                    } else {
-                        IERC20(pair.originalToken).safeTransfer(prerotatedKeyHash, netAmount);
-                        if (tokenFee > 0) IERC20(pair.originalToken).safeTransfer(feeCollector, tokenFee);
-                    }
-
-                    uint256 remainder = permit.amount - recipient.amount;
-                    if (remainder > 0) {
-                        IERC20(permit.token).safeTransferFrom(user, prerotatedKeyHash, remainder);
-                        totalTransferred += remainder;
-                    }
-                } else if (recipient.burn && permit.token == token && msg.sender == owner()) {
+                if (recipient.unwrap && permit.token == ectx.token) {
+                    _handleUnwrap(permit, ectx, recipient, totalTransferred);
+                } else if (recipient.burn && permit.token == ectx.token && msg.sender == owner()) {
                     IMockERC20(permit.token).burn(recipient.recipientAddress, recipient.amount);
-                } else if (recipient.mint && permit.token == token && msg.sender == owner()) {
-                    uint8 decimals = (permit.token == address(0)) ? 18 : IERC20WithDecimals(permit.token).decimals();
-                    uint256 maxFeeRate = 10 ** decimals;
-                    uint256 tokenFee = (recipient.amount * feeInfo.fee) / maxFeeRate;
-                    uint256 netAmount = recipient.amount - tokenFee;
-                    IMockERC20(permit.token).mint(recipient.recipientAddress, netAmount);
-                } else if (recipient.wrap && permit.token == token) {
-                    TokenPairData memory pair = tokenPairs[permit.token];
-                    if (!isNative) {
-                        require(IERC20(pair.originalToken).balanceOf(user) >= recipient.amount, "Insufficient original balance for wrap");
-                    } else {
-                        require(msg.value >= recipient.amount, "Insufficient native token sent");
-                    }
-
-                    uint8 decimals = (permit.token == address(0)) ? 18 : IERC20WithDecimals(permit.token).decimals();
-                    uint256 maxFeeRate = 10 ** decimals;
-                    uint256 tokenFee = (recipient.amount * feeInfo.fee) / maxFeeRate;
-                    if (isNative) {
-                        if (tokenFee > 0) _transferNative(feeCollector, tokenFee);
-                    } else {
-                        IERC20(pair.originalToken).safeTransferFrom(user, address(this), recipient.amount - tokenFee);
-                        if (tokenFee > 0) IERC20(pair.originalToken).safeTransferFrom(user, feeCollector, tokenFee);
-                    }
-                    WrappedToken(pair.wrappedToken).mint(prerotatedKeyHash, recipient.amount - tokenFee);
-                    if (recipient.amount < permit.amount) {
-                        uint256 remainder = permit.amount - recipient.amount;
-                        if (remainder > 0) {
-                            if (token == address(0)) {
-                                _transferNative(prerotatedKeyHash, remainder);
-                            } else {
-                                IERC20(permit.token).safeTransferFrom(user, prerotatedKeyHash, remainder);
-                            }
-                            totalTransferred += remainder;
-                        }
-                    }
+                } else if (recipient.mint && permit.token == ectx.token && msg.sender == owner()) {
+                    _handleMint(permit, ectx, recipient);
+                } else if (recipient.wrap && permit.token == ectx.token) {
+                    _handleWrap(permit, ectx, recipient, totalTransferred, isNative);
                 } else if (transferOnly) {
                     if (isNative) {
                         _transferNative(recipient.recipientAddress, recipient.amount);
                     } else {
-                        IERC20(permit.token).safeTransferFrom(user, recipient.recipientAddress, recipient.amount);
+                        IERC20(permit.token).safeTransferFrom(ectx.user, recipient.recipientAddress, recipient.amount);
                     }
                 }
                 totalTransferred += recipient.amount;
@@ -377,16 +331,123 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
             if (transferOnly) {
                 uint256 remainder = permit.amount - totalTransferred;
                 if (remainder > 0) {
-                    if (token == address(0)) {
-                        _transferNative(prerotatedKeyHash, remainder);
+                    if (ectx.token == address(0)) {
+                        _transferNative(ectx.prerotatedKeyHash, remainder);
                     } else {
-                        IERC20(permit.token).safeTransferFrom(user, prerotatedKeyHash, remainder);
+                        IERC20(permit.token).safeTransferFrom(ectx.user, ectx.prerotatedKeyHash, remainder);
                     }
                     totalTransferred += remainder;
                 }
             }
             if (totalTransferred != permit.amount) revert TransferFailed();
         }
+    }
+
+    function _handleMint(
+        PermitData memory permit,
+        PermitContext memory mctx,
+        Recipient memory recipient
+    ) internal {
+        uint8 decimals = (permit.token == address(0)) ? 18 : IERC20WithDecimals(permit.token).decimals();
+        uint256 maxFeeRate = 10 ** decimals;
+        uint256 tokenFee = (recipient.amount * mctx.feeInfo.fee) / maxFeeRate;
+        uint256 netAmount = recipient.amount - tokenFee;
+        IMockERC20(permit.token).mint(recipient.recipientAddress, netAmount);
+    }
+
+    function _handleWrap(
+        PermitData memory permit,
+        PermitContext memory wctx,
+        Recipient memory recipient,
+        uint256 totalTransferred,
+        bool isNative
+    ) internal {
+
+        TokenPairData memory pair = tokenPairs[permit.token];
+        if (!isNative) {
+            require(IERC20(pair.originalToken).balanceOf(wctx.user) >= recipient.amount, "Insufficient original balance for wrap");
+        } else {
+            require(msg.value >= recipient.amount, "Insufficient native token sent");
+        }
+
+        uint8 decimals = (permit.token == address(0)) ? 18 : IERC20WithDecimals(permit.token).decimals();
+        uint256 maxFeeRate = 10 ** decimals;
+        uint256 tokenFee = (recipient.amount * wctx.feeInfo.fee) / maxFeeRate;
+        if (isNative) {
+            if (tokenFee > 0) _transferNative(feeCollector, tokenFee);
+        } else {
+            IERC20(pair.originalToken).safeTransferFrom(wctx.user, address(this), recipient.amount - tokenFee);
+            if (tokenFee > 0) IERC20(pair.originalToken).safeTransferFrom(wctx.user, feeCollector, tokenFee);
+        }
+        WrappedToken(pair.wrappedToken).mint(wctx.prerotatedKeyHash, recipient.amount - tokenFee);
+        if (recipient.amount < permit.amount) {
+            uint256 remainder = permit.amount - recipient.amount;
+            if (remainder > 0) {
+                if (wctx.token == address(0)) {
+                    _transferNative(wctx.prerotatedKeyHash, remainder);
+                } else {
+                    IERC20(permit.token).safeTransferFrom(wctx.user, wctx.prerotatedKeyHash, remainder);
+                }
+                totalTransferred += remainder;
+            }
+        }
+    }
+
+    function _handleUnwrap(
+        PermitData memory permit,
+        PermitContext memory uctx,
+        Recipient memory recipient,
+        uint256 totalTransferred
+    ) internal {
+
+        // Balance check for unwrap
+        require(WrappedToken(permit.token).balanceOf(uctx.user) >= recipient.amount, "Insufficient wrapped balance for unwrap");
+
+        IERC20(permit.token).safeTransferFrom(uctx.user, address(this), recipient.amount);
+        WrappedToken(permit.token).burn(address(this), recipient.amount);
+
+        TokenPairData memory pair = tokenPairs[permit.token];
+        uint8 decimals = (permit.token == address(0)) ? 18 : IERC20WithDecimals(permit.token).decimals();
+        uint256 maxFeeRate = 10 ** decimals;
+        uint256 tokenFee = (recipient.amount * uctx.feeInfo.fee) / maxFeeRate;
+        uint256 netAmount = recipient.amount - tokenFee;
+
+        if (pair.originalToken == address(0)) {
+            _transferNative(uctx.prerotatedKeyHash, netAmount);
+            if (tokenFee > 0) _transferNative(feeCollector, tokenFee);
+        } else {
+            IERC20(pair.originalToken).safeTransfer(uctx.prerotatedKeyHash, netAmount);
+            if (tokenFee > 0) IERC20(pair.originalToken).safeTransfer(feeCollector, tokenFee);
+        }
+
+        uint256 remainder = permit.amount - recipient.amount;
+        if (remainder > 0) {
+            IERC20(permit.token).safeTransferFrom(uctx.user, uctx.prerotatedKeyHash, remainder);
+            totalTransferred += remainder;
+        }
+    }
+
+    function _getPermitNonce(address token, address owner) internal view returns (uint256) {
+        return IERC20Permit2(token).nonces(owner);
+    }
+
+    function _buildPermitHash(PermitData memory permit, PermitContext memory ectx) internal view returns (bytes32) {
+        return keccak256(
+            abi.encodePacked(
+                "\x19\x01",
+                IERC20Permit2(permit.token).DOMAIN_SEPARATOR(),
+                keccak256(
+                    abi.encode(
+                        keccak256("Permit(address owner,address spender,uint256 value,uint256 nonce,uint256 deadline)"),
+                        ectx.user,
+                        address(this),
+                        permit.amount,
+                        _getPermitNonce(permit.token, ectx.user),
+                        permit.deadline
+                    )
+                )
+            )
+        );
     }
 
     function _transferNative(address to, uint256 amount) private {
@@ -407,34 +468,27 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
     }
 
     function registerKeyPairWithTransfer(
-        address token,
-        FeeInfo calldata fee,
-        TokenPair[] calldata newTokenPairs,
-        PermitData[] calldata permits,
-        Params calldata unconfirmed,
-        bytes calldata unconfirmedSignature,
-        Params calldata confirming,
-        bytes calldata confirmingSignature
+        RegisterKeyPairContext memory ctx
     ) external payable nonReentrant {
-        address unconfirmedPublicKey = getAddressFromPublicKey(unconfirmed.publicKey);
+        address unconfirmedPublicKey = getAddressFromPublicKey(ctx.unconfirmed.publicKey);
         if (msg.sender != unconfirmedPublicKey) revert InvalidPublicKey();
         uint256 nonce = nonces[msg.sender];
-        bytes32 unconfirmedHash = keccak256(abi.encode(token, newTokenPairs, unconfirmed, nonce));
-        if (unconfirmed.outputAddress == address(0)) revert ZeroAddress();
-        if (unconfirmed.publicKey.length != PUBLIC_KEY_LENGTH) revert InvalidPublicKey();
-        if (!_verifySignature(unconfirmedHash, unconfirmedSignature, getAddressFromPublicKey(unconfirmed.publicKey))) {
+        bytes32 unconfirmedHash = keccak256(abi.encode(ctx.token, ctx.newTokenPairs, ctx.unconfirmed, nonce));
+        if (ctx.unconfirmed.outputAddress == address(0)) revert ZeroAddress();
+        if (ctx.unconfirmed.publicKey.length != PUBLIC_KEY_LENGTH) revert InvalidPublicKey();
+        if (!_verifySignature(unconfirmedHash, ctx.unconfirmedSignature, getAddressFromPublicKey(ctx.unconfirmed.publicKey))) {
             revert InvalidSignature();
         }
-        if (confirming.outputAddress != address(0)) {
-            bytes32 confirmingHash = keccak256(abi.encode(token, newTokenPairs, confirming, nonce + 1));
-            if (confirming.publicKey.length != PUBLIC_KEY_LENGTH) revert InvalidPublicKey();
-            if (confirming.outputAddress == address(0)) revert ZeroAddress();
-            if (!_verifySignature(confirmingHash, confirmingSignature, getAddressFromPublicKey(confirming.publicKey))) {
+        if (ctx.confirming.outputAddress != address(0)) {
+            bytes32 confirmingHash = keccak256(abi.encode(ctx.token, ctx.newTokenPairs, ctx.confirming, nonce + 1));
+            if (ctx.confirming.publicKey.length != PUBLIC_KEY_LENGTH) revert InvalidPublicKey();
+            if (ctx.confirming.outputAddress == address(0)) revert ZeroAddress();
+            if (!_verifySignature(confirmingHash, ctx.confirmingSignature, getAddressFromPublicKey(ctx.confirming.publicKey))) {
                 revert InvalidSignature();
             }
         }
-        for (uint256 i = 0; i < newTokenPairs.length; i++) {
-            TokenPair memory pair = newTokenPairs[i];
+        for (uint256 i = 0; i < ctx.newTokenPairs.length; i++) {
+            TokenPair memory pair = ctx.newTokenPairs[i];
             if (tokenPairs[pair.originalToken].wrappedToken != address(0)) revert TokenPairExists();
             address wrappedToken = pair.wrappedToken;
             if (wrappedToken == address(0)) {
@@ -453,45 +507,53 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
             tokenPairs[wrappedToken] = TokenPairData(pair.originalToken, wrappedToken);
             supportedOriginalTokens.push(pair.originalToken);
         }
-        bool isPair = confirming.outputAddress != address(0);
-        if (permits.length > 0) {
-            (KeyLogEntry memory latest, bool exists) = keyLogRegistry.getLatestChainEntry(unconfirmed.publicKey);
+        bool isPair = ctx.confirming.outputAddress != address(0);
+        if (ctx.permits.length > 0) {
+            (KeyLogEntry memory latest, bool exists) = keyLogRegistry.getLatestChainEntry(ctx.unconfirmed.publicKey);
             if (!isPair && exists) revert InvalidPermits();
             _executePermits(
-                token,
-                msg.sender,
-                permits,
-                fee,
-                isPair ? confirming.prerotatedKeyHash : unconfirmed.prerotatedKeyHash,
-                unconfirmed.publicKey
+                PermitContext({
+                    token: ctx.token,
+                    user: msg.sender,
+                    feeInfo: ctx.fee,
+                    prerotatedKeyHash: isPair ? ctx.confirming.prerotatedKeyHash : ctx.unconfirmed.prerotatedKeyHash,
+                    publicKey: ctx.unconfirmed.publicKey,
+                    permits: ctx.permits
+                })
             );
         }
         if (isPair) {
             keyLogRegistry.registerKeyLogPair(
-                unconfirmed.publicKey,
-                unconfirmed.prerotatedKeyHash,
-                unconfirmed.twicePrerotatedKeyHash,
-                unconfirmed.prevPublicKeyHash,
-                unconfirmed.outputAddress,
-                confirming.publicKey,
-                confirming.prerotatedKeyHash,
-                confirming.twicePrerotatedKeyHash,
-                confirming.prevPublicKeyHash,
-                confirming.outputAddress
+                KeyData({
+                    publicKey: ctx.unconfirmed.publicKey,
+                    prerotatedKeyHash: ctx.unconfirmed.prerotatedKeyHash,
+                    twicePrerotatedKeyHash: ctx.unconfirmed.twicePrerotatedKeyHash,
+                    prevPublicKeyHash: ctx.unconfirmed.prevPublicKeyHash,
+                    outputAddress: ctx.unconfirmed.outputAddress
+                }),
+                KeyData({
+                    publicKey: ctx.confirming.publicKey,
+                    prerotatedKeyHash: ctx.confirming.prerotatedKeyHash,
+                    twicePrerotatedKeyHash: ctx.confirming.twicePrerotatedKeyHash,
+                    prevPublicKeyHash: ctx.confirming.prevPublicKeyHash,
+                    outputAddress: ctx.confirming.outputAddress
+                })
             );
             if (owner() == msg.sender) {
-                transferOwnership(confirming.prerotatedKeyHash);
+                transferOwnership(ctx.confirming.prerotatedKeyHash);
             }
         } else {
             keyLogRegistry.registerKeyLog(
-                unconfirmed.publicKey,
-                unconfirmed.prerotatedKeyHash,
-                unconfirmed.twicePrerotatedKeyHash,
-                unconfirmed.prevPublicKeyHash,
-                unconfirmed.outputAddress
+                KeyData({
+                    publicKey: ctx.unconfirmed.publicKey,
+                    prerotatedKeyHash: ctx.unconfirmed.prerotatedKeyHash,
+                    twicePrerotatedKeyHash: ctx.unconfirmed.twicePrerotatedKeyHash,
+                    prevPublicKeyHash: ctx.unconfirmed.prevPublicKeyHash,
+                    outputAddress: ctx.unconfirmed.outputAddress
+                })
             );
             if (owner() == msg.sender) {
-                transferOwnership(unconfirmed.prerotatedKeyHash);
+                transferOwnership(ctx.unconfirmed.prerotatedKeyHash);
             }
         }
         nonces[msg.sender] += NONCE_INCREMENT;
@@ -576,81 +638,86 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
     }
 
     function upgradeWithKeyRotation(
-        address newImplementation,
-        FeeInfo calldata noFee,
-        PermitData[] calldata permits,
-        Params calldata unconfirmed,
-        bytes calldata unconfirmedSignature,
-        Params calldata confirming,
-        bytes calldata confirmingSignature
+        UpgradeContext memory ctx
     ) external onlyProxy nonReentrant {
-        address unconfirmedPublicKeyHash = getAddressFromPublicKey(unconfirmed.publicKey);
+        address unconfirmedPublicKeyHash = getAddressFromPublicKey(ctx.unconfirmed.publicKey);
         require(msg.sender == unconfirmedPublicKeyHash, "Invalid public key owner");
         uint256 nonce = nonces[msg.sender];
         uint256[] memory emptyArray = new uint256[](0);
-        bytes32 unconfirmedHash = keccak256(abi.encode(newImplementation, emptyArray, unconfirmed, nonce));
+        bytes32 unconfirmedHash = keccak256(abi.encode(ctx.newImplementation, emptyArray, ctx.unconfirmed, nonce));
 
         require(
             _verifySignature(
                 unconfirmedHash,
-                unconfirmedSignature,
+                ctx.unconfirmedSignature,
                 unconfirmedPublicKeyHash
             ),
             "Invalid unconfirmed upgrade signature"
         );
 
-        bytes32 confirmingHash = keccak256(abi.encode(newImplementation, emptyArray, confirming, nonce + 1));
+        bytes32 confirmingHash = keccak256(abi.encode(ctx.newImplementation, emptyArray, ctx.confirming, nonce + 1));
 
         require(
             _verifySignature(
                 confirmingHash,
-                confirmingSignature,
-                getAddressFromPublicKey(confirming.publicKey)
+                ctx.confirmingSignature,
+                getAddressFromPublicKey(ctx.confirming.publicKey)
             ),
             "Invalid confirming upgrade signature"
         );
 
-        (KeyLogEntry memory latest, bool exists) = keyLogRegistry.getLatestChainEntry(unconfirmed.publicKey);
+        (KeyLogEntry memory latest, bool exists) = keyLogRegistry.getLatestChainEntry(ctx.unconfirmed.publicKey);
         require(exists, "Key log not initialized.");
 
-        if (permits.length > 0) {
+        if (ctx.permits.length > 0) {
             _executePermits(
-                address(0),
-                msg.sender,
-                permits,
-                noFee,
-                confirming.prerotatedKeyHash,
-                unconfirmed.publicKey
+                PermitContext({
+                    token: address(0),
+                    user: msg.sender,
+                    feeInfo: FeeInfo({
+                        token: address(0),
+                        fee: 0,
+                        expires: 0,
+                        signature: ""
+                    }),
+                    prerotatedKeyHash: ctx.confirming.prerotatedKeyHash,
+                    publicKey: ctx.unconfirmed.publicKey,
+                    permits: ctx.permits
+                })
             );
         }
 
         keyLogRegistry.registerKeyLogPair(
-            unconfirmed.publicKey,
-            unconfirmed.prerotatedKeyHash,
-            unconfirmed.twicePrerotatedKeyHash,
-            unconfirmed.prevPublicKeyHash,
-            unconfirmed.outputAddress,
-            confirming.publicKey,
-            confirming.prerotatedKeyHash,
-            confirming.twicePrerotatedKeyHash,
-            confirming.prevPublicKeyHash,
-            confirming.outputAddress
+            KeyData({
+                publicKey: ctx.unconfirmed.publicKey,
+                prerotatedKeyHash: ctx.unconfirmed.prerotatedKeyHash,
+                twicePrerotatedKeyHash: ctx.unconfirmed.twicePrerotatedKeyHash,
+                prevPublicKeyHash: ctx.unconfirmed.prevPublicKeyHash,
+                outputAddress: ctx.unconfirmed.outputAddress
+            }),
+            KeyData({
+                publicKey: ctx.confirming.publicKey,
+                prerotatedKeyHash: ctx.confirming.prerotatedKeyHash,
+                twicePrerotatedKeyHash: ctx.confirming.twicePrerotatedKeyHash,
+                prevPublicKeyHash:ctx.confirming.prevPublicKeyHash,
+                outputAddress: ctx.confirming.outputAddress
+            })
         );
         require(
-            newImplementation.code.length > 0,
+            ctx.newImplementation.code.length > 0,
             "Implementation has no code"
         );
         require(
-            IERC1822Proxiable(newImplementation).proxiableUUID()
+            IERC1822Proxiable(ctx.newImplementation).proxiableUUID()
                 == ERC1967Utils.IMPLEMENTATION_SLOT,
             "New implementation is not UUPS compatible"
         );
         upgradeToAndCall(
-            newImplementation,
+            ctx.newImplementation,
             ""
         );
         if (owner() == msg.sender) {
-            transferOwnership(confirming.prerotatedKeyHash);
+            transferOwnership(ctx.confirming.prerotatedKeyHash);
         }
         nonces[msg.sender] += NONCE_INCREMENT;
     }

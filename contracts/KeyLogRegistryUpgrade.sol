@@ -1,22 +1,31 @@
 // SPDX-License-Identifier: YadaCoin Open Source License (YOSL) v1.1
-pragma solidity ^0.8.0;
+pragma solidity 0.8.24;
 
 import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 
-contract KeyLogRegistryUpgrade is Initializable, OwnableUpgradeable, UUPSUpgradeable {
-    enum KeyEventFlag { INCEPTION, UNCONFIRMED, CONFIRMING }
+struct KeyData {
+    bytes publicKey;
+    address prerotatedKeyHash;
+    address twicePrerotatedKeyHash;
+    address prevPublicKeyHash;
+    address outputAddress;
+}
 
-    struct KeyLogEntry {
-        address twicePrerotatedKeyHash;
-        address prerotatedKeyHash;
-        address publicKeyHash;
-        address prevPublicKeyHash;
-        address outputAddress;
-        bool isOnChain;
-        KeyEventFlag flag;
-    }
+enum KeyEventFlag { INCEPTION, UNCONFIRMED, CONFIRMING }
+
+struct KeyLogEntry {
+    address twicePrerotatedKeyHash;
+    address prerotatedKeyHash;
+    address publicKeyHash;
+    address prevPublicKeyHash;
+    address outputAddress;
+    bool isOnChain;
+    KeyEventFlag flag;
+}
+
+contract KeyLogRegistryUpgrade is Initializable, OwnableUpgradeable, UUPSUpgradeable {
 
     KeyLogEntry[] public keyLogEntries;
 
@@ -53,43 +62,41 @@ contract KeyLogRegistryUpgrade is Initializable, OwnableUpgradeable, UUPSUpgrade
     }
 
     function registerKeyLog(
-        bytes memory publicKey,
-        address prerotatedKeyHash,
-        address twicePrerotatedKeyHash,
-        address prevPublicKeyHash,
-        address outputAddress
+        KeyData memory key
     ) external onlyAuthorized {
-        address publicKeyHash = getAddressFromPublicKey(publicKey);
+        address publicKeyHash = getAddressFromPublicKey(key.publicKey);
         (KeyEventFlag flag, ) = validateTransaction(
-            publicKey,
-            publicKeyHash,
-            prerotatedKeyHash,
-            twicePrerotatedKeyHash,
-            prevPublicKeyHash,
-            outputAddress,
-            "", address(0), address(0), address(0), address(0), address(0), false
+            key,
+            KeyData({
+                publicKey: "",
+                prerotatedKeyHash: address(0),
+                twicePrerotatedKeyHash: address(0),
+                outputAddress: address(0),
+                prevPublicKeyHash: address(0)
+            }),
+            false
         );
 
         keyLogEntries.push(KeyLogEntry({
-            twicePrerotatedKeyHash: twicePrerotatedKeyHash,
-            prerotatedKeyHash: prerotatedKeyHash,
+            twicePrerotatedKeyHash: key.twicePrerotatedKeyHash,
+            prerotatedKeyHash: key.prerotatedKeyHash,
             publicKeyHash: publicKeyHash,
-            prevPublicKeyHash: prevPublicKeyHash,
-            outputAddress: outputAddress,
+            prevPublicKeyHash: key.prevPublicKeyHash,
+            outputAddress: key.outputAddress,
             isOnChain: flag == KeyEventFlag.INCEPTION || flag == KeyEventFlag.CONFIRMING,
             flag: flag
         }));
 
         uint256 newIndex = keyLogEntries.length - 1;
         byPublicKeyHash[publicKeyHash] = newIndex + 1;
-        if (prevPublicKeyHash != address(0)) {
-            byPrevPublicKeyHash[prevPublicKeyHash] = newIndex + 1;
+        if (key.prevPublicKeyHash != address(0)) {
+            byPrevPublicKeyHash[key.prevPublicKeyHash] = newIndex + 1;
         }
-        if (prerotatedKeyHash != address(0)) {
-            byPrerotatedKeyHash[prerotatedKeyHash] = newIndex + 1;
+        if (key.prerotatedKeyHash != address(0)) {
+            byPrerotatedKeyHash[key.prerotatedKeyHash] = newIndex + 1;
         }
-        if (twicePrerotatedKeyHash != address(0)) {
-            byTwicePrerotatedKeyHash[twicePrerotatedKeyHash] = newIndex + 1;
+        if (key.twicePrerotatedKeyHash != address(0)) {
+            byTwicePrerotatedKeyHash[key.twicePrerotatedKeyHash] = newIndex + 1;
         }
 
         emit KeyLogRegistered(publicKeyHash, newIndex);
@@ -98,86 +105,68 @@ contract KeyLogRegistryUpgrade is Initializable, OwnableUpgradeable, UUPSUpgrade
         }
 
         if (owner() == publicKeyHash) {
-            _transferOwnershipForKeyRotation(prerotatedKeyHash);
+            _transferOwnershipForKeyRotation(key.prerotatedKeyHash);
         }
     }
 
     function registerKeyLogPair(
-        bytes calldata unconfirmedPublicKey,
-        address unconfirmedPrerotatedKeyHash,
-        address unconfirmedTwicePrerotatedKeyHash,
-        address unconfirmedPrevPublicKeyHash,
-        address unconfirmedOutputAddress,
-        bytes calldata confirmingPublicKey,
-        address confirmingPrerotatedKeyHash,
-        address confirmingTwicePrerotatedKeyHash,
-        address confirmingPrevPublicKeyHash,
-        address confirmingOutputAddress
+        KeyData memory unconfirmedKey,
+        KeyData memory confirmingKey
     ) external onlyAuthorized {
-        address unconfirmedPublicKeyHash = getAddressFromPublicKey(unconfirmedPublicKey);
-        address confirmingPublicKeyHash = getAddressFromPublicKey(confirmingPublicKey);
+        address unconfirmedPublicKeyHash = getAddressFromPublicKey(unconfirmedKey.publicKey);
+        address confirmingPublicKeyHash = getAddressFromPublicKey(confirmingKey.publicKey);
         (KeyEventFlag unconfirmedFlag, KeyEventFlag confirmingFlag) = validateTransaction(
-            unconfirmedPublicKey,
-            unconfirmedPublicKeyHash,
-            unconfirmedPrerotatedKeyHash,
-            unconfirmedTwicePrerotatedKeyHash,
-            unconfirmedPrevPublicKeyHash,
-            unconfirmedOutputAddress,
-            confirmingPublicKey,
-            confirmingPublicKeyHash,
-            confirmingPrerotatedKeyHash,
-            confirmingTwicePrerotatedKeyHash,
-            confirmingPrevPublicKeyHash,
-            confirmingOutputAddress,
+            unconfirmedKey,
+            confirmingKey,
             true
         );
 
         keyLogEntries.push(KeyLogEntry({
-            twicePrerotatedKeyHash: unconfirmedTwicePrerotatedKeyHash,
-            prerotatedKeyHash: unconfirmedPrerotatedKeyHash,
+            twicePrerotatedKeyHash: unconfirmedKey.twicePrerotatedKeyHash,
+            prerotatedKeyHash: unconfirmedKey.prerotatedKeyHash,
             publicKeyHash: unconfirmedPublicKeyHash,
-            prevPublicKeyHash: unconfirmedPrevPublicKeyHash,
-            outputAddress: unconfirmedOutputAddress,
+            prevPublicKeyHash: unconfirmedKey.prevPublicKeyHash,
+            outputAddress: unconfirmedKey.outputAddress,
             isOnChain: true,
             flag: unconfirmedFlag
         }));
         uint256 unconfirmedIndex = keyLogEntries.length - 1;
 
         byPublicKeyHash[unconfirmedPublicKeyHash] = unconfirmedIndex + 1;
-        if (unconfirmedPrevPublicKeyHash != address(0)) {
-            byPrevPublicKeyHash[unconfirmedPrevPublicKeyHash] = unconfirmedIndex + 1;
+        if (unconfirmedKey.prevPublicKeyHash != address(0)) {
+            byPrevPublicKeyHash[unconfirmedKey.prevPublicKeyHash] = unconfirmedIndex + 1;
         }
-        if (unconfirmedPrerotatedKeyHash != address(0)) {
-            byPrerotatedKeyHash[unconfirmedPrerotatedKeyHash] = unconfirmedIndex + 1;
+        if (unconfirmedKey.prerotatedKeyHash != address(0)) {
+            byPrerotatedKeyHash[unconfirmedKey.prerotatedKeyHash] = unconfirmedIndex + 1;
         }
-        if (unconfirmedTwicePrerotatedKeyHash != address(0)) {
-            byTwicePrerotatedKeyHash[unconfirmedTwicePrerotatedKeyHash] = unconfirmedIndex + 1;
+        if (unconfirmedKey.twicePrerotatedKeyHash != address(0)) {
+            byTwicePrerotatedKeyHash[unconfirmedKey.twicePrerotatedKeyHash] = unconfirmedIndex + 1;
         }
 
         keyLogEntries.push(KeyLogEntry({
-            twicePrerotatedKeyHash: confirmingTwicePrerotatedKeyHash,
-            prerotatedKeyHash: confirmingPrerotatedKeyHash,
+            twicePrerotatedKeyHash: confirmingKey.twicePrerotatedKeyHash,
+            prerotatedKeyHash: confirmingKey.prerotatedKeyHash,
             publicKeyHash: confirmingPublicKeyHash,
-            prevPublicKeyHash: confirmingPrevPublicKeyHash,
-            outputAddress: confirmingOutputAddress,
+            prevPublicKeyHash: confirmingKey.prevPublicKeyHash,
+            outputAddress: confirmingKey.outputAddress,
             isOnChain: true,
             flag: confirmingFlag
         }));
         uint256 confirmingIndex = keyLogEntries.length - 1;
 
         byPublicKeyHash[confirmingPublicKeyHash] = confirmingIndex + 1;
-        if (confirmingPrevPublicKeyHash != address(0)) {
-            byPrevPublicKeyHash[confirmingPrevPublicKeyHash] = confirmingIndex + 1;
+        if (confirmingKey.prevPublicKeyHash != address(0)) {
+            byPrevPublicKeyHash[confirmingKey.prevPublicKeyHash] = confirmingIndex + 1;
         }
-        if (confirmingPrerotatedKeyHash != address(0)) {
-            byPrerotatedKeyHash[confirmingPrerotatedKeyHash] = confirmingIndex + 1;
+        if (confirmingKey.prerotatedKeyHash != address(0)) {
+            byPrerotatedKeyHash[confirmingKey.prerotatedKeyHash] = confirmingIndex + 1;
         }
-        if (confirmingTwicePrerotatedKeyHash != address(0)) {
-            byTwicePrerotatedKeyHash[confirmingTwicePrerotatedKeyHash] = confirmingIndex + 1;
+        if (confirmingKey.twicePrerotatedKeyHash != address(0)) {
+            byTwicePrerotatedKeyHash[confirmingKey.twicePrerotatedKeyHash] = confirmingIndex + 1;
         }
 
         if (owner() == unconfirmedPublicKeyHash) {
-            _transferOwnershipForKeyRotation(confirmingPrerotatedKeyHash);
+            _transferOwnershipForKeyRotation(confirmingKey.prerotatedKeyHash);
         }
 
         emit KeyLogRegistered(unconfirmedPublicKeyHash, unconfirmedIndex);
@@ -186,64 +175,54 @@ contract KeyLogRegistryUpgrade is Initializable, OwnableUpgradeable, UUPSUpgrade
     }
 
     function validateTransaction(
-        bytes memory publicKey,
-        address publicKeyHash,
-        address prerotatedKeyHash,
-        address twicePrerotatedKeyHash,
-        address prevPublicKeyHash,
-        address outputAddress,
-        bytes memory confirmingPublicKey,
-        address confirmingPublicKeyHash,
-        address confirmingPrerotatedKeyHash,
-        address confirmingTwicePrerotatedKeyHash,
-        address confirmingPrevPublicKeyHash,
-        address confirmingOutputAddress,
+        KeyData memory unconfirmed,
+        KeyData memory confirming,
         bool isPair
     ) public view returns (KeyEventFlag, KeyEventFlag) {
-        (KeyLogEntry memory lastEntry, bool hasEntries) = getLatestChainEntry(publicKey);
-        address calculatedPublicKeyhash = getAddressFromPublicKey(publicKey);
+        (KeyLogEntry memory lastEntry, bool hasEntries) = getLatestChainEntry(unconfirmed.publicKey);
+        address unconfirmedPublicKeyHash = getAddressFromPublicKey(unconfirmed.publicKey);
+        address confirmingPublicKeyHash = getAddressFromPublicKey(confirming.publicKey);
 
         if (hasEntries) {
             require(lastEntry.isOnChain, "Previous entry must be on-chain");
-            require(lastEntry.publicKeyHash == prevPublicKeyHash, "Prev public key mismatch");
-            require(lastEntry.prerotatedKeyHash == calculatedPublicKeyhash, "Public key mismatch");
-            require(lastEntry.twicePrerotatedKeyHash == prerotatedKeyHash, "Prerotated key must match previous twice prerotated");
-        } else if (prevPublicKeyHash != address(0)) {
+            require(lastEntry.publicKeyHash == unconfirmed.prevPublicKeyHash, "Prev public key mismatch");
+            require(lastEntry.prerotatedKeyHash == unconfirmedPublicKeyHash, "Public key mismatch");
+            require(lastEntry.twicePrerotatedKeyHash == unconfirmed.prerotatedKeyHash, "Prerotated key must match previous twice prerotated");
+        } else if (unconfirmed.prevPublicKeyHash != address(0)) {
             revert("Inception event cannot have a prev_public_key_hash");
         }
 
-        require(calculatedPublicKeyhash == publicKeyHash, "Public key hash mismatch");
-        require(byPrevPublicKeyHash[prevPublicKeyHash] == 0, "Previous public key hash already used");
-        require(byPublicKeyHash[publicKeyHash] == 0, "Public key hash already used");
-        require(byPrerotatedKeyHash[prerotatedKeyHash] == 0, "Prerotated key hash already used");
-        require(byTwicePrerotatedKeyHash[twicePrerotatedKeyHash] == 0, "Twice prerotated key hash already used");
+        require(byPrevPublicKeyHash[unconfirmed.prevPublicKeyHash] == 0, "Previous public key hash already used");
+        require(byPublicKeyHash[unconfirmedPublicKeyHash] == 0, "Public key hash already used");
+        require(byPrerotatedKeyHash[unconfirmed.prerotatedKeyHash] == 0, "Prerotated key hash already used");
+        require(byTwicePrerotatedKeyHash[unconfirmed.twicePrerotatedKeyHash] == 0, "Twice prerotated key hash already used");
 
         KeyEventFlag firstFlag;
-        if (!hasEntries && prevPublicKeyHash == address(0)) {
-            require(outputAddress == prerotatedKeyHash, "Invalid inception");
+        if (!hasEntries && unconfirmed.prevPublicKeyHash == address(0)) {
+            require(unconfirmed.outputAddress == unconfirmed.prerotatedKeyHash, "Invalid inception");
             firstFlag = KeyEventFlag.INCEPTION;
-        } else if (outputAddress != prerotatedKeyHash) {
+        } else if (unconfirmed.outputAddress != unconfirmed.prerotatedKeyHash) {
             firstFlag = KeyEventFlag.UNCONFIRMED;
         } else {
-            require(outputAddress == prerotatedKeyHash, "Invalid confirming");
+            require(unconfirmed.outputAddress == unconfirmed.prerotatedKeyHash, "Invalid confirming");
             firstFlag = KeyEventFlag.CONFIRMING;
         }
 
         if (!isPair) {
-            require(prerotatedKeyHash == outputAddress, "Confirming twice prerotated key hash already used");
-            require(confirmingOutputAddress == address(0), "Confirming twice prerotated key hash already used");
+            require(unconfirmed.prerotatedKeyHash == unconfirmed.outputAddress, "Confirming twice prerotated key hash already used");
+            require(confirming.outputAddress == address(0), "Confirming twice prerotated key hash already used");
             return (firstFlag, KeyEventFlag.UNCONFIRMED);
         }
 
-        require(getAddressFromPublicKey(confirmingPublicKey) == confirmingPublicKeyHash, "Invalid confirmingPublicKey");
-        require(twicePrerotatedKeyHash == confirmingPrerotatedKeyHash, "Sequence mismatch: twicePrerotatedKeyHash != confirmingPrerotatedKeyHash");
-        require(confirmingOutputAddress == confirmingPrerotatedKeyHash, "Invalid confirming conditions");
-        require(prerotatedKeyHash == confirmingPublicKeyHash, "Sequence mismatch: prerotatedKeyHash != publicKeyHash");
-        require(confirmingPrevPublicKeyHash == publicKeyHash, "Confirming prevPublicKeyHash must match unconfirmed publicKeyHash");
-        require(byPrevPublicKeyHash[confirmingPrevPublicKeyHash] == 0, "Previous public key hash already used");
+        require(getAddressFromPublicKey(confirming.publicKey) == confirmingPublicKeyHash, "Invalid confirmingPublicKey");
+        require(unconfirmed.twicePrerotatedKeyHash == confirming.prerotatedKeyHash, "Sequence mismatch: twicePrerotatedKeyHash != confirmingPrerotatedKeyHash");
+        require(confirming.outputAddress == confirming.prerotatedKeyHash, "Invalid confirming conditions");
+        require(unconfirmed.prerotatedKeyHash == confirmingPublicKeyHash, "Sequence mismatch: prerotatedKeyHash != publicKeyHash");
+        require(confirming.prevPublicKeyHash == unconfirmedPublicKeyHash, "Confirming prevPublicKeyHash must match unconfirmed publicKeyHash");
+        require(byPrevPublicKeyHash[confirming.prevPublicKeyHash] == 0, "Previous public key hash already used");
         require(byPublicKeyHash[confirmingPublicKeyHash] == 0, "Public key hash already used");
-        require(byPrerotatedKeyHash[confirmingPrerotatedKeyHash] == 0, "Confirming prerotated key hash already used");
-        require(byTwicePrerotatedKeyHash[confirmingTwicePrerotatedKeyHash] == 0, "Confirming twice prerotated key hash already used");
+        require(byPrerotatedKeyHash[confirming.prerotatedKeyHash] == 0, "Confirming prerotated key hash already used");
+        require(byTwicePrerotatedKeyHash[confirming.twicePrerotatedKeyHash] == 0, "Confirming twice prerotated key hash already used");
 
         return (KeyEventFlag.UNCONFIRMED, KeyEventFlag.CONFIRMING);
     }
@@ -397,6 +376,6 @@ contract KeyLogRegistryUpgrade is Initializable, OwnableUpgradeable, UUPSUpgrade
 
     // New function for testing
     function getTestString() external pure returns (string memory) {
-        return "Upgraded KeyLogRegistry v5!";
+        return "Upgraded KeyLogRegistry v6!";
     }
 }
