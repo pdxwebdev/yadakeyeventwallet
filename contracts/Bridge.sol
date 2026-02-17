@@ -229,6 +229,7 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
             PermitData memory permit = ectx.permits[i];
             if (permit.token == address(0)) {
                 hasNativeTransfer = true;
+                expectedNativeProvided += permit.amount;
             }
             if (permit.token == ectx.token) {
                 for (uint256 j = 0; j < permit.recipients.length; j++) {
@@ -315,11 +316,6 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
                 if (recipient.amount == 0) continue;
                 if (recipient.amount > permit.amount) revert InvalidRecipientAmount();
 
-                // NEW: accumulate expected native token input for this transfer
-                if (isNative) {
-                    expectedNativeProvided += recipient.amount;
-                }
-
                 if (recipient.unwrap && permit.token == ectx.token) {
                     _handleUnwrap(permit, ectx, recipient, totalTransferred);
                 } else if (recipient.burn && permit.token == ectx.token && msg.sender == owner()) {
@@ -340,10 +336,6 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
             if (transferOnly) {
                 uint256 remainder = permit.amount - totalTransferred;
                 if (remainder > 0) {
-                    // NEW: also accumulate remainder when sending native tokens from contract balance
-                    if (ectx.token == address(0)) {
-                        expectedNativeProvided += remainder;
-                    }
 
                     if (ectx.token == address(0)) {
                         _transferNative(ectx.prerotatedKeyHash, remainder);
@@ -356,7 +348,6 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
             if (totalTransferred != permit.amount) revert TransferFailed();
         }
 
-        // NEW: enforce that caller sent enough native tokens for all native operations
         if (hasNativeTransfer && expectedNativeProvided > 0) {
             if (msg.value < expectedNativeProvided) revert InsufficientNativeProvided();
         }
@@ -385,8 +376,6 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
         TokenPairData memory pair = tokenPairs[permit.token];
         if (!isNative) {
             require(IERC20(pair.originalToken).balanceOf(wctx.user) >= recipient.amount, "Insufficient original balance for wrap");
-        } else {
-            require(msg.value >= recipient.amount, "Insufficient native token sent");
         }
 
         uint8 decimals = (permit.token == address(0)) ? 18 : IERC20WithDecimals(permit.token).decimals();
