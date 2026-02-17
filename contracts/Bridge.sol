@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: YadaCoin Open Source License (YOSL) v1.1
-pragma solidity ^0.8.0;
+pragma solidity 0.8.24;
 
 import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
@@ -100,14 +100,14 @@ struct TokenPair {
 }
 
 struct RegisterKeyPairContext {
-        address token;
-        FeeInfo fee;
-        TokenPair[] newTokenPairs;
-        PermitData[] permits;
-        Params unconfirmed;
-        bytes unconfirmedSignature;
-        Params confirming;
-        bytes confirmingSignature;
+    address token;
+    FeeInfo fee;
+    TokenPair[] newTokenPairs;
+    PermitData[] permits;
+    Params unconfirmed;
+    bytes unconfirmedSignature;
+    Params confirming;
+    bytes confirmingSignature;
 }
 
 contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, ReentrancyGuardUpgradeable {
@@ -156,6 +156,7 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
     error InsufficientBalance();
     error InvalidRecipientForNonMatchingSigner();
     error InvalidPermits();
+    error InsufficientNativeProvided(); // Added for native token protection
 
     uint256 private constant PUBLIC_KEY_LENGTH = 64;
     uint256 private constant MAX_TOKEN_PAIRS = 10;
@@ -218,6 +219,9 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
     ) internal {
         bool hasNativeTransfer = false;
         bool requiresOwner = false;  // Flag for direct mint/burn only (IMockERC20 ops)
+        // NEW: Track how much native token (ETH/BNB) the caller is expected to provide via msg.value
+        uint256 expectedNativeProvided = 0;
+
         address expectedSigner = getAddressFromPublicKey(ectx.publicKey);
 
         // Existing native check + owner scan (only for direct mint/burn, not wrap/unwrap)
@@ -311,6 +315,11 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
                 if (recipient.amount == 0) continue;
                 if (recipient.amount > permit.amount) revert InvalidRecipientAmount();
 
+                // NEW: accumulate expected native token input for this transfer
+                if (isNative) {
+                    expectedNativeProvided += recipient.amount;
+                }
+
                 if (recipient.unwrap && permit.token == ectx.token) {
                     _handleUnwrap(permit, ectx, recipient, totalTransferred);
                 } else if (recipient.burn && permit.token == ectx.token && msg.sender == owner()) {
@@ -331,6 +340,11 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
             if (transferOnly) {
                 uint256 remainder = permit.amount - totalTransferred;
                 if (remainder > 0) {
+                    // NEW: also accumulate remainder when sending native tokens from contract balance
+                    if (ectx.token == address(0)) {
+                        expectedNativeProvided += remainder;
+                    }
+
                     if (ectx.token == address(0)) {
                         _transferNative(ectx.prerotatedKeyHash, remainder);
                     } else {
@@ -340,6 +354,11 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
                 }
             }
             if (totalTransferred != permit.amount) revert TransferFailed();
+        }
+
+        // NEW: enforce that caller sent enough native tokens for all native operations
+        if (hasNativeTransfer && expectedNativeProvided > 0) {
+            if (msg.value < expectedNativeProvided) revert InsufficientNativeProvided();
         }
     }
 
@@ -634,7 +653,7 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
     }
 
     function getTestString() external pure returns (string memory) {
-      return 'bridge v44';
+      return 'bridge v46';
     }
 
     function upgradeWithKeyRotation(

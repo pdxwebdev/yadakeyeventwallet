@@ -181,7 +181,7 @@ contract KeyLogRegistry is Initializable, OwnableUpgradeable, UUPSUpgradeable {
     ) public view returns (KeyEventFlag, KeyEventFlag) {
         (KeyLogEntry memory lastEntry, bool hasEntries) = getLatestChainEntry(unconfirmed.publicKey);
         address unconfirmedPublicKeyHash = getAddressFromPublicKey(unconfirmed.publicKey);
-        address confirmingPublicKeyHash = getAddressFromPublicKey(unconfirmed.publicKey);
+        address confirmingPublicKeyHash = getAddressFromPublicKey(confirming.publicKey);
 
         if (hasEntries) {
             require(lastEntry.isOnChain, "Previous entry must be on-chain");

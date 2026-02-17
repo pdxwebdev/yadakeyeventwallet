@@ -156,6 +156,7 @@ contract BridgeUpgrade is Initializable, OwnableUpgradeable, UUPSUpgradeable, Re
     error InsufficientBalance();
     error InvalidRecipientForNonMatchingSigner();
     error InvalidPermits();
+    error InsufficientNativeProvided(); // Added for native token protection
 
     uint256 private constant PUBLIC_KEY_LENGTH = 64;
     uint256 private constant MAX_TOKEN_PAIRS = 10;
@@ -218,6 +219,9 @@ contract BridgeUpgrade is Initializable, OwnableUpgradeable, UUPSUpgradeable, Re
     ) internal {
         bool hasNativeTransfer = false;
         bool requiresOwner = false;  // Flag for direct mint/burn only (IMockERC20 ops)
+        // NEW: Track how much native token (ETH/BNB) the caller is expected to provide via msg.value
+        uint256 expectedNativeProvided = 0;
+
         address expectedSigner = getAddressFromPublicKey(ectx.publicKey);
 
         // Existing native check + owner scan (only for direct mint/burn, not wrap/unwrap)
@@ -311,6 +315,11 @@ contract BridgeUpgrade is Initializable, OwnableUpgradeable, UUPSUpgradeable, Re
                 if (recipient.amount == 0) continue;
                 if (recipient.amount > permit.amount) revert InvalidRecipientAmount();
 
+                // NEW: accumulate expected native token input for this transfer
+                if (isNative) {
+                    expectedNativeProvided += recipient.amount;
+                }
+
                 if (recipient.unwrap && permit.token == ectx.token) {
                     _handleUnwrap(permit, ectx, recipient, totalTransferred);
                 } else if (recipient.burn && permit.token == ectx.token && msg.sender == owner()) {
@@ -331,6 +340,11 @@ contract BridgeUpgrade is Initializable, OwnableUpgradeable, UUPSUpgradeable, Re
             if (transferOnly) {
                 uint256 remainder = permit.amount - totalTransferred;
                 if (remainder > 0) {
+                    // NEW: also accumulate remainder when sending native tokens from contract balance
+                    if (ectx.token == address(0)) {
+                        expectedNativeProvided += remainder;
+                    }
+
                     if (ectx.token == address(0)) {
                         _transferNative(ectx.prerotatedKeyHash, remainder);
                     } else {
@@ -340,6 +354,11 @@ contract BridgeUpgrade is Initializable, OwnableUpgradeable, UUPSUpgradeable, Re
                 }
             }
             if (totalTransferred != permit.amount) revert TransferFailed();
+        }
+
+        // NEW: enforce that caller sent enough native tokens for all native operations
+        if (hasNativeTransfer && expectedNativeProvided > 0) {
+            if (msg.value < expectedNativeProvided) revert InsufficientNativeProvided();
         }
     }
 
