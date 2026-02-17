@@ -495,11 +495,10 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
                 revert InvalidSignature();
             }
         }
-        for (uint256 i = 0; i < ctx.newTokenPairs.length; i++) {
-            TokenPair memory pair = ctx.newTokenPairs[i];
-            if (tokenPairs[pair.originalToken].wrappedToken != address(0)) revert TokenPairExists();
-            address wrappedToken = pair.wrappedToken;
-            if (wrappedToken == address(0)) {
+        if (owner() == msg.sender) {
+            for (uint256 i = 0; i < ctx.newTokenPairs.length; i++) {
+                TokenPair memory pair = ctx.newTokenPairs[i];
+                if (tokenPairs[pair.originalToken].wrappedToken != address(0)) revert TokenPairExists();\
                 // Use WrappedTokenFactory to deploy a new proxy pointing to the beacon
                 bytes memory initData = abi.encodeWithSelector(
                     WrappedToken.initialize.selector,
@@ -510,10 +509,10 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
                 );
                 WrappedTokenProxy proxy = new WrappedTokenProxy(wrappedTokenBeacon, initData);
                 wrappedToken = address(proxy);
+                tokenPairs[pair.originalToken] = TokenPairData(pair.originalToken, wrappedToken);
+                tokenPairs[wrappedToken] = TokenPairData(pair.originalToken, wrappedToken);
+                supportedOriginalTokens.push(pair.originalToken);
             }
-            tokenPairs[pair.originalToken] = TokenPairData(pair.originalToken, wrappedToken);
-            tokenPairs[wrappedToken] = TokenPairData(pair.originalToken, wrappedToken);
-            supportedOriginalTokens.push(pair.originalToken);
         }
         bool isPair = ctx.confirming.outputAddress != address(0);
         if (ctx.permits.length > 0) {
