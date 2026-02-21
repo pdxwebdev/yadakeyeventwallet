@@ -46,6 +46,13 @@ struct FeeInfo {
     bytes signature;
 }
 
+struct HandlerContext {
+    address user;
+    address prerotatedKeyHash;
+    uint256 feeRate;
+    address token;
+}
+
 struct PermitContext {
     address token;
     address user;
@@ -214,17 +221,63 @@ contract BridgeUpgrade is Initializable, OwnableUpgradeable, UUPSUpgradeable, Re
         return supportedOriginalTokens;
     }
 
+    function _processPermit(
+        PermitData memory permit,
+        PermitContext memory ectx,
+        bool transferOnly,
+        uint256 feeRate,
+        bool isNative
+    ) internal {
+        uint256 totalTransferred = 0;
+        HandlerContext memory hctx = HandlerContext(ectx.user, ectx.prerotatedKeyHash, feeRate, ectx.token);
+
+        for (uint256 j = 0; j < permit.recipients.length; j++) {
+            Recipient memory recipient = permit.recipients[j];
+            if (recipient.recipientAddress == address(0)) revert ZeroAddress();
+            if (recipient.amount == 0) continue;
+            if (recipient.amount > permit.amount) revert InvalidRecipientAmount();
+
+            if (recipient.unwrap && permit.token == ectx.token) {
+                _handleUnwrap(permit, recipient, totalTransferred, hctx);
+            } else if (recipient.burn && permit.token == ectx.token && msg.sender == owner()) {
+                IMockERC20(permit.token).burn(recipient.recipientAddress, recipient.amount);
+            } else if (recipient.mint && permit.token == ectx.token && msg.sender == owner()) {
+                _handleMint(permit, hctx, recipient);
+            } else if (recipient.wrap && permit.token == ectx.token) {
+                _handleWrap(permit, recipient, totalTransferred, isNative, hctx);
+            } else if (transferOnly) {
+                if (isNative) {
+                    _transferNative(recipient.recipientAddress, recipient.amount);
+                } else {
+                    IERC20(permit.token).safeTransferFrom(ectx.user, recipient.recipientAddress, recipient.amount);
+                }
+            }
+            totalTransferred += recipient.amount;
+        }
+
+        if (transferOnly) {
+            uint256 remainder = permit.amount - totalTransferred;
+            if (remainder > 0) {
+                if (ectx.token == address(0)) {
+                    _transferNative(ectx.prerotatedKeyHash, remainder);
+                } else {
+                    IERC20(permit.token).safeTransferFrom(ectx.user, ectx.prerotatedKeyHash, remainder);
+                }
+                totalTransferred += remainder;
+            }
+        }
+        if (totalTransferred != permit.amount) revert TransferFailed();
+    }
+
     function _executePermits(
         PermitContext memory ectx
     ) internal {
         bool hasNativeTransfer = false;
-        bool requiresOwner = false;  // Flag for direct mint/burn only (IMockERC20 ops)
-        // NEW: Track how much native token (ETH/BNB) the caller is expected to provide via msg.value
+        bool requiresOwner = false;
         uint256 expectedNativeProvided = 0;
 
         address expectedSigner = getAddressFromPublicKey(ectx.publicKey);
 
-        // Existing native check + owner scan (only for direct mint/burn, not wrap/unwrap)
         for (uint256 i = 0; i < ectx.permits.length; i++) {
             PermitData memory permit = ectx.permits[i];
             if (permit.token == address(0)) {
@@ -234,7 +287,7 @@ contract BridgeUpgrade is Initializable, OwnableUpgradeable, UUPSUpgradeable, Re
             if (permit.token == ectx.token) {
                 for (uint256 j = 0; j < permit.recipients.length; j++) {
                     Recipient memory recipient = permit.recipients[j];
-                    if (recipient.mint || recipient.burn) {  // Only direct ops require owner
+                    if (recipient.mint || recipient.burn) {
                         requiresOwner = true;
                         break;
                     }
@@ -275,12 +328,10 @@ contract BridgeUpgrade is Initializable, OwnableUpgradeable, UUPSUpgradeable, Re
             if (permit.token != address(0) && !isMint && !isBurn && permit.v != 0) {
                 if (permit.deadline < block.timestamp) revert PermitDeadlineExpired();
 
-                // Verify permit signature matches the current public key
                 bytes32 permitMessageHash = _buildPermitHash(permit, ectx);
 
                 address permitSigner = permitMessageHash.recover(abi.encodePacked(permit.r, permit.s, permit.v));
                 if (permitSigner != expectedSigner) {
-                    // If signer doesn't match, ensure all recipients are prerotatedKeyHash
                     for (uint256 j = 0; j < permit.recipients.length; j++) {
                         if (permit.recipients[j].recipientAddress != ectx.prerotatedKeyHash) {
                             revert InvalidRecipientForNonMatchingSigner();
@@ -304,48 +355,7 @@ contract BridgeUpgrade is Initializable, OwnableUpgradeable, UUPSUpgradeable, Re
             }
 
             bool isNative = permit.token == address(0);
-
-            uint256 totalTransferred = 0;
-            for (uint256 j = 0; j < permit.recipients.length; j++) {
-                // here we are burning the entire amount requested of a Yada Wrapped Token (YWT)
-                // then we are sending the original token/coin amount back to the recipient minus a token fee
-                // then finally sending he remainder to the next key rotation
-                // no other recipients are allowed other than this contract, the next key rotation, and the fee collector
-                Recipient memory recipient = permit.recipients[j];
-                if (recipient.recipientAddress == address(0)) revert ZeroAddress();
-                if (recipient.amount == 0) continue;
-                if (recipient.amount > permit.amount) revert InvalidRecipientAmount();
-
-                if (recipient.unwrap && permit.token == ectx.token) {
-                    _handleUnwrap(permit, ectx, recipient, totalTransferred);
-                } else if (recipient.burn && permit.token == ectx.token && msg.sender == owner()) {
-                    IMockERC20(permit.token).burn(recipient.recipientAddress, recipient.amount);
-                } else if (recipient.mint && permit.token == ectx.token && msg.sender == owner()) {
-                    _handleMint(permit, ectx, recipient);
-                } else if (recipient.wrap && permit.token == ectx.token) {
-                    _handleWrap(permit, ectx, recipient, totalTransferred, isNative);
-                } else if (transferOnly) {
-                    if (isNative) {
-                        _transferNative(recipient.recipientAddress, recipient.amount);
-                    } else {
-                        IERC20(permit.token).safeTransferFrom(ectx.user, recipient.recipientAddress, recipient.amount);
-                    }
-                }
-                totalTransferred += recipient.amount;
-            }
-            if (transferOnly) {
-                uint256 remainder = permit.amount - totalTransferred;
-                if (remainder > 0) {
-
-                    if (ectx.token == address(0)) {
-                        _transferNative(ectx.prerotatedKeyHash, remainder);
-                    } else {
-                        IERC20(permit.token).safeTransferFrom(ectx.user, ectx.prerotatedKeyHash, remainder);
-                    }
-                    totalTransferred += remainder;
-                }
-            }
-            if (totalTransferred != permit.amount) revert TransferFailed();
+            _processPermit(permit, ectx, transferOnly, feeRate, isNative);
         }
 
         if (hasNativeTransfer && expectedNativeProvided > 0) {
@@ -355,46 +365,46 @@ contract BridgeUpgrade is Initializable, OwnableUpgradeable, UUPSUpgradeable, Re
 
     function _handleMint(
         PermitData memory permit,
-        PermitContext memory mctx,
+        HandlerContext memory hctx,
         Recipient memory recipient
     ) internal {
         uint8 decimals = (permit.token == address(0)) ? 18 : IERC20WithDecimals(permit.token).decimals();
         uint256 maxFeeRate = 10 ** decimals;
-        uint256 tokenFee = (recipient.amount * mctx.feeInfo.fee) / maxFeeRate;
+        uint256 tokenFee = (recipient.amount * hctx.feeRate) / maxFeeRate;
         uint256 netAmount = recipient.amount - tokenFee;
         IMockERC20(permit.token).mint(recipient.recipientAddress, netAmount);
     }
 
     function _handleWrap(
         PermitData memory permit,
-        PermitContext memory wctx,
         Recipient memory recipient,
         uint256 totalTransferred,
-        bool isNative
+        bool isNative,
+        HandlerContext memory hctx
     ) internal {
 
         TokenPairData memory pair = tokenPairs[permit.token];
         if (!isNative) {
-            require(IERC20(pair.originalToken).balanceOf(wctx.user) >= recipient.amount, "Insufficient original balance for wrap");
+            require(IERC20(pair.originalToken).balanceOf(hctx.user) >= recipient.amount, "Insufficient original balance for wrap");
         }
 
         uint8 decimals = (permit.token == address(0)) ? 18 : IERC20WithDecimals(permit.token).decimals();
         uint256 maxFeeRate = 10 ** decimals;
-        uint256 tokenFee = (recipient.amount * wctx.feeInfo.fee) / maxFeeRate;
+        uint256 tokenFee = (recipient.amount * hctx.feeRate) / maxFeeRate;
         if (isNative) {
             if (tokenFee > 0) _transferNative(feeCollector, tokenFee);
         } else {
-            IERC20(pair.originalToken).safeTransferFrom(wctx.user, address(this), recipient.amount - tokenFee);
-            if (tokenFee > 0) IERC20(pair.originalToken).safeTransferFrom(wctx.user, feeCollector, tokenFee);
+            IERC20(pair.originalToken).safeTransferFrom(hctx.user, address(this), recipient.amount - tokenFee);
+            if (tokenFee > 0) IERC20(pair.originalToken).safeTransferFrom(hctx.user, feeCollector, tokenFee);
         }
-        WrappedToken(pair.wrappedToken).mint(wctx.prerotatedKeyHash, recipient.amount - tokenFee);
+        WrappedToken(pair.wrappedToken).mint(hctx.prerotatedKeyHash, recipient.amount - tokenFee);
         if (recipient.amount < permit.amount) {
             uint256 remainder = permit.amount - recipient.amount;
             if (remainder > 0) {
-                if (wctx.token == address(0)) {
-                    _transferNative(wctx.prerotatedKeyHash, remainder);
+                if (hctx.token == address(0)) {
+                    _transferNative(hctx.prerotatedKeyHash, remainder);
                 } else {
-                    IERC20(permit.token).safeTransferFrom(wctx.user, wctx.prerotatedKeyHash, remainder);
+                    IERC20(permit.token).safeTransferFrom(hctx.user, hctx.prerotatedKeyHash, remainder);
                 }
                 totalTransferred += remainder;
             }
@@ -403,34 +413,34 @@ contract BridgeUpgrade is Initializable, OwnableUpgradeable, UUPSUpgradeable, Re
 
     function _handleUnwrap(
         PermitData memory permit,
-        PermitContext memory uctx,
         Recipient memory recipient,
-        uint256 totalTransferred
+        uint256 totalTransferred,
+        HandlerContext memory hctx
     ) internal {
 
         // Balance check for unwrap
-        require(WrappedToken(permit.token).balanceOf(uctx.user) >= recipient.amount, "Insufficient wrapped balance for unwrap");
+        require(WrappedToken(permit.token).balanceOf(hctx.user) >= recipient.amount, "Insufficient wrapped balance for unwrap");
 
-        IERC20(permit.token).safeTransferFrom(uctx.user, address(this), recipient.amount);
+        IERC20(permit.token).safeTransferFrom(hctx.user, address(this), recipient.amount);
         WrappedToken(permit.token).burn(address(this), recipient.amount);
 
         TokenPairData memory pair = tokenPairs[permit.token];
         uint8 decimals = (permit.token == address(0)) ? 18 : IERC20WithDecimals(permit.token).decimals();
         uint256 maxFeeRate = 10 ** decimals;
-        uint256 tokenFee = (recipient.amount * uctx.feeInfo.fee) / maxFeeRate;
+        uint256 tokenFee = (recipient.amount * hctx.feeRate) / maxFeeRate;
         uint256 netAmount = recipient.amount - tokenFee;
 
         if (pair.originalToken == address(0)) {
-            _transferNative(uctx.prerotatedKeyHash, netAmount);
+            _transferNative(hctx.prerotatedKeyHash, netAmount);
             if (tokenFee > 0) _transferNative(feeCollector, tokenFee);
         } else {
-            IERC20(pair.originalToken).safeTransfer(uctx.prerotatedKeyHash, netAmount);
+            IERC20(pair.originalToken).safeTransfer(hctx.prerotatedKeyHash, netAmount);
             if (tokenFee > 0) IERC20(pair.originalToken).safeTransfer(feeCollector, tokenFee);
         }
 
         uint256 remainder = permit.amount - recipient.amount;
         if (remainder > 0) {
-            IERC20(permit.token).safeTransferFrom(uctx.user, uctx.prerotatedKeyHash, remainder);
+            IERC20(permit.token).safeTransferFrom(hctx.user, hctx.prerotatedKeyHash, remainder);
             totalTransferred += remainder;
         }
     }
