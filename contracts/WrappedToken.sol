@@ -13,17 +13,20 @@ interface IBridge2 {
 
 contract WrappedToken is Initializable, ERC20Upgradeable, ERC20PermitUpgradeable, UUPSUpgradeable, OwnableUpgradeable {
     address public bridge;
+    address public keyLogRegistry;
 
     function initialize(
         string memory name,
         string memory symbol,
-        address _bridge
+        address _bridge,
+        address _keyLogRegistry
     ) public initializer {
         __ERC20_init(name, symbol);
         __ERC20Permit_init(name);
         __Ownable_init(_bridge);
         __UUPSUpgradeable_init();
         bridge = _bridge;
+        keyLogRegistry = _keyLogRegistry;
     }
 
     function owner() public view override returns (address) {
