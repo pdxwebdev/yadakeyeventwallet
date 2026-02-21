@@ -513,6 +513,7 @@ contract BridgeUpgrade is Initializable, OwnableUpgradeable, UUPSUpgradeable, Re
             for (uint256 i = 0; i < ctx.newTokenPairs.length; i++) {
                 TokenPair memory pair = ctx.newTokenPairs[i];
                 if (tokenPairs[pair.originalToken].wrappedToken != address(0)) revert TokenPairExists();
+                require(supportedOriginalTokens.length < MAX_TOKEN_PAIRS, "max token pairs reached");
                 // Use WrappedTokenFactory to deploy a new proxy pointing to the beacon
                 bytes memory initData = abi.encodeWithSelector(
                     WrappedToken.initialize.selector,
