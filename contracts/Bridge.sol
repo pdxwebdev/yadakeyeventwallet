@@ -498,7 +498,7 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
         if (owner() == msg.sender) {
             for (uint256 i = 0; i < ctx.newTokenPairs.length; i++) {
                 TokenPair memory pair = ctx.newTokenPairs[i];
-                if (tokenPairs[pair.originalToken].wrappedToken != address(0)) revert TokenPairExists();\
+                if (tokenPairs[pair.originalToken].wrappedToken != address(0)) revert TokenPairExists();
                 // Use WrappedTokenFactory to deploy a new proxy pointing to the beacon
                 bytes memory initData = abi.encodeWithSelector(
                     WrappedToken.initialize.selector,
@@ -508,7 +508,7 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
                     address(keyLogRegistry)
                 );
                 WrappedTokenProxy proxy = new WrappedTokenProxy(wrappedTokenBeacon, initData);
-                wrappedToken = address(proxy);
+                address wrappedToken = address(proxy);
                 tokenPairs[pair.originalToken] = TokenPairData(pair.originalToken, wrappedToken);
                 tokenPairs[wrappedToken] = TokenPairData(pair.originalToken, wrappedToken);
                 supportedOriginalTokens.push(pair.originalToken);
