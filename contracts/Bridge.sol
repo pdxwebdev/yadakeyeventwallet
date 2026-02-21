@@ -391,13 +391,17 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
         uint8 decimals = (permit.token == address(0)) ? 18 : IERC20WithDecimals(permit.token).decimals();
         uint256 maxFeeRate = 10 ** decimals;
         uint256 tokenFee = (recipient.amount * hctx.feeRate) / maxFeeRate;
+        uint256 actualReceived;
         if (isNative) {
+            actualReceived = recipient.amount - tokenFee;
             if (tokenFee > 0) _transferNative(feeCollector, tokenFee);
         } else {
+            uint256 balBefore = IERC20(pair.originalToken).balanceOf(address(this));
             IERC20(pair.originalToken).safeTransferFrom(hctx.user, address(this), recipient.amount - tokenFee);
+            actualReceived = IERC20(pair.originalToken).balanceOf(address(this)) - balBefore;
             if (tokenFee > 0) IERC20(pair.originalToken).safeTransferFrom(hctx.user, feeCollector, tokenFee);
         }
-        WrappedToken(pair.wrappedToken).mint(hctx.prerotatedKeyHash, recipient.amount - tokenFee);
+        WrappedToken(pair.wrappedToken).mint(hctx.prerotatedKeyHash, actualReceived);
         if (recipient.amount < permit.amount) {
             uint256 remainder = permit.amount - recipient.amount;
             if (remainder > 0) {
