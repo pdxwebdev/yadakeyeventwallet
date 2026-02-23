@@ -34,6 +34,9 @@ contract KeyLogRegistryUpgrade is Initializable, OwnableUpgradeable, UUPSUpgrade
     mapping(address => uint256) public byPrerotatedKeyHash;
     mapping(address => uint256) public byTwicePrerotatedKeyHash;
 
+    mapping(address => address) public chainOf;       // any key hash → inception hash
+    mapping(address => address) public latestInChain;  // inception hash → latest key hash
+
     address public authorizedCaller;
 
     event KeyLogRegistered(address indexed publicKeyHash, uint256 index);
@@ -104,6 +107,10 @@ contract KeyLogRegistryUpgrade is Initializable, OwnableUpgradeable, UUPSUpgrade
             emit KeyRotated(publicKeyHash, newIndex);
         }
 
+        // Update chain indexing: inception entry
+        chainOf[publicKeyHash] = publicKeyHash;
+        latestInChain[publicKeyHash] = publicKeyHash;
+
         if (owner() == publicKeyHash) {
             _transferOwnershipForKeyRotation(key.prerotatedKeyHash);
         }
@@ -172,6 +179,12 @@ contract KeyLogRegistryUpgrade is Initializable, OwnableUpgradeable, UUPSUpgrade
         emit KeyLogRegistered(unconfirmedPublicKeyHash, unconfirmedIndex);
         emit KeyLogRegistered(confirmingPublicKeyHash, confirmingIndex);
         emit KeyRotated(confirmingPublicKeyHash, confirmingIndex);
+
+        // Update chain indexing: get inception from previous entry in chain
+        address inceptionHash = chainOf[unconfirmedKey.prevPublicKeyHash];
+        chainOf[unconfirmedPublicKeyHash] = inceptionHash;
+        chainOf[confirmingPublicKeyHash] = inceptionHash;
+        latestInChain[inceptionHash] = confirmingPublicKeyHash;
     }
 
     function validateTransaction(
@@ -232,6 +245,10 @@ contract KeyLogRegistryUpgrade is Initializable, OwnableUpgradeable, UUPSUpgrade
         require(publicKey.length == 64, "Public key must be 64 bytes");
         bytes32 hash = keccak256(publicKey);
         return address(uint160(uint256(hash)));
+    }
+
+    function getInceptionHash(address anyKeyInChain) internal view returns (address) {
+        return chainOf[anyKeyInChain];
     }
 
     function getLatestEntryByPrerotatedKeyHash(address prerotatedKeyHash) public view returns (KeyLogEntry memory, bool) {
@@ -334,21 +351,32 @@ contract KeyLogRegistryUpgrade is Initializable, OwnableUpgradeable, UUPSUpgrade
     }
 
     function getLatestChainEntry(bytes memory publicKey) public view returns (KeyLogEntry memory, bool) {
-        KeyLogEntry[] memory log = buildFromPublicKey(publicKey);
-        if (log.length == 0) {
-            KeyLogEntry memory emptyEntry;
-            return (emptyEntry, false);
-        }
-        return (log[log.length - 1], true);
+        address publicKeyHash = getAddressFromPublicKey(publicKey);
+        return getLatestChainEntry(publicKeyHash);
     }
 
     function getLatestChainEntry(address publicKeyHash) public view returns (KeyLogEntry memory, bool) {
-        KeyLogEntry[] memory log = _buildChainFromHash(publicKeyHash);
-        if (log.length == 0) {
+        // O(1) lookup: get inception hash directly from mapping
+        address inceptionHash = getInceptionHash(publicKeyHash);
+        if (inceptionHash == address(0)) {
             KeyLogEntry memory emptyEntry;
             return (emptyEntry, false);
         }
-        return (log[log.length - 1], true);
+
+        // Get the latest entry in the chain efficiently
+        address latestKeyHash = latestInChain[inceptionHash];
+        if (latestKeyHash == address(0)) {
+            KeyLogEntry memory emptyEntry;
+            return (emptyEntry, false);
+        }
+
+        uint256 idx = byPublicKeyHash[latestKeyHash];
+        if (idx == 0) {
+            KeyLogEntry memory emptyEntry;
+            return (emptyEntry, false);
+        }
+
+        return (keyLogEntries[idx - 1], true);
     }
 
     function getLatestEntry(address publicKeyHash) public view returns (KeyLogEntry memory, bool) {
