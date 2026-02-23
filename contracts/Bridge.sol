@@ -771,11 +771,13 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
         if (existingOwnerAddress != owner()) revert("Incorrect public key provided.");
         (KeyLogEntry memory latest, bool exists) = keyLogRegistry.getLatestChainEntry(existingOwnerPublicKey);
 
+        require(exists, "Key log not initialized");
 
         // Update fee collector if desired
         feeCollector = latest.prerotatedKeyHash;
 
-        // Transfer ownership
-        transferOwnership(latest.prerotatedKeyHash); // use internal to bypass any hooks if needed
+        // Transfer ownership on both contracts atomically to maintain synchronization
+        transferOwnership(latest.prerotatedKeyHash);
+        keyLogRegistry.transferOwnership(latest.prerotatedKeyHash);
     }
 }
