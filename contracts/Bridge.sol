@@ -124,7 +124,6 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
 
     KeyLogRegistry public keyLogRegistry;
     address public relayer;
-    address public feeCollector;
     address public feeSigner;
     address public wrappedTokenBeacon;
 
@@ -140,7 +139,6 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
     error UpgradeFailed(address contractAddress, string reason);
 
     error ZeroAddress();
-    error InvalidFeeCollector();
     error TokenPairExists();
     error TokenPairNotSupported();
     error InvalidSignature();
@@ -183,7 +181,6 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
         __ReentrancyGuard_init();
         if (_keyLogRegistry == address(0)) revert ZeroAddress();
         keyLogRegistry = KeyLogRegistry(_keyLogRegistry);
-        feeCollector = msg.sender;
         wrappedTokenBeacon = _wrappedTokenBeacon;
     }
 
@@ -208,13 +205,7 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
     function transferOwnership(address newOwner) public override onlyOwner {
         if (newOwner == address(0)) revert ZeroAddress();
         if (!keyLogRegistry.isValidOwnershipTransfer(owner(), newOwner)) revert InvalidOwnershipTransfer();
-        feeCollector = newOwner;
         super.transferOwnership(newOwner);
-    }
-
-    function setFeeCollector(address _feeCollector) external onlyOwner {
-        if (_feeCollector == address(0)) revert InvalidFeeCollector();
-        feeCollector = _feeCollector;
     }
 
     function getSupportedTokens() external view returns (address[] memory) {
@@ -394,12 +385,12 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
         uint256 actualReceived;
         if (isNative) {
             actualReceived = recipient.amount - tokenFee;
-            if (tokenFee > 0) _transferNative(feeCollector, tokenFee);
+            if (tokenFee > 0) _transferNative(owner(), tokenFee);
         } else {
             uint256 balBefore = IERC20(pair.originalToken).balanceOf(address(this));
             IERC20(pair.originalToken).safeTransferFrom(hctx.user, address(this), recipient.amount - tokenFee);
             actualReceived = IERC20(pair.originalToken).balanceOf(address(this)) - balBefore;
-            if (tokenFee > 0) IERC20(pair.originalToken).safeTransferFrom(hctx.user, feeCollector, tokenFee);
+            if (tokenFee > 0) IERC20(pair.originalToken).safeTransferFrom(hctx.user, owner(), tokenFee);
         }
         WrappedToken(pair.wrappedToken).mint(hctx.prerotatedKeyHash, actualReceived);
         if (recipient.amount < permit.amount) {
@@ -436,10 +427,10 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
 
         if (pair.originalToken == address(0)) {
             _transferNative(hctx.prerotatedKeyHash, netAmount);
-            if (tokenFee > 0) _transferNative(feeCollector, tokenFee);
+            if (tokenFee > 0) _transferNative(owner(), tokenFee);
         } else {
             IERC20(pair.originalToken).safeTransfer(hctx.prerotatedKeyHash, netAmount);
-            if (tokenFee > 0) IERC20(pair.originalToken).safeTransfer(feeCollector, tokenFee);
+            if (tokenFee > 0) IERC20(pair.originalToken).safeTransfer(owner(), tokenFee);
         }
 
         uint256 remainder = permit.amount - recipient.amount;
@@ -773,10 +764,8 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
 
         require(exists, "Key log not initialized");
 
-        // Update fee collector if desired
-        feeCollector = latest.prerotatedKeyHash;
-
         // Transfer ownership on both contracts atomically to maintain synchronization
+        // Note: Fees will flow to the new owner after ownership transfer.
         transferOwnership(latest.prerotatedKeyHash);
         keyLogRegistry.transferOwnership(latest.prerotatedKeyHash);
     }
