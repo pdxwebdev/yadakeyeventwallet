@@ -329,7 +329,7 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
                         }
                     }
                 }
-                IERC20Permit2(permit.token).permit(
+                try IERC20Permit2(permit.token).permit(
                     ectx.user,
                     address(this),
                     permit.amount,
@@ -337,7 +337,16 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
                     permit.v,
                     permit.r,
                     permit.s
-                );
+                ) {} catch {
+                    if (
+                        IERC20(permit.token).allowance(
+                            ectx.user,
+                            address(this)
+                        ) < permit.amount
+                    ) {
+                        revert InsufficientAllowance();
+                    }
+                }
             }
 
             uint256 feeRate = 0;
