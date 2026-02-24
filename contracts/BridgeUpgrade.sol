@@ -761,7 +761,7 @@ contract BridgeUpgrade is Initializable, OwnableUpgradeable, UUPSUpgradeable, Re
         emit BurnForYadaCoinWithdrawal(msg.sender, wrappedToken, amount, yadacoinAddress);
     }
 
-    function rotateToPublicKey(bytes memory existingOwnerPublicKey) external {
+    function rotateToPublicKey(bytes memory existingOwnerPublicKey) external onlyOwner {
         if (existingOwnerPublicKey.length != PUBLIC_KEY_LENGTH) revert InvalidPublicKey();
 
         address existingOwnerAddress = getAddressFromPublicKey(existingOwnerPublicKey);
