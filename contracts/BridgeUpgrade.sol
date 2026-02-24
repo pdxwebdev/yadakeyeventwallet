@@ -513,13 +513,11 @@ contract BridgeUpgrade is Initializable, OwnableUpgradeable, UUPSUpgradeable, Re
         uint256 nonce = nonces[msg.sender];
         bytes32 unconfirmedHash = keccak256(abi.encode(ctx.token, ctx.newTokenPairs, ctx.unconfirmed, nonce));
         if (ctx.unconfirmed.outputAddress == address(0)) revert ZeroAddress();
-        if (ctx.unconfirmed.publicKey.length != PUBLIC_KEY_LENGTH) revert InvalidPublicKey();
         if (!_verifySignature(unconfirmedHash, ctx.unconfirmedSignature, getAddressFromPublicKey(ctx.unconfirmed.publicKey))) {
             revert InvalidSignature();
         }
         if (ctx.confirming.outputAddress != address(0)) {
             bytes32 confirmingHash = keccak256(abi.encode(ctx.token, ctx.newTokenPairs, ctx.confirming, nonce + 1));
-            if (ctx.confirming.publicKey.length != PUBLIC_KEY_LENGTH) revert InvalidPublicKey();
             if (!_verifySignature(confirmingHash, ctx.confirmingSignature, getAddressFromPublicKey(ctx.confirming.publicKey))) {
                 revert InvalidSignature();
             }
