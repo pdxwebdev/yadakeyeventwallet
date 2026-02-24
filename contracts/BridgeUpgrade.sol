@@ -139,9 +139,11 @@ contract BridgeUpgrade is Initializable, OwnableUpgradeable, UUPSUpgradeable, Re
 
     mapping(address => TokenPairData) public tokenPairs;
     mapping(address => uint256) public nonces;
+    mapping(address => bool) public disabledPairs;
     address[] public supportedOriginalTokens;
 
     error UpgradeFailed(address contractAddress, string reason);
+    error TokenPairDisabled();
 
     error ZeroAddress();
     error TokenPairExists();
@@ -191,6 +193,16 @@ contract BridgeUpgrade is Initializable, OwnableUpgradeable, UUPSUpgradeable, Re
     function setFeeSigner(address _signer) external onlyOwner {
         if (_signer == address(0)) revert ZeroAddress();
         feeSigner = _signer;
+    }
+
+    function disableTokenPair(address token) external onlyOwner {
+        if (tokenPairs[token].wrappedToken == address(0)) revert TokenPairNotSupported();
+        disabledPairs[token] = true;
+    }
+
+    function enableTokenPair(address token) external onlyOwner {
+        if (tokenPairs[token].wrappedToken == address(0)) revert TokenPairNotSupported();
+        disabledPairs[token] = false;
     }
 
     function _verifyFee(FeeInfo memory feeInfo) internal view returns (uint256) {
@@ -387,6 +399,7 @@ contract BridgeUpgrade is Initializable, OwnableUpgradeable, UUPSUpgradeable, Re
         bool isNative,
         HandlerContext memory hctx
     ) internal {
+        if (disabledPairs[permit.token]) revert TokenPairDisabled();
 
         TokenPairData memory pair = tokenPairs[permit.token];
         if (!isNative) {
@@ -426,6 +439,7 @@ contract BridgeUpgrade is Initializable, OwnableUpgradeable, UUPSUpgradeable, Re
         uint256 totalTransferred,
         HandlerContext memory hctx
     ) internal {
+        if (disabledPairs[permit.token]) revert TokenPairDisabled();
 
         // Balance check for unwrap
         require(WrappedToken(permit.token).balanceOf(hctx.user) >= recipient.amount, "Insufficient wrapped balance for unwrap");
