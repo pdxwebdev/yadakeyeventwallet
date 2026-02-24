@@ -393,6 +393,12 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
 
         if (hasNativeTransfer && expectedNativeProvided > 0) {
             if (msg.value < expectedNativeProvided) revert InsufficientNativeProvided();
+            
+            // Refund excess native tokens if msg.value > expectedNativeProvided (L-16 fix)
+            uint256 excess = msg.value - expectedNativeProvided;
+            if (excess > 0) {
+                _transferNative(ectx.user, excess);
+            }
         }
     }
 
