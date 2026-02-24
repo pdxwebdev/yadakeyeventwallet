@@ -274,7 +274,7 @@ contract BridgeUpgrade is Initializable, OwnableUpgradeable, UUPSUpgradeable, Re
                 hasNativeTransfer = true;
                 expectedNativeProvided += permit.amount;
             }
-            if (permit.token == ectx.token) {
+            if (!requiresOwner && permit.token == ectx.token) {
                 for (uint256 j = 0; j < permit.recipients.length; j++) {
                     Recipient memory recipient = permit.recipients[j];
                     if (recipient.mint || recipient.burn) {
@@ -282,7 +282,6 @@ contract BridgeUpgrade is Initializable, OwnableUpgradeable, UUPSUpgradeable, Re
                         break;
                     }
                 }
-                if (requiresOwner) break;
             }
         }
         if (!hasNativeTransfer) revert MissingPermit();
