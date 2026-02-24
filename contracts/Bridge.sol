@@ -262,13 +262,13 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
             if (recipient.amount > permit.amount) revert InvalidRecipientAmount();
 
             if (recipient.unwrap && permit.token == ectx.token) {
-                _handleUnwrap(permit, recipient, totalTransferred, hctx);
+                _handleUnwrap(permit, recipient, hctx);
             } else if (recipient.burn && permit.token == ectx.token && msg.sender == owner()) {
                 IMockERC20(permit.token).burn(recipient.recipientAddress, recipient.amount);
             } else if (recipient.mint && permit.token == ectx.token && msg.sender == owner()) {
                 _handleMint(permit, hctx, recipient);
             } else if (recipient.wrap && permit.token == ectx.token) {
-                _handleWrap(permit, recipient, totalTransferred, isNative, hctx);
+                _handleWrap(permit, recipient, isNative, hctx);
             } else if (transferOnly) {
                 if (isNative) {
                     _transferNative(recipient.recipientAddress, recipient.amount);
@@ -418,7 +418,6 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
     function _handleWrap(
         PermitData memory permit,
         Recipient memory recipient,
-        uint256 totalTransferred,
         bool isNative,
         HandlerContext memory hctx
     ) internal {
@@ -443,23 +442,11 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
             if (tokenFee > 0) IERC20(pair.originalToken).safeTransferFrom(hctx.user, owner(), tokenFee);
         }
         WrappedToken(pair.wrappedToken).mint(hctx.prerotatedKeyHash, actualReceived);
-        if (recipient.amount < permit.amount) {
-            uint256 remainder = permit.amount - recipient.amount;
-            if (remainder > 0) {
-                if (hctx.token == address(0)) {
-                    _transferNative(hctx.prerotatedKeyHash, remainder);
-                } else {
-                    IERC20(permit.token).safeTransferFrom(hctx.user, hctx.prerotatedKeyHash, remainder);
-                }
-                totalTransferred += remainder;
-            }
-        }
     }
 
     function _handleUnwrap(
         PermitData memory permit,
         Recipient memory recipient,
-        uint256 totalTransferred,
         HandlerContext memory hctx
     ) internal {
         if (disabledPairs[permit.token]) revert TokenPairDisabled();
@@ -482,12 +469,6 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
         } else {
             IERC20(pair.originalToken).safeTransfer(hctx.prerotatedKeyHash, netAmount);
             if (tokenFee > 0) IERC20(pair.originalToken).safeTransfer(owner(), tokenFee);
-        }
-
-        uint256 remainder = permit.amount - recipient.amount;
-        if (remainder > 0) {
-            IERC20(permit.token).safeTransferFrom(hctx.user, hctx.prerotatedKeyHash, remainder);
-            totalTransferred += remainder;
         }
     }
 
