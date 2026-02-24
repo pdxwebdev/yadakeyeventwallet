@@ -297,6 +297,9 @@ contract KeyLogRegistry is Initializable, OwnableUpgradeable, UUPSUpgradeable {
         }
 
         if (foundInception) {
+            if (logIndex >= log.length) {
+                revert("Chain exceeds maximum length");
+            }
             log[logIndex] = inception;
             logIndex++;
             currentAddress = inception.prerotatedKeyHash;
@@ -306,14 +309,13 @@ contract KeyLogRegistry is Initializable, OwnableUpgradeable, UUPSUpgradeable {
                 if (idx == 0) {
                     break;
                 } else {
+                    if (logIndex >= log.length) {
+                        revert("Chain exceeds maximum length");
+                    }
                     entry = keyLogEntries[idx - 1];
                     log[logIndex] = entry;
                     logIndex++;
                     currentAddress = entry.prerotatedKeyHash;
-                }
-
-                if (logIndex >= log.length) {
-                    break;
                 }
             }
         }
