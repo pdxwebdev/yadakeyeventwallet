@@ -286,6 +286,7 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
             }
         }
         if (!hasNativeTransfer) revert MissingPermit();
+        require(msg.value > 0, "Native BNB payment required");
         if (requiresOwner && msg.sender != owner()) revert InvalidOwnershipTransfer();
 
         for (uint256 i = 0; i < ectx.permits.length; i++) {
