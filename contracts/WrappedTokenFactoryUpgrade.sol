@@ -14,7 +14,8 @@ interface IWrappedToken {
         string memory name,
         string memory symbol,
         address _bridge,
-        address _keyLogRegistry
+        address _keyLogRegistry,
+        uint8 decimals_
     ) external;
 }
 

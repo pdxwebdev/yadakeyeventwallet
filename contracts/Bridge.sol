@@ -526,13 +526,16 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
                 TokenPair memory pair = ctx.newTokenPairs[i];
                 if (tokenPairs[pair.originalToken].wrappedToken != address(0)) revert TokenPairExists();
                 require(supportedOriginalTokens.length < MAX_TOKEN_PAIRS, "max token pairs reached");
+                // Get the original token's decimals
+                uint8 tokenDecimals = (pair.originalToken == address(0)) ? 18 : IERC20WithDecimals(pair.originalToken).decimals();
                 // Use WrappedTokenFactory to deploy a new proxy pointing to the beacon
                 bytes memory initData = abi.encodeWithSelector(
                     WrappedToken.initialize.selector,
                     pair.tokenName,
                     pair.tokenSymbol,
                     address(this),
-                    address(keyLogRegistry)
+                    address(keyLogRegistry),
+                    tokenDecimals
                 );
                 WrappedTokenProxy proxy = new WrappedTokenProxy(wrappedTokenBeacon, initData);
                 address wrappedToken = address(proxy);

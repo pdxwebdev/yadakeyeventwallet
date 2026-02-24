@@ -14,6 +14,7 @@ interface IBridge2 {
 contract WrappedTokenUpgrade is Initializable, ERC20Upgradeable, ERC20PermitUpgradeable, UUPSUpgradeable, OwnableUpgradeable {
     address public bridge;
     address public keyLogRegistry;
+    uint8 private _decimals;
 
     event BridgeUpdated(address indexed oldBridge, address indexed newBridge);
 
@@ -26,7 +27,8 @@ contract WrappedTokenUpgrade is Initializable, ERC20Upgradeable, ERC20PermitUpgr
         string memory name,
         string memory symbol,
         address _bridge,
-        address _keyLogRegistry
+        address _keyLogRegistry,
+        uint8 decimals_
     ) public initializer {
         __ERC20_init(name, symbol);
         __ERC20Permit_init(name);
@@ -34,10 +36,15 @@ contract WrappedTokenUpgrade is Initializable, ERC20Upgradeable, ERC20PermitUpgr
         __UUPSUpgradeable_init();
         bridge = _bridge;
         keyLogRegistry = _keyLogRegistry;
+        _decimals = decimals_;
     }
 
     function owner() public view override returns (address) {
         return IBridge2(bridge).getOwner();
+    }
+
+    function decimals() public view override returns (uint8) {
+        return _decimals;
     }
 
     modifier onlyBridge() {
