@@ -15,6 +15,11 @@ contract WrappedToken is Initializable, ERC20Upgradeable, ERC20PermitUpgradeable
     address public bridge;
     address public keyLogRegistry;
 
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
+
     function initialize(
         string memory name,
         string memory symbol,

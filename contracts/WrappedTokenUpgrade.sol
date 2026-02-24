@@ -17,6 +17,11 @@ contract WrappedTokenUpgrade is Initializable, ERC20Upgradeable, ERC20PermitUpgr
 
     event BridgeUpdated(address indexed oldBridge, address indexed newBridge);
 
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
+
     function initialize(
         string memory name,
         string memory symbol,

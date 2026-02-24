@@ -26,6 +26,11 @@ contract WrappedTokenFactoryUpgrade is OwnableUpgradeable, UUPSUpgradeable {
 
     event TokenDeployed(address proxy);
 
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
+
     function initialize(address _beacon, address _owner, address _bridge) public initializer {
         __Ownable_init(_owner);
         __UUPSUpgradeable_init();

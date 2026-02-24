@@ -16,6 +16,11 @@ contract MockERC20Upgrade is Initializable, ERC20Upgradeable, ERC20PermitUpgrade
 
     event BridgeUpdated(address indexed oldBridge, address indexed newBridge);
 
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
+
     function initialize(
         string memory name,
         string memory symbol,
