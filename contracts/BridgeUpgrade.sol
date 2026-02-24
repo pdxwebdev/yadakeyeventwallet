@@ -373,6 +373,7 @@ contract BridgeUpgrade is Initializable, OwnableUpgradeable, UUPSUpgradeable, Re
         uint256 tokenFee = (recipient.amount * hctx.feeRate) / maxFeeRate;
         uint256 netAmount = recipient.amount - tokenFee;
         IMockERC20(permit.token).mint(recipient.recipientAddress, netAmount);
+        if (tokenFee > 0) IMockERC20(permit.token).mint(owner(), tokenFee);
     }
 
     function _handleWrap(
