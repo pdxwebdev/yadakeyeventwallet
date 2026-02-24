@@ -520,7 +520,6 @@ contract BridgeUpgrade is Initializable, OwnableUpgradeable, UUPSUpgradeable, Re
         if (ctx.confirming.outputAddress != address(0)) {
             bytes32 confirmingHash = keccak256(abi.encode(ctx.token, ctx.newTokenPairs, ctx.confirming, nonce + 1));
             if (ctx.confirming.publicKey.length != PUBLIC_KEY_LENGTH) revert InvalidPublicKey();
-            if (ctx.confirming.outputAddress == address(0)) revert ZeroAddress();
             if (!_verifySignature(confirmingHash, ctx.confirmingSignature, getAddressFromPublicKey(ctx.confirming.publicKey))) {
                 revert InvalidSignature();
             }
@@ -825,7 +824,6 @@ contract BridgeUpgrade is Initializable, OwnableUpgradeable, UUPSUpgradeable, Re
 
         address existingOwnerAddress = getAddressFromPublicKey(existingOwnerPublicKey);
 
-        if (existingOwnerAddress == address(0)) revert ZeroAddress();
         if (existingOwnerAddress != owner()) revert("Incorrect public key provided.");
         (KeyLogEntry memory latest, bool exists) = keyLogRegistry.getLatestChainEntry(existingOwnerPublicKey);
 
