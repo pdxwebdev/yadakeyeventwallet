@@ -261,9 +261,6 @@ contract KeyLogRegistryUpgrade is Initializable, OwnableUpgradeable, UUPSUpgrade
             }
         }
         KeyLogEntry memory entry = keyLogEntries[idx - 1];
-        address currentAddress = entry.prerotatedKeyHash;
-        idx = byPublicKeyHash[currentAddress];
-        require(idx == 0, "Not the latest key rotation.");
         return (entry, true);
     }
 
