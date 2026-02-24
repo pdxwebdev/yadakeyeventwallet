@@ -165,7 +165,6 @@ contract BridgeUpgrade is Initializable, OwnableUpgradeable, UUPSUpgradeable, Re
 
     uint256 private constant PUBLIC_KEY_LENGTH = 64;
     uint256 private constant MAX_TOKEN_PAIRS = 10;
-    uint256 private constant GAS_LIMIT = 30000;
     uint256 private constant NONCE_INCREMENT = 2;
 
     event BurnForYadaCoinWithdrawal(
@@ -473,7 +472,7 @@ contract BridgeUpgrade is Initializable, OwnableUpgradeable, UUPSUpgradeable, Re
     }
 
     function _transferNative(address to, uint256 amount) private {
-        (bool success, ) = to.call{value: amount, gas: GAS_LIMIT}("");
+        (bool success, ) = to.call{value: amount}("");
         if (!success) revert TransferFailed();
     }
 
