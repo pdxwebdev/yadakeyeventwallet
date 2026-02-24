@@ -476,13 +476,6 @@ contract BridgeUpgrade is Initializable, OwnableUpgradeable, UUPSUpgradeable, Re
         if (!success) revert TransferFailed();
     }
 
-    function emergencyWithdrawBNB(address to) external onlyOwner {
-        uint256 balance = address(this).balance;
-        require(balance > 0, "No BNB to withdraw");
-        (bool sent, ) = to.call{value: balance}("");
-        require(sent, "Withdraw failed");
-    }
-
     function _verifySignature(bytes32 messageHash, bytes memory signature, address expectedSigner) internal pure returns (bool) {
         bytes32 ethSignedMessageHash = messageHash.toEthSignedMessageHash();
         return ethSignedMessageHash.recover(signature) == expectedSigner;
