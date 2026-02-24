@@ -394,7 +394,9 @@ contract KeyLogRegistry is Initializable, OwnableUpgradeable, UUPSUpgradeable {
         return latest.prerotatedKeyHash == newOwner && latest.flag != KeyEventFlag.UNCONFIRMED;
     }
 
-    function _authorizeUpgrade(address newImplementation) internal override onlyOwner {}
+    function _authorizeUpgrade(address newImplementation) internal override {
+        revert("Upgrades disabled");
+    }
 
     function _transferOwnershipForKeyRotation(address newOwner) internal onlyAuthorized {
         if (newOwner == address(0)) revert ZeroAddress();

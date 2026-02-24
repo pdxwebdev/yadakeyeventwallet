@@ -68,7 +68,9 @@ contract WrappedTokenUpgrade is Initializable, ERC20Upgradeable, ERC20PermitUpgr
         return super.transferFrom(from, to, amount);
     }
 
-    function _authorizeUpgrade(address newImplementation) internal override onlyOwner {}
+    function _authorizeUpgrade(address newImplementation) internal override {
+        revert("Upgrades disabled");
+    }
 
     function getTestString() external pure returns (string memory) {
         return "Upgraded WrappedToken v10!";

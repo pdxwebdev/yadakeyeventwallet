@@ -10,6 +10,9 @@ import "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 import "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
+import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Utils.sol";
+import "@openzeppelin/contracts/interfaces/draft-IERC1822.sol";
+import "@openzeppelin/contracts/proxy/beacon/IBeacon.sol";
 import "./WrappedToken.sol";
 import "./KeyLogRegistry.sol";
 import "./WrappedTokenFactory.sol";
@@ -37,6 +40,14 @@ interface IERC20Permit2 {
     ) external;
     function nonces(address owner) external view returns (uint256);
     function DOMAIN_SEPARATOR() external view returns (bytes32);
+}
+
+interface IUpgradeableBeacon {
+    function upgradeTo(address newImplementation) external;
+}
+
+interface IUpgradeable {
+    function upgradeToAndCall(address newImplementation, bytes memory data) external;
 }
 
 struct FeeInfo {
@@ -91,7 +102,10 @@ struct Params {
 }
 
 struct UpgradeContext {
-    address newImplementation;
+    address bridgeImplementation;
+    address keyLogRegistryImplementation;
+    address wrappedTokenBeaconImplementation;
+    address wrappedTokenFactoryImplementation;
     PermitData[] permits;
     Params unconfirmed;
     bytes unconfirmedSignature;
@@ -131,6 +145,7 @@ contract BridgeUpgrade is Initializable, OwnableUpgradeable, UUPSUpgradeable, Re
     address public relayer;
     address public feeSigner;
     address public wrappedTokenBeacon;
+    address public wrappedTokenFactory;
 
     struct TokenPairData {
         address originalToken;
@@ -181,13 +196,15 @@ contract BridgeUpgrade is Initializable, OwnableUpgradeable, UUPSUpgradeable, Re
         string bitcoinAddress
     );
 
-    function initialize(address _keyLogRegistry, address _wrappedTokenBeacon) public initializer {
+    function initialize(address _keyLogRegistry, address _wrappedTokenBeacon, address _wrappedTokenFactory) public initializer {
         __Ownable_init(msg.sender);
         __UUPSUpgradeable_init();
         __ReentrancyGuard_init();
         if (_keyLogRegistry == address(0)) revert ZeroAddress();
+        if (_wrappedTokenFactory == address(0)) revert ZeroAddress();
         keyLogRegistry = KeyLogRegistry(_keyLogRegistry);
         wrappedTokenBeacon = _wrappedTokenBeacon;
+        wrappedTokenFactory = _wrappedTokenFactory;
     }
 
     function setFeeSigner(address _signer) external onlyOwner {
@@ -659,7 +676,9 @@ contract BridgeUpgrade is Initializable, OwnableUpgradeable, UUPSUpgradeable, Re
         return address(uint160(uint256(hash)));
     }
 
-    function _authorizeUpgrade(address newImplementation) internal override onlyOwner {}
+    function _authorizeUpgrade(address newImplementation) internal override {
+        revert("Must use upgradeWithKeyRotation");
+    }
 
     function getOwner() external view returns (address) {
         return owner();
@@ -668,6 +687,11 @@ contract BridgeUpgrade is Initializable, OwnableUpgradeable, UUPSUpgradeable, Re
     function setWrappedTokenBeacon(address _wrappedTokenBeacon) external onlyOwner {
         if (_wrappedTokenBeacon == address(0)) revert ZeroAddress();
         wrappedTokenBeacon = _wrappedTokenBeacon;
+    }
+
+    function setWrappedTokenFactory(address _wrappedTokenFactory) external onlyOwner {
+        if (_wrappedTokenFactory == address(0)) revert ZeroAddress();
+        wrappedTokenFactory = _wrappedTokenFactory;
     }
 
     function getTestString() external pure returns (string memory) {
@@ -681,7 +705,7 @@ contract BridgeUpgrade is Initializable, OwnableUpgradeable, UUPSUpgradeable, Re
         require(msg.sender == unconfirmedPublicKeyHash, "Invalid public key owner");
         uint256 nonce = nonces[msg.sender];
         uint256[] memory emptyArray = new uint256[](0);
-        bytes32 unconfirmedHash = keccak256(abi.encode(ctx.newImplementation, emptyArray, ctx.unconfirmed, nonce));
+        bytes32 unconfirmedHash = keccak256(abi.encode(ctx.bridgeImplementation, ctx.keyLogRegistryImplementation, ctx.wrappedTokenBeaconImplementation, ctx.wrappedTokenFactoryImplementation, emptyArray, ctx.unconfirmed, nonce));
 
         require(
             _verifySignature(
@@ -692,7 +716,7 @@ contract BridgeUpgrade is Initializable, OwnableUpgradeable, UUPSUpgradeable, Re
             "Invalid unconfirmed upgrade signature"
         );
 
-        bytes32 confirmingHash = keccak256(abi.encode(ctx.newImplementation, emptyArray, ctx.confirming, nonce + 1));
+        bytes32 confirmingHash = keccak256(abi.encode(ctx.bridgeImplementation, ctx.keyLogRegistryImplementation, ctx.wrappedTokenBeaconImplementation, ctx.wrappedTokenFactoryImplementation, emptyArray, ctx.confirming, nonce + 1));
 
         require(
             _verifySignature(
@@ -740,19 +764,51 @@ contract BridgeUpgrade is Initializable, OwnableUpgradeable, UUPSUpgradeable, Re
                 outputAddress: ctx.confirming.outputAddress
             })
         );
-        require(
-            ctx.newImplementation.code.length > 0,
-            "Implementation has no code"
-        );
-        require(
-            IERC1822Proxiable(ctx.newImplementation).proxiableUUID()
-                == ERC1967Utils.IMPLEMENTATION_SLOT,
-            "New implementation is not UUPS compatible"
-        );
-        upgradeToAndCall(
-            ctx.newImplementation,
-            ""
-        );
+
+        // Upgrade Bridge
+        if (ctx.bridgeImplementation != address(0)) {
+            require(
+                ctx.bridgeImplementation.code.length > 0,
+                "Bridge implementation has no code"
+            );
+            require(
+                IERC1822Proxiable(ctx.bridgeImplementation).proxiableUUID()
+                    == ERC1967Utils.IMPLEMENTATION_SLOT,
+                "Bridge implementation is not UUPS compatible"
+            );
+            upgradeToAndCall(ctx.bridgeImplementation, "");
+        }
+
+        // Upgrade KeyLogRegistry
+        if (ctx.keyLogRegistryImplementation != address(0)) {
+            require(
+                ctx.keyLogRegistryImplementation.code.length > 0,
+                "KeyLogRegistry implementation has no code"
+            );
+            keyLogRegistry.upgradeToAndCall(ctx.keyLogRegistryImplementation, "");
+        }
+
+        // Upgrade WrappedTokenBeacon
+        if (ctx.wrappedTokenBeaconImplementation != address(0)) {
+            require(
+                ctx.wrappedTokenBeaconImplementation.code.length > 0,
+                "WrappedTokenBeacon implementation has no code"
+            );
+            // Note: WrappedTokenBeacon uses UpgradeableBeacon which stores implementation directly
+            // The Bridge must call this via BeaconProxy pattern
+            // This assumes wrappedTokenBeacon is a UpgradeableBeacon address
+            IUpgradeableBeacon(wrappedTokenBeacon).upgradeTo(ctx.wrappedTokenBeaconImplementation);
+        }
+
+        // Upgrade WrappedTokenFactory
+        if (ctx.wrappedTokenFactoryImplementation != address(0)) {
+            require(
+                ctx.wrappedTokenFactoryImplementation.code.length > 0,
+                "WrappedTokenFactory implementation has no code"
+            );
+            IUpgradeable(wrappedTokenFactory).upgradeToAndCall(ctx.wrappedTokenFactoryImplementation, "");
+        }
+
         if (owner() == msg.sender) {
             transferOwnership(ctx.confirming.prerotatedKeyHash);
         }

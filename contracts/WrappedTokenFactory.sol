@@ -58,5 +58,7 @@ contract WrappedTokenFactory is OwnableUpgradeable, UUPSUpgradeable {
         return IBridge(bridge).getOwner();
     }
 
-    function _authorizeUpgrade(address newImplementation) internal override onlyOwner {}
+    function _authorizeUpgrade(address newImplementation) internal override {
+        revert("Upgrades disabled");
+    }
 }
