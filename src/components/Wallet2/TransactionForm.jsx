@@ -72,7 +72,7 @@ const TransactionForm = ({
               style={{ flex: 1 }}
             />
 
-            <Group spacing={6} align="center" noWrap>
+            <Group spacing={6} align="center">
               <AmountInput
                 value={recipient.amount}
                 onChange={(value) => onUpdateRecipient(index, "amount", value)}

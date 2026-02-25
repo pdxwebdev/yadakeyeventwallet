@@ -1,4 +1,10 @@
-import { Card, Text, Button, Group, Tooltip, ActionIcon } from "@mantine/core";
+import {
+  Card,
+  Text,
+  Button,
+  Group,
+  Tooltip,
+} from "@mantine/core";
 import { IconInfoCircle } from "@tabler/icons-react";
 
 const WalletBalance = ({
@@ -24,6 +30,7 @@ const WalletBalance = ({
           Address: {parsedData.publicKeyHash}
         </Text>
       )}
+
       {balance ? (
         <>
           {selectedBlockchain.isBridge && (
