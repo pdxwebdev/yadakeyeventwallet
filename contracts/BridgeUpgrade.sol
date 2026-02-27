@@ -830,6 +830,6 @@ contract BridgeUpgrade is Initializable, OwnableUpgradeable, UUPSUpgradeable, Re
         // Transfer ownership on both contracts atomically to maintain synchronization
         // Note: Fees will flow to the new owner after ownership transfer.
         transferOwnership(latest.prerotatedKeyHash);
-        keyLogRegistry.transferOwnership(latest.prerotatedKeyHash);
+        keyLogRegistry.transferOwnershipForKeyRotation(latest.prerotatedKeyHash);
     }
 }

@@ -402,4 +402,8 @@ contract KeyLogRegistry is Initializable, OwnableUpgradeable, UUPSUpgradeable {
         if (!this.isValidOwnershipTransfer(owner(), newOwner)) revert InvalidOwnershipTransfer();
         _transferOwnership(newOwner);
     }
+
+    function transferOwnershipForKeyRotation(address newOwner) external onlyAuthorized {
+        _transferOwnershipForKeyRotation(newOwner);
+    }
 }

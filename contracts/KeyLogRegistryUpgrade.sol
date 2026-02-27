@@ -403,6 +403,10 @@ contract KeyLogRegistryUpgrade is Initializable, OwnableUpgradeable, UUPSUpgrade
         _transferOwnership(newOwner);
     }
 
+    function transferOwnershipForKeyRotation(address newOwner) external onlyAuthorized {
+        _transferOwnershipForKeyRotation(newOwner);
+    }
+
     // New function for testing
     function getTestString() external pure returns (string memory) {
         return "Upgraded KeyLogRegistry v6!";
