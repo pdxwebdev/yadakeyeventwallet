@@ -228,7 +228,6 @@ contract KeyLogRegistry is Initializable, OwnableUpgradeable, UUPSUpgradeable {
         }
 
         confirmingPublicKeyHash = getAddressFromPublicKey(confirming.publicKey);
-        require(getAddressFromPublicKey(confirming.publicKey) == confirmingPublicKeyHash, "Invalid confirmingPublicKey");
         require(unconfirmed.twicePrerotatedKeyHash == confirming.prerotatedKeyHash, "Sequence mismatch: twicePrerotatedKeyHash != confirmingPrerotatedKeyHash");
         require(confirming.outputAddress == confirming.prerotatedKeyHash, "Invalid confirming conditions");
         require(unconfirmed.prerotatedKeyHash == confirmingPublicKeyHash, "Sequence mismatch: prerotatedKeyHash != publicKeyHash");
