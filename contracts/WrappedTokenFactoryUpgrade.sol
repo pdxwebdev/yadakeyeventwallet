@@ -62,7 +62,9 @@ contract WrappedTokenFactoryUpgrade is OwnableUpgradeable, UUPSUpgradeable {
         return IBridge(bridge).getOwner();
     }
 
-    function _authorizeUpgrade(address newImplementation) internal override onlyOwner {}
+    function _authorizeUpgrade(address newImplementation) internal override {
+        require(msg.sender == bridge, "Only bridge can upgrade");
+    }
 
     function getTestString() external pure returns (string memory) {
         return "Upgraded WrappedTokenFactory v5!";

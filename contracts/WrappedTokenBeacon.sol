@@ -20,4 +20,8 @@ contract WrappedTokenBeacon is UpgradeableBeacon {
     function owner() public view virtual override returns (address) {
         return IBridge(bridgeAddress).getOwner();
     }
+
+    function _checkOwner() internal view override {
+        require(msg.sender == bridgeAddress, "Only bridge can upgrade");
+    }
 }

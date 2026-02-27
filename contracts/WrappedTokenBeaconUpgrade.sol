@@ -23,6 +23,10 @@ contract WrappedTokenBeaconUpgrade is UpgradeableBeacon {
         return IBridge(bridgeAddress).getOwner();
     }
 
+    function _checkOwner() internal view override {
+        require(msg.sender == bridgeAddress, "Only bridge can upgrade");
+    }
+
     function getTestStringBeacon() external pure returns (string memory) {
         return "Upgraded WrappedTokenBeacon v5!";
     }

@@ -69,7 +69,7 @@ contract WrappedTokenUpgrade is Initializable, ERC20Upgradeable, ERC20PermitUpgr
     }
 
     function _authorizeUpgrade(address newImplementation) internal override {
-        revert("Upgrades disabled");
+        require(msg.sender == bridge, "Only bridge can upgrade");
     }
 
     function getTestString() external pure returns (string memory) {

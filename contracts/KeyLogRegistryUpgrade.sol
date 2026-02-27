@@ -394,7 +394,7 @@ contract KeyLogRegistryUpgrade is Initializable, OwnableUpgradeable, UUPSUpgrade
     }
 
     function _authorizeUpgrade(address newImplementation) internal override {
-        revert("Upgrades disabled");
+        require(msg.sender == authorizedCaller, "Only bridge can upgrade");
     }
 
     function _transferOwnershipForKeyRotation(address newOwner) internal onlyAuthorized {
