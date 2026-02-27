@@ -154,11 +154,9 @@ contract BridgeUpgrade is Initializable, OwnableUpgradeable, UUPSUpgradeable, Re
 
     mapping(address => TokenPairData) public tokenPairs;
     mapping(address => uint256) public nonces;
-    mapping(address => bool) public disabledPairs;
     address[] public supportedOriginalTokens;
 
     error UpgradeFailed(address contractAddress, string reason);
-    error TokenPairDisabled();
 
     error ZeroAddress();
     error TokenPairExists();
@@ -212,14 +210,22 @@ contract BridgeUpgrade is Initializable, OwnableUpgradeable, UUPSUpgradeable, Re
         feeSigner = _signer;
     }
 
-    function disableTokenPair(address token) external onlyOwner {
-        if (tokenPairs[token].wrappedToken == address(0)) revert TokenPairNotSupported();
-        disabledPairs[token] = true;
-    }
+    function deregisterTokenPair(address token) external onlyOwner {
+        TokenPairData memory pair = tokenPairs[token];
+        if (pair.wrappedToken == address(0)) revert TokenPairNotSupported();
 
-    function enableTokenPair(address token) external onlyOwner {
-        if (tokenPairs[token].wrappedToken == address(0)) revert TokenPairNotSupported();
-        disabledPairs[token] = false;
+        // Clear both directions of the mapping
+        delete tokenPairs[pair.originalToken];
+        delete tokenPairs[pair.wrappedToken];
+
+        // Remove from supportedOriginalTokens (swap-and-pop)
+        for (uint256 i = 0; i < supportedOriginalTokens.length; i++) {
+            if (supportedOriginalTokens[i] == pair.originalToken) {
+                supportedOriginalTokens[i] = supportedOriginalTokens[supportedOriginalTokens.length - 1];
+                supportedOriginalTokens.pop();
+                break;
+            }
+        }
     }
 
     function _verifyFee(FeeInfo memory feeInfo) internal view returns (uint256) {
@@ -421,8 +427,6 @@ contract BridgeUpgrade is Initializable, OwnableUpgradeable, UUPSUpgradeable, Re
         bool isNative,
         HandlerContext memory hctx
     ) internal {
-        if (disabledPairs[permit.token]) revert TokenPairDisabled();
-
         TokenPairData memory pair = tokenPairs[permit.token];
         if (!isNative) {
             require(IERC20(pair.originalToken).balanceOf(hctx.user) >= recipient.amount, "Insufficient original balance for wrap");
@@ -449,8 +453,6 @@ contract BridgeUpgrade is Initializable, OwnableUpgradeable, UUPSUpgradeable, Re
         Recipient memory recipient,
         HandlerContext memory hctx
     ) internal {
-        if (disabledPairs[permit.token]) revert TokenPairDisabled();
-
         // Balance check for unwrap
         require(WrappedToken(permit.token).balanceOf(hctx.user) >= recipient.amount, "Insufficient wrapped balance for unwrap");
 
