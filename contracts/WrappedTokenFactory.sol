@@ -40,14 +40,16 @@ contract WrappedTokenFactory is OwnableUpgradeable, UUPSUpgradeable {
     function createToken(
         string memory name,
         string memory symbol,
-        address keyLogRegistry
+        address keyLogRegistry,
+        uint8 decimals_
     ) external onlyOwner returns (address) {
         bytes memory initData = abi.encodeWithSelector(
             IWrappedToken.initialize.selector,
             name,
             symbol,
             bridge,
-            keyLogRegistry
+            keyLogRegistry,
+            decimals_
         );
         WrappedTokenProxy proxy = new WrappedTokenProxy(beacon, initData);
         emit TokenDeployed(address(proxy));
