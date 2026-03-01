@@ -6,7 +6,10 @@ import {
   Title,
   Button,
   Group,
+  Select,
+  Flex,
 } from "@mantine/core";
+import { useState } from "react";
 import { useAppContext } from "../../context/AppContext";
 import { BLOCKCHAINS } from "../../shared/constants";
 import { IconDownload } from "@tabler/icons-react";
@@ -21,6 +24,12 @@ const TransactionHistory = ({
   // Add this prop to get ALL history (not just paginated)
   allHistory = combinedHistory, // fallback to current if not provided
 }) => {
+  const [rowsPerPage, setRowsPerPage] = useState("3");
+  const rowsPerPageNum = parseInt(rowsPerPage, 10);
+  const calculatedTotalPages = Math.ceil(allHistory.length / rowsPerPageNum);
+  const startIdx = (currentPage - 1) * rowsPerPageNum;
+  const endIdx = startIdx + rowsPerPageNum;
+  const paginatedHistory = allHistory.slice(startIdx, endIdx);
   let token;
   if (selectedBlockchain.isBridge) {
     const { selectedToken, supportedTokens } = useAppContext();
@@ -126,7 +135,7 @@ const TransactionHistory = ({
             </Table.Tr>
           </Table.Thead>
           <Table.Tbody>
-            {combinedHistory.map((item, index) => (
+            {paginatedHistory.map((item, index) => (
               <Table.Tr
                 key={`${item.type}-${item.public_key_hash || index}-${
                   item.id || index
@@ -182,13 +191,25 @@ const TransactionHistory = ({
       </div>
 
       {/* Pagination + Download Button */}
-      <Group justify="space-between" mt="md">
-        <Pagination
-          total={totalPages}
-          value={currentPage}
-          onChange={onPageChange}
-          color="teal"
-        />
+      <Group justify="space-between" mt="md" align="center">
+        <Flex align="center" gap="md">
+          <Pagination
+            total={calculatedTotalPages}
+            value={currentPage}
+            onChange={onPageChange}
+            color="teal"
+          />
+          <Select
+            placeholder="Rows per page"
+            data={["3", "10", "20", "50"]}
+            value={rowsPerPage}
+            onChange={(value) => {
+              setRowsPerPage(value || "3");
+              onPageChange(1); // Reset to first page when changing rows per page
+            }}
+            w={120}
+          />
+        </Flex>
         <Button
           leftSection={<IconDownload size={16} />}
           variant="outline"

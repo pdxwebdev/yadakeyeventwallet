@@ -69,6 +69,7 @@ import {
   IconUpload,
   IconTrash,
   IconCheck,
+  IconSignature,
 } from "@tabler/icons-react";
 import { glossaryTerms } from "../shared/glossary";
 
@@ -1697,7 +1698,7 @@ const Wallet2 = () => {
           />
           <NavLink
             label={isSmOrLarger ? "Sign" : undefined}
-            leftSection={<IconShieldLock size={22} />}
+            leftSection={<IconSignature size={22} />}
             active={activeSection === "sign"}
             onClick={() => setActiveSection("sign")}
             disabled={!privateKey || !isInitialized}
