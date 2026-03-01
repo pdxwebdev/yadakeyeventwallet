@@ -70,6 +70,7 @@ import {
   IconTrash,
   IconCheck,
   IconSignature,
+  IconPlayerPlay,
 } from "@tabler/icons-react";
 import { glossaryTerms } from "../shared/glossary";
 
@@ -147,10 +148,26 @@ const Wallet2 = () => {
 
   const [glossaryOpen, { open: openGlossary, close: closeGlossary }] =
     useDisclosure(false);
+  const [demoModalOpen, { open: openDemo, close: closeDemo }] =
+    useDisclosure(false);
   const [searchTerm, setSearchTerm] = useState("");
 
   // Navigation state
   const [activeSection, setActiveSection] = useState("overview");
+
+  // Auto-open demo video on first visit
+  useEffect(() => {
+    const demoPresentationShown = localStorage.getItem("demoPresentationShown");
+    if (!demoPresentationShown) {
+      openDemo();
+    }
+  }, [openDemo]);
+
+  // Handle demo modal close with localStorage tracking
+  const handleDemoClose = () => {
+    localStorage.setItem("demoPresentationShown", "true");
+    closeDemo();
+  };
 
   useEffect(() => {
     const saved = localStorage.getItem(`lastSection_${selectedBlockchain.id}`);
@@ -931,8 +948,17 @@ const Wallet2 = () => {
             size="lg"
             onClick={openGlossary}
             title="Open Glossary"
+            ml="auto"
           >
             <IconBook size={20} />
+          </ActionIcon>
+          <ActionIcon
+            variant="light"
+            size="lg"
+            onClick={openDemo}
+            title="Watch Demonstration"
+          >
+            <IconPlayerPlay size={20} />
           </ActionIcon>
         </Group>
       </AppShell.Header>
@@ -1650,6 +1676,38 @@ const Wallet2 = () => {
                     </Text>
                   )}
                 </Accordion>
+              </Modal>
+
+              <Modal
+                opened={demoModalOpen}
+                onClose={handleDemoClose}
+                title="Wallet Demonstration"
+                size="lg"
+                centered
+              >
+                <div
+                  style={{
+                    position: "relative",
+                    paddingBottom: "56.25%",
+                    height: 0,
+                    overflow: "hidden",
+                  }}
+                >
+                  <iframe
+                    style={{
+                      position: "absolute",
+                      top: 0,
+                      left: 0,
+                      width: "100%",
+                      height: "100%",
+                      border: "none",
+                    }}
+                    src="https://www.youtube.com/embed/Cii3UYF4FqY"
+                    title="Wallet Demonstration"
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                    allowFullScreen
+                  ></iframe>
+                </div>
               </Modal>
             </>
           )}
