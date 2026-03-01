@@ -171,181 +171,179 @@ const SecurityAlerts = ({ parsedData, selectedBlockchain, onRotateKey }) => {
   }
 
   return (
-    <>
-      <Card
-        withBorder
-        radius="md"
-        p="md"
-        mt="md"
-        mb="sm"
-        style={{
-          borderColor: "#e03131",
-          backgroundColor: "rgba(224, 49, 49, 0.05)",
-          borderLeftWidth: 4,
-          borderLeftColor: "#e03131",
-        }}
+    <Card
+      withBorder
+      radius="md"
+      p="md"
+      mt="md"
+      mb="sm"
+      style={{
+        borderColor: "#e03131",
+        backgroundColor: "rgba(224, 49, 49, 0.05)",
+        borderLeftWidth: 4,
+        borderLeftColor: "#e03131",
+      }}
+    >
+      {/* Summary Section */}
+      <Group
+        mb="md"
+        position="apart"
+        style={{ cursor: "pointer" }}
+        onClick={() => setDetailsExpanded(!detailsExpanded)}
       >
-        {/* Summary Section */}
-        <Group
-          mb="md"
-          position="apart"
-          style={{ cursor: "pointer" }}
-          onClick={() => setDetailsExpanded(!detailsExpanded)}
-        >
-          <Group spacing="sm" style={{ flex: 1 }}>
-            <IconAlertCircle
-              size={24}
-              style={{ color: "#e03131", flexShrink: 0 }}
-            />
-            <div style={{ flex: 1 }}>
-              <Text size="md" weight={600} style={{ color: "#e03131" }}>
-                🛡️ Attacks Prevented
-              </Text>
-              <Text size="xs" color="dimmed">
-                {failedTransactions.length} attack
-                {failedTransactions.length > 1 ? "s" : ""} detected and
-                prevented •{" "}
-                {lastCheckTime
-                  ? lastCheckTime.toLocaleTimeString()
-                  : "Checking..."}
-              </Text>
-            </div>
-          </Group>
-          <Button
-            variant="subtle"
-            color="red"
-            size="xs"
-            rightIcon={
-              <IconChevronDown
-                size={16}
-                style={{
-                  transform: detailsExpanded
-                    ? "rotate(180deg)"
-                    : "rotate(0deg)",
-                  transition: "transform 200ms ease",
-                }}
-              />
-            }
-          >
-            {detailsExpanded ? "Hide" : "See"} Details
-          </Button>
+        <Group spacing="sm" style={{ flex: 1 }}>
+          <IconAlertCircle
+            size={24}
+            style={{ color: "#e03131", flexShrink: 0 }}
+          />
+          <div style={{ flex: 1 }}>
+            <Text size="md" weight={600} style={{ color: "#e03131" }}>
+              🛡️ Security Alert: Attacks Prevented
+            </Text>
+            <Text size="xs" color="dimmed">
+              {failedTransactions.length} attack
+              {failedTransactions.length > 1 ? "s" : ""} detected and
+              prevented •{" "}
+              {lastCheckTime
+                ? lastCheckTime.toLocaleTimeString()
+                : "Checking..."}
+            </Text>
+          </div>
         </Group>
+        <Button
+          variant="subtle"
+          color="red"
+          size="xs"
+          rightIcon={
+            <IconChevronDown
+              size={16}
+              style={{
+                transform: detailsExpanded
+                  ? "rotate(180deg)"
+                  : "rotate(0deg)",
+                transition: "transform 200ms ease",
+              }}
+            />
+          }
+        >
+          {detailsExpanded ? "Hide" : "See"} Details
+        </Button>
+      </Group>
 
-        {/* Expandable Details Section */}
-        <Collapse in={detailsExpanded}>
-          <Stack
-            spacing="sm"
+      {/* Expandable Details Section */}
+      <Collapse in={detailsExpanded}>
+        <Stack
+          spacing="sm"
+          style={{
+            marginTop: "12px",
+            paddingTop: "12px",
+            borderTop: "1px solid rgba(224, 49, 49, 0.2)",
+          }}
+        >
+          {failedTransactions.map((tx, idx) => (
+            <div
+              key={idx}
+              style={{
+                padding: "10px",
+                borderRadius: "4px",
+                backgroundColor: "rgba(224, 49, 49, 0.1)",
+                borderLeft: "2px solid #e03131",
+              }}
+            >
+              <Group spacing="sm" mb="xs">
+                <div style={{ flex: 1 }}>
+                  <Text size="sm" weight={500}>
+                    {tx.functionName || "Unknown Transaction"}
+                  </Text>
+                  <Text
+                    size="xs"
+                    component="a"
+                    href={`https://${
+                      selectedBlockchain.testnet ? "testnet." : ""
+                    }bscscan.com/tx/${tx.hash}`}
+                    target="_blank"
+                    style={{
+                      cursor: "pointer",
+                      textDecoration: "underline",
+                      color: "#e03131",
+                    }}
+                  >
+                    {tx.hash.slice(0, 10)}...{tx.hash.slice(-8)}
+                  </Text>
+                </div>
+                <Badge variant="filled" color="red" size="sm">
+                  Blocked
+                </Badge>
+              </Group>
+              {tx.revertReason && (
+                <div
+                  style={{
+                    padding: "6px",
+                    backgroundColor: "rgba(224, 49, 49, 0.05)",
+                    borderRadius: "3px",
+                    borderLeft: "2px solid #e03131",
+                  }}
+                >
+                  <Text
+                    size="xs"
+                    style={{
+                      fontFamily: "monospace",
+                      wordBreak: "break-word",
+                      color: "#e03131",
+                    }}
+                  >
+                    <strong>Attack Type:</strong> {tx.revertReason}
+                  </Text>
+                </div>
+              )}
+            </div>
+          ))}
+
+          <Text size="xs" color="dimmed" style={{ marginTop: "8px" }}>
+            View details on{" "}
+            <Text
+              component="a"
+              href={`https://${
+                selectedBlockchain.testnet ? "testnet." : ""
+              }bscscan.com/address/${parsedData?.publicKeyHash}`}
+              target="_blank"
+              style={{ cursor: "pointer", textDecoration: "underline" }}
+            >
+              BSCScan
+            </Text>
+          </Text>
+
+          {/* Key Rotation Recommendation - Within Expanded Section */}
+          <div
             style={{
-              marginTop: "12px",
+              marginTop: "16px",
               paddingTop: "12px",
               borderTop: "1px solid rgba(224, 49, 49, 0.2)",
             }}
           >
-            {failedTransactions.map((tx, idx) => (
-              <div
-                key={idx}
-                style={{
-                  padding: "10px",
-                  borderRadius: "4px",
-                  backgroundColor: "rgba(224, 49, 49, 0.1)",
-                  borderLeft: "2px solid #e03131",
-                }}
-              >
-                <Group spacing="sm" mb="xs">
-                  <div style={{ flex: 1 }}>
-                    <Text size="sm" weight={500}>
-                      {tx.functionName || "Unknown Transaction"}
-                    </Text>
-                    <Text
-                      size="xs"
-                      component="a"
-                      href={`https://${
-                        selectedBlockchain.testnet ? "testnet." : ""
-                      }bscscan.com/tx/${tx.hash}`}
-                      target="_blank"
-                      style={{
-                        cursor: "pointer",
-                        textDecoration: "underline",
-                        color: "#e03131",
-                      }}
-                    >
-                      {tx.hash.slice(0, 10)}...{tx.hash.slice(-8)}
-                    </Text>
-                  </div>
-                  <Badge variant="filled" color="red" size="sm">
-                    Blocked
-                  </Badge>
-                </Group>
-                {tx.revertReason && (
-                  <div
-                    style={{
-                      padding: "6px",
-                      backgroundColor: "rgba(224, 49, 49, 0.05)",
-                      borderRadius: "3px",
-                      borderLeft: "2px solid #e03131",
-                    }}
-                  >
-                    <Text
-                      size="xs"
-                      style={{
-                        fontFamily: "monospace",
-                        wordBreak: "break-word",
-                        color: "#e03131",
-                      }}
-                    >
-                      <strong>Attack Type:</strong> {tx.revertReason}
-                    </Text>
-                  </div>
-                )}
-              </div>
-            ))}
-
-            <Text size="xs" color="dimmed" style={{ marginTop: "8px" }}>
-              View details on{" "}
-              <Text
-                component="a"
-                href={`https://${
-                  selectedBlockchain.testnet ? "testnet." : ""
-                }bscscan.com/address/${parsedData?.publicKeyHash}`}
-                target="_blank"
-                style={{ cursor: "pointer", textDecoration: "underline" }}
-              >
-                BSCScan
-              </Text>
+            <Text
+              size="sm"
+              weight={500}
+              style={{ color: "#e03131", marginBottom: "8px" }}
+            >
+              ⚠️ Recommended Action
             </Text>
-          </Stack>
-        </Collapse>
-      </Card>
-
-      {/* Key Rotation Recommendation - Outside Details */}
-      <Card
-        withBorder
-        radius="md"
-        p="md"
-        mb="sm"
-        style={{
-          borderColor: "#e03131",
-          backgroundColor: "rgba(224, 49, 49, 0.1)",
-          borderLeftWidth: 4,
-          borderLeftColor: "#e03131",
-        }}
-      >
-        <Text
-          size="sm"
-          weight={500}
-          style={{ color: "#e03131", marginBottom: "8px" }}
-        >
-          ⚠️ Recommended Action
-        </Text>
-        <Text size="xs" style={{ color: "#e03131", marginBottom: "12px" }}>
-          Your private key may have been compromised. We strongly recommend
-          rotating your key immediately.
-        </Text>
-        <Button color="red" size="sm" variant="filled" onClick={onRotateKey}>
-          Rotate Key
-        </Button>
-      </Card>
-    </>
+            <Text size="xs" style={{ color: "#e03131", marginBottom: "12px" }}>
+              Your private key may have been compromised. We strongly recommend
+              rotating your key immediately.
+            </Text>
+            <Button
+              color="red"
+              size="sm"
+              variant="filled"
+              onClick={onRotateKey}
+            >
+              Rotate Key
+            </Button>
+          </div>
+        </Stack>
+      </Collapse>
+    </Card>
   );
 };
 

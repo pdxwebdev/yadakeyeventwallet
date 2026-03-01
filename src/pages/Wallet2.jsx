@@ -31,10 +31,9 @@ import QRDisplayModal from "../components/Wallet2/QRDisplayModal";
 import WalletStateHandler from "../components/Wallet2/WalletStateHandler";
 import BlockchainNav from "../components/Wallet2/BlockchainNav";
 import TokenPairsForm from "../components/Wallet2/TokenPairsForm";
-import { MintForm, BurnForm } from "../components/Wallet2/MintBurnForms";
+import { TokenManagementForm } from "../components/Wallet2/MintBurnForms";
 import { styles } from "../shared/styles";
 import { fromWIF } from "../utils/hdWallet";
-import TokenSelector from "../components/Wallet2/TokenSelector";
 import { capture } from "../shared/capture";
 import {
   BLOCKCHAINS,
@@ -50,7 +49,7 @@ import { ethers } from "ethers";
 import SendBalanceForm from "../components/Wallet2/SendBalanceForm";
 import { SwapForm } from "../components/Wallet2/SwapForm";
 import { LiquidityForm } from "../components/Wallet2/LiquidityForm";
-import { useDisclosure } from "@mantine/hooks";
+import { useDisclosure, useMediaQuery } from "@mantine/hooks";
 import AmountInput from "../components/Wallet2/AmountInput";
 import {
   IconBook,
@@ -63,6 +62,13 @@ import {
   IconHistory,
   IconShieldLock,
   IconTransfer,
+  IconKey,
+  IconArrowDown,
+  IconArrowUp,
+  IconCopy,
+  IconUpload,
+  IconTrash,
+  IconCheck,
 } from "@tabler/icons-react";
 import { glossaryTerms } from "../shared/glossary";
 
@@ -126,6 +132,7 @@ const Wallet2 = () => {
   const isDeploymentChecked = useRef(false);
 
   const [opened, { toggle }] = useDisclosure(false);
+  const isSmOrLarger = useMediaQuery("(min-width: 576px)");
   const [currentScanIndex, setCurrentScanIndex] = useState(0);
   const [wrapAmount, setWrapAmount] = useState("");
   const [unwrapAmount, setUnwrapAmount] = useState("");
@@ -152,6 +159,7 @@ const Wallet2 = () => {
         "overview",
         "send",
         "swap",
+        "wrap",
         "bridge",
         "history",
         "sign",
@@ -966,7 +974,6 @@ const Wallet2 = () => {
                     log={log}
                     onDeployContracts={handleDeployContracts}
                     onRotateKey={() => handleRotateKey(appContext)}
-                    onReset={resetWalletState}
                     isDeployed={isDeployed}
                     styles={styles}
                   />
@@ -997,6 +1004,7 @@ const Wallet2 = () => {
                                   webcamRef
                                 );
                               }}
+                              leftSection={<IconKey size={16} />}
                             >
                               {balance <= 0
                                 ? `Cannot initialize wallet (${
@@ -1008,12 +1016,6 @@ const Wallet2 = () => {
                             </Button>
                           )}
                         </Card>
-
-                        {isInitialized &&
-                          selectedBlockchain.isBridge &&
-                          log.length === (parsedData?.rotation ?? 0) && (
-                            <TokenSelector styles={styles} />
-                          )}
 
                         <WalletBalance
                           balance={balance}
@@ -1032,479 +1034,33 @@ const Wallet2 = () => {
                           sendWrapped={sendWrapped}
                         />
 
-                        {isInitialized &&
-                          selectedBlockchain.isBridge &&
-                          log.length === (parsedData?.rotation ?? 0) && (
-                            <>
-                              {isOwner && (
-                                <TokenPairsForm
-                                  appContext={appContext}
-                                  webcamRef={webcamRef}
-                                  styles={styles}
-                                />
-                              )}
-                              {isOwner &&
-                                selectedToken ===
-                                  contractAddresses.yadaERC20Address && (
-                                  <Card
-                                    withBorder
-                                    mt="md"
-                                    radius="md"
-                                    p="md"
-                                    style={styles.card}
-                                  >
-                                    <MintForm
-                                      walletManager={walletManager}
-                                      appContext={appContext}
-                                      webcamRef={webcamRef}
-                                      tokenSymbol={tokenSymbol}
-                                      wrappedTokenSymbol={wrappedTokenSymbol}
-                                      styles={styles}
-                                    />
-                                    <BurnForm
-                                      walletManager={walletManager}
-                                      appContext={appContext}
-                                      webcamRef={webcamRef}
-                                      tokenSymbol={tokenSymbol}
-                                      wrappedTokenSymbol={wrappedTokenSymbol}
-                                      styles={styles}
-                                    />
-                                  </Card>
-                                )}
-                            </>
-                          )}
-
-                        {isInitialized && (
-                          <>
-                            <Card
-                              withBorder
-                              mt="md"
-                              radius="md"
-                              p="md"
-                              style={styles.card}
-                            >
-                              <Title order={4}>Quick Actions</Title>
-                              <Group grow mt="md">
-                                <Button
-                                  onClick={() => setActiveSection("send")}
-                                >
-                                  Send
-                                </Button>
-                                {selectedBlockchain.id === "bsc" && (
-                                  <Button
-                                    onClick={() => setActiveSection("swap")}
-                                  >
-                                    Swap / LP
-                                  </Button>
-                                )}
-                                {selectedBlockchain.isBridge && (
-                                  <Button
-                                    onClick={() => setActiveSection("bridge")}
-                                  >
-                                    Bridge
-                                  </Button>
-                                )}
-                              </Group>
-                            </Card>
-
-                            <Card
-                              withBorder
-                              mt="md"
-                              radius="md"
-                              p="md"
-                              style={styles.card}
-                            >
-                              <Title order={4}>Wrap / Unwrap tokens</Title>
-
-                              <Grid mt="md" gutter="md">
-                                <Grid.Col span={{ base: 12, md: 6 }}>
-                                  <Title order={6} mb="xs">
-                                    Wrap → {tokenSymbol}
-                                  </Title>
-
-                                  {!selectedBlockchain.isBridge && (
-                                    <TextInput
-                                      label="Wrap to address"
-                                      value={wrapAddress}
-                                      onChange={(e) =>
-                                        setWrapAddress(e.currentTarget.value)
-                                      }
-                                      placeholder="0x..."
-                                      disabled={
-                                        !isDeployed ||
-                                        !isInitialized ||
-                                        (selectedBlockchain.isBridge &&
-                                          !tokenPairs.some(
-                                            (p) =>
-                                              p.original.toLowerCase() ===
-                                              (selectedToken?.toLowerCase() ??
-                                                "")
-                                          ))
-                                      }
-                                      styles={styles.input}
-                                      mb="xs"
-                                    />
-                                  )}
-
-                                  <Group align="flex-end" wrap="nowrap">
-                                    <div style={{ flex: 1 }}>
-                                      <AmountInput
-                                        label={`Amount to wrap (${tokenSymbol})`}
-                                        value={wrapAmount}
-                                        onChange={(value) =>
-                                          setWrapAmount(
-                                            value === undefined
-                                              ? ""
-                                              : String(value)
-                                          )
-                                        }
-                                        placeholder="0.0"
-                                        decimalScale={18}
-                                        disabled={
-                                          !isDeployed ||
-                                          !isInitialized ||
-                                          (selectedBlockchain.isBridge &&
-                                            !tokenPairs.some(
-                                              (p) =>
-                                                p.original.toLowerCase() ===
-                                                (selectedToken?.toLowerCase() ??
-                                                  "")
-                                            )) ||
-                                          !balance?.original
-                                        }
-                                        styles={styles.input}
-                                      />
-                                    </div>
-
-                                    <ActionIcon
-                                      size="lg"
-                                      variant="light"
-                                      color="blue"
-                                      onClick={() => {
-                                        if (balance?.original) {
-                                          setWrapAmount(balance.original);
-                                        }
-                                      }}
-                                      disabled={
-                                        !balance?.original ||
-                                        Number(balance.original) <= 0
-                                      }
-                                      title="Use maximum available balance"
-                                    >
-                                      <IconMaximize size={18} />
-                                    </ActionIcon>
-                                  </Group>
-
-                                  {balance?.original && (
-                                    <Text size="xs" c="dimmed" mt={4}>
-                                      Available:{" "}
-                                      {Number(balance.original).toLocaleString(
-                                        undefined,
-                                        {
-                                          maximumFractionDigits: 6,
-                                        }
-                                      )}{" "}
-                                      {tokenSymbol}
-                                    </Text>
-                                  )}
-
-                                  <Button
-                                    onClick={handleWrap}
-                                    color="blue"
-                                    disabled={
-                                      !isDeployed ||
-                                      !isInitialized ||
-                                      !tokenPairs.some(
-                                        (p) =>
-                                          p.original.toLowerCase() ===
-                                          (selectedToken?.toLowerCase() ?? "")
-                                      ) ||
-                                      !wrapAmount ||
-                                      Number(wrapAmount) <= 0 ||
-                                      (balance?.original &&
-                                        Number(wrapAmount) >
-                                          Number(balance.original))
-                                    }
-                                    mt="sm"
-                                    fullWidth
-                                  >
-                                    Wrap {tokenSymbol}
-                                  </Button>
-                                </Grid.Col>
-
-                                <Grid.Col span={{ base: 12, md: 6 }}>
-                                  <Title order={6} mb="xs">
-                                    Unwrap ← {wrappedTokenSymbol}
-                                  </Title>
-
-                                  <Group align="flex-end">
-                                    <div style={{ flex: 1 }}>
-                                      <AmountInput
-                                        label={`Amount to unwrap (${wrappedTokenSymbol})`}
-                                        value={unwrapAmount}
-                                        onChange={(value) =>
-                                          setUnwrapAmount(
-                                            value === undefined
-                                              ? ""
-                                              : String(value)
-                                          )
-                                        }
-                                        placeholder="0.0"
-                                        decimalScale={18}
-                                        disabled={
-                                          !isDeployed ||
-                                          !isInitialized ||
-                                          !tokenPairs.some(
-                                            (p) =>
-                                              p.original.toLowerCase() ===
-                                              (selectedToken?.toLowerCase() ??
-                                                "")
-                                          ) ||
-                                          !balance?.wrapped
-                                        }
-                                        styles={styles.input}
-                                      />
-                                    </div>
-
-                                    <ActionIcon
-                                      size="lg"
-                                      variant="light"
-                                      color="blue"
-                                      onClick={() => {
-                                        if (balance?.wrapped) {
-                                          setUnwrapAmount(balance.wrapped);
-                                        }
-                                      }}
-                                      disabled={
-                                        !balance?.wrapped ||
-                                        Number(balance.wrapped) <= 0
-                                      }
-                                      title="Use maximum wrapped balance"
-                                    >
-                                      <IconMaximize size={18} />
-                                    </ActionIcon>
-                                  </Group>
-
-                                  {balance?.wrapped && (
-                                    <Text size="xs" c="dimmed" mt={4}>
-                                      Available:{" "}
-                                      {Number(balance.wrapped).toLocaleString(
-                                        undefined,
-                                        {
-                                          maximumFractionDigits: 6,
-                                        }
-                                      )}{" "}
-                                      {wrappedTokenSymbol}
-                                    </Text>
-                                  )}
-
-                                  <Button
-                                    onClick={handleUnwrap}
-                                    color="violet"
-                                    disabled={
-                                      !isDeployed ||
-                                      !isInitialized ||
-                                      !tokenPairs.some(
-                                        (p) =>
-                                          p.original.toLowerCase() ===
-                                          (selectedToken?.toLowerCase() ?? "")
-                                      ) ||
-                                      !unwrapAmount ||
-                                      Number(unwrapAmount) <= 0 ||
-                                      (balance?.wrapped &&
-                                        Number(unwrapAmount) >
-                                          Number(balance.wrapped))
-                                    }
-                                    mt="sm"
-                                    fullWidth
-                                  >
-                                    Unwrap {wrappedTokenSymbol}
-                                  </Button>
-                                </Grid.Col>
-                              </Grid>
-                            </Card>
-
-                            {combinedHistory.length > 0 && (
-                              <TransactionHistory
-                                combinedHistory={paginatedHistory}
-                                allHistory={combinedHistory}
-                                currentPage={currentPage}
-                                totalPages={totalPages}
-                                onPageChange={setCurrentPage}
-                                styles={styles}
-                                selectedBlockchain={selectedBlockchain}
-                              />
-                            )}
-                          </>
-                        )}
-
-                        {isInitialized &&
-                          (parsedData?.rotation ?? 0) === log.length && (
-                            <TransactionForm
-                              recipients={recipients}
-                              onAddRecipient={addRecipient}
-                              onRemoveRecipient={removeRecipient}
-                              onUpdateRecipient={updateRecipient}
-                              onSendTransaction={handleSignTransaction}
-                              setFocusedRotation={setFocusedRotation}
-                              styles={styles}
-                              feeEstimate={feeEstimate}
-                              selectedBlockchain={selectedBlockchain}
-                              balance={balance}
-                            />
-                          )}
-
-                        {privateKey && isInitialized && (
-                          <Card
-                            withBorder
-                            mt="md"
-                            radius="md"
-                            p="md"
-                            style={styles.card}
-                          >
-                            <Title order={4} mb="md">
-                              Sign Arbitrary Message
-                            </Title>
-                            <Text size="sm" c="dimmed" mb="md">
-                              Useful for contract verification (BscScan, etc.).
-                              Paste the exact message from BscScan below
-                              (including newlines) and click Sign.
-                            </Text>
-
-                            <Textarea
-                              label="Message to sign"
-                              placeholder="Paste the full message from BscScan here...\n(It usually has multiple lines)"
-                              value={messageToSign}
-                              onChange={(e) =>
-                                setMessageToSign(e.currentTarget.value)
-                              }
-                              minRows={5}
-                              autosize
-                              maxRows={12}
-                              styles={styles.input}
-                              disabled={isSigning}
-                            />
-
-                            <Group mt="md" justify="flex-end">
-                              <Button
-                                variant="outline"
-                                onClick={() => {
-                                  setMessageToSign("");
-                                  setSignResult(null);
-                                }}
-                                disabled={isSigning}
-                              >
-                                Clear
-                              </Button>
-
-                              <Button
-                                onClick={handleSignMessage}
-                                loading={isSigning}
-                                disabled={isSigning || !messageToSign.trim()}
-                                color="violet"
-                              >
-                                Sign Message
-                              </Button>
-                            </Group>
-
-                            {signResult && (
-                              <Card
-                                withBorder
-                                mt="xl"
-                                p="md"
-                                bg="dark"
-                                radius="md"
-                              >
-                                <Text fw={500} mb="xs">
-                                  Signed by: {signResult.address}
-                                </Text>
-
-                                <Text size="sm" fw={500} mt="md">
-                                  Original message:
-                                </Text>
-                                <Text
-                                  component="pre"
-                                  p="xs"
-                                  bg="dark.8"
-                                  style={{
-                                    whiteSpace: "pre-wrap",
-                                    wordBreak: "break-word",
-                                    fontFamily: "monospace",
-                                  }}
-                                >
-                                  {signResult.message}
-                                </Text>
-
-                                <Text size="sm" fw={500} mt="md">
-                                  Signature:
-                                </Text>
-                                <Group gap="xs" align="center">
-                                  <Text
-                                    component="pre"
-                                    p="xs"
-                                    bg="dark.8"
-                                    style={{
-                                      flex: 1,
-                                      whiteSpace: "pre-wrap",
-                                      wordBreak: "break-all",
-                                      fontFamily: "monospace",
-                                    }}
-                                  >
-                                    {signResult.signature}
-                                  </Text>
-
-                                  <Button
-                                    size="xs"
-                                    variant="light"
-                                    onClick={() => {
-                                      navigator.clipboard.writeText(
-                                        signResult.signature
-                                      );
-                                      notifications.show({
-                                        title: "Copied",
-                                        message:
-                                          "Signature copied to clipboard",
-                                        color: "green",
-                                      });
-                                    }}
-                                  >
-                                    Copy signature
-                                  </Button>
-                                </Group>
-
-                                <Button
-                                  fullWidth
-                                  mt="md"
-                                  variant="light"
-                                  color="gray"
-                                  onClick={() => {
-                                    navigator.clipboard.writeText(
-                                      `Message:\n${signResult.message}\n\nSignature:\n${signResult.signature}`
-                                    );
-                                    notifications.show({
-                                      title: "Copied",
-                                      message:
-                                        "Full result (message + signature) copied",
-                                      color: "green",
-                                    });
-                                  }}
-                                >
-                                  Copy both
-                                </Button>
-                              </Card>
-                            )}
-                          </Card>
-                        )}
+                        {isInitialized && <></>}
                       </>
                     )}
                 </>
               )}
 
               {activeSection === "send" && isInitialized && (
-                <SendBalanceForm
-                  appContext={appContext}
-                  webcamRef={webcamRef}
-                />
+                <>
+                  {(parsedData?.rotation ?? 0) === log.length && (
+                    <TransactionForm
+                      recipients={recipients}
+                      onAddRecipient={addRecipient}
+                      onRemoveRecipient={removeRecipient}
+                      onUpdateRecipient={updateRecipient}
+                      onSendTransaction={handleSignTransaction}
+                      setFocusedRotation={setFocusedRotation}
+                      styles={styles}
+                      feeEstimate={feeEstimate}
+                      selectedBlockchain={selectedBlockchain}
+                      balance={balance}
+                    />
+                  )}
+                  <SendBalanceForm
+                    appContext={appContext}
+                    webcamRef={webcamRef}
+                  />
+                </>
               )}
 
               {activeSection === "swap" &&
@@ -1532,259 +1088,207 @@ const Wallet2 = () => {
                   </>
                 )}
 
-              {activeSection === "bridge" &&
-                selectedBlockchain.isBridge &&
-                isInitialized && (
-                  <>
-                    <Card
-                      withBorder
-                      mt="md"
-                      radius="md"
-                      p="md"
-                      style={styles.card}
-                    >
-                      <Title order={4}>Wrap / Unwrap tokens</Title>
+              {activeSection === "wrap" && isInitialized && (
+                <Card withBorder mt="md" radius="md" p="md" style={styles.card}>
+                  <Title order={4}>Wrap / Unwrap tokens</Title>
 
-                      <Grid mt="md" gutter="md">
-                        <Grid.Col span={{ base: 12, md: 6 }}>
-                          <Title order={6} mb="xs">
-                            Wrap → {tokenSymbol}
-                          </Title>
+                  <Grid mt="md" gutter="md">
+                    <Grid.Col span={{ base: 12, md: 6 }}>
+                      <Title order={6} mb="xs">
+                        Wrap → {tokenSymbol}
+                      </Title>
 
-                          {!selectedBlockchain.isBridge && (
-                            <TextInput
-                              label="Wrap to address"
-                              value={wrapAddress}
-                              onChange={(e) =>
-                                setWrapAddress(e.currentTarget.value)
-                              }
-                              placeholder="0x..."
-                              disabled={
-                                !isDeployed ||
-                                !isInitialized ||
-                                (selectedBlockchain.isBridge &&
-                                  !tokenPairs.some(
-                                    (p) =>
-                                      p.original.toLowerCase() ===
-                                      (selectedToken?.toLowerCase() ?? "")
-                                  ))
-                              }
-                              styles={styles.input}
-                              mb="xs"
-                            />
-                          )}
-
-                          <Group align="flex-end" wrap="nowrap">
-                            <div style={{ flex: 1 }}>
-                              <AmountInput
-                                label={`Amount to wrap (${tokenSymbol})`}
-                                value={wrapAmount}
-                                onChange={(value) =>
-                                  setWrapAmount(
-                                    value === undefined ? "" : String(value)
-                                  )
-                                }
-                                placeholder="0.0"
-                                decimalScale={18}
-                                disabled={
-                                  !isDeployed ||
-                                  !isInitialized ||
-                                  (selectedBlockchain.isBridge &&
-                                    !tokenPairs.some(
-                                      (p) =>
-                                        p.original.toLowerCase() ===
-                                        (selectedToken?.toLowerCase() ?? "")
-                                    )) ||
-                                  !balance?.original
-                                }
-                                styles={styles.input}
-                              />
-                            </div>
-
-                            <ActionIcon
-                              size="lg"
-                              variant="light"
-                              color="blue"
-                              onClick={() => {
-                                if (balance?.original) {
-                                  setWrapAmount(balance.original);
-                                }
-                              }}
-                              disabled={
-                                !balance?.original ||
-                                Number(balance.original) <= 0
-                              }
-                              title="Use maximum available balance"
-                            >
-                              <IconMaximize size={18} />
-                            </ActionIcon>
-                          </Group>
-
-                          {balance?.original && (
-                            <Text size="xs" c="dimmed" mt={4}>
-                              Available:{" "}
-                              {Number(balance.original).toLocaleString(
-                                undefined,
-                                {
-                                  maximumFractionDigits: 6,
-                                }
-                              )}{" "}
-                              {tokenSymbol}
-                            </Text>
-                          )}
-
-                          <Button
-                            onClick={handleWrap}
-                            color="blue"
-                            disabled={
-                              !isDeployed ||
-                              !isInitialized ||
+                      {!selectedBlockchain.isBridge && (
+                        <TextInput
+                          label="Wrap to address"
+                          value={wrapAddress}
+                          onChange={(e) =>
+                            setWrapAddress(e.currentTarget.value)
+                          }
+                          placeholder="0x..."
+                          disabled={
+                            !isDeployed ||
+                            !isInitialized ||
+                            (selectedBlockchain.isBridge &&
                               !tokenPairs.some(
                                 (p) =>
                                   p.original.toLowerCase() ===
                                   (selectedToken?.toLowerCase() ?? "")
-                              ) ||
-                              !wrapAmount ||
-                              Number(wrapAmount) <= 0 ||
-                              (balance?.original &&
-                                Number(wrapAmount) > Number(balance.original))
-                            }
-                            mt="sm"
-                            fullWidth
-                          >
-                            Wrap {tokenSymbol}
-                          </Button>
-                        </Grid.Col>
-
-                        <Grid.Col span={{ base: 12, md: 6 }}>
-                          <Title order={6} mb="xs">
-                            Unwrap ← {wrappedTokenSymbol}
-                          </Title>
-
-                          <Group align="flex-end">
-                            <div style={{ flex: 1 }}>
-                              <AmountInput
-                                label={`Amount to unwrap (${wrappedTokenSymbol})`}
-                                value={unwrapAmount}
-                                onChange={(value) =>
-                                  setUnwrapAmount(
-                                    value === undefined ? "" : String(value)
-                                  )
-                                }
-                                placeholder="0.0"
-                                decimalScale={18}
-                                disabled={
-                                  !isDeployed ||
-                                  !isInitialized ||
-                                  !tokenPairs.some(
-                                    (p) =>
-                                      p.original.toLowerCase() ===
-                                      (selectedToken?.toLowerCase() ?? "")
-                                  ) ||
-                                  !balance?.wrapped
-                                }
-                                styles={styles.input}
-                              />
-                            </div>
-
-                            <ActionIcon
-                              size="lg"
-                              variant="light"
-                              color="blue"
-                              onClick={() => {
-                                if (balance?.wrapped) {
-                                  setUnwrapAmount(balance.wrapped);
-                                }
-                              }}
-                              disabled={
-                                !balance?.wrapped ||
-                                Number(balance.wrapped) <= 0
-                              }
-                              title="Use maximum wrapped balance"
-                            >
-                              <IconMaximize size={18} />
-                            </ActionIcon>
-                          </Group>
-
-                          {balance?.wrapped && (
-                            <Text size="xs" c="dimmed" mt={4}>
-                              Available:{" "}
-                              {Number(balance.wrapped).toLocaleString(
-                                undefined,
-                                {
-                                  maximumFractionDigits: 6,
-                                }
-                              )}{" "}
-                              {wrappedTokenSymbol}
-                            </Text>
-                          )}
-
-                          <Button
-                            onClick={handleUnwrap}
-                            color="violet"
-                            disabled={
-                              !isDeployed ||
-                              !isInitialized ||
-                              !tokenPairs.some(
-                                (p) =>
-                                  p.original.toLowerCase() ===
-                                  (selectedToken?.toLowerCase() ?? "")
-                              ) ||
-                              !unwrapAmount ||
-                              Number(unwrapAmount) <= 0 ||
-                              (balance?.wrapped &&
-                                Number(unwrapAmount) > Number(balance.wrapped))
-                            }
-                            mt="sm"
-                            fullWidth
-                          >
-                            Unwrap {wrappedTokenSymbol}
-                          </Button>
-                        </Grid.Col>
-                      </Grid>
-                    </Card>
-
-                    {isOwner && (
-                      <TokenPairsForm
-                        appContext={appContext}
-                        webcamRef={webcamRef}
-                        styles={styles}
-                      />
-                    )}
-
-                    {isOwner &&
-                      selectedToken === contractAddresses.yadaERC20Address && (
-                        <Card
-                          withBorder
-                          mt="md"
-                          radius="md"
-                          p="md"
-                          style={styles.card}
-                        >
-                          <MintForm
-                            walletManager={walletManager}
-                            appContext={appContext}
-                            webcamRef={webcamRef}
-                            tokenSymbol={tokenSymbol}
-                            wrappedTokenSymbol={wrappedTokenSymbol}
-                            styles={styles}
-                          />
-                          <BurnForm
-                            walletManager={walletManager}
-                            appContext={appContext}
-                            webcamRef={webcamRef}
-                            tokenSymbol={tokenSymbol}
-                            wrappedTokenSymbol={wrappedTokenSymbol}
-                            styles={styles}
-                          />
-                        </Card>
+                              ))
+                          }
+                          styles={styles.input}
+                          mb="xs"
+                        />
                       )}
-                  </>
-                )}
+
+                      <Group align="flex-end" wrap="nowrap">
+                        <div style={{ flex: 1 }}>
+                          <AmountInput
+                            label={`Amount to wrap (${tokenSymbol})`}
+                            value={wrapAmount}
+                            onChange={(value) =>
+                              setWrapAmount(
+                                value === undefined ? "" : String(value)
+                              )
+                            }
+                            placeholder="0.0"
+                            decimalScale={18}
+                            disabled={
+                              !isDeployed ||
+                              !isInitialized ||
+                              (selectedBlockchain.isBridge &&
+                                !tokenPairs.some(
+                                  (p) =>
+                                    p.original.toLowerCase() ===
+                                    (selectedToken?.toLowerCase() ?? "")
+                                )) ||
+                              !balance?.original
+                            }
+                            styles={styles.input}
+                          />
+                        </div>
+
+                        <ActionIcon
+                          size="lg"
+                          variant="light"
+                          color="blue"
+                          onClick={() => {
+                            if (balance?.original) {
+                              setWrapAmount(balance.original);
+                            }
+                          }}
+                          disabled={
+                            !balance?.original || Number(balance.original) <= 0
+                          }
+                          title="Use maximum available balance"
+                        >
+                          <IconMaximize size={18} />
+                        </ActionIcon>
+                      </Group>
+
+                      {balance?.original && (
+                        <Text size="xs" c="dimmed" mt={4}>
+                          Available:{" "}
+                          {Number(balance.original).toLocaleString(undefined, {
+                            maximumFractionDigits: 6,
+                          })}{" "}
+                          {tokenSymbol}
+                        </Text>
+                      )}
+
+                      <Button
+                        onClick={handleWrap}
+                        color="blue"
+                        disabled={
+                          !isDeployed ||
+                          !isInitialized ||
+                          !tokenPairs.some(
+                            (p) =>
+                              p.original.toLowerCase() ===
+                              (selectedToken?.toLowerCase() ?? "")
+                          ) ||
+                          !wrapAmount ||
+                          Number(wrapAmount) <= 0 ||
+                          (balance?.original &&
+                            Number(wrapAmount) > Number(balance.original))
+                        }
+                        mt="sm"
+                        fullWidth
+                        leftSection={<IconArrowDown size={16} />}
+                      >
+                        Wrap {tokenSymbol}
+                      </Button>
+                    </Grid.Col>
+
+                    <Grid.Col span={{ base: 12, md: 6 }}>
+                      <Title order={6} mb="xs">
+                        Unwrap ← {wrappedTokenSymbol}
+                      </Title>
+
+                      <Group align="flex-end">
+                        <div style={{ flex: 1 }}>
+                          <AmountInput
+                            label={`Amount to unwrap (${wrappedTokenSymbol})`}
+                            value={unwrapAmount}
+                            onChange={(value) =>
+                              setUnwrapAmount(
+                                value === undefined ? "" : String(value)
+                              )
+                            }
+                            placeholder="0.0"
+                            decimalScale={18}
+                            disabled={
+                              !isDeployed ||
+                              !isInitialized ||
+                              !tokenPairs.some(
+                                (p) =>
+                                  p.original.toLowerCase() ===
+                                  (selectedToken?.toLowerCase() ?? "")
+                              ) ||
+                              !balance?.wrapped
+                            }
+                            styles={styles.input}
+                          />
+                        </div>
+
+                        <ActionIcon
+                          size="lg"
+                          variant="light"
+                          color="blue"
+                          onClick={() => {
+                            if (balance?.wrapped) {
+                              setUnwrapAmount(balance.wrapped);
+                            }
+                          }}
+                          disabled={
+                            !balance?.wrapped || Number(balance.wrapped) <= 0
+                          }
+                          title="Use maximum wrapped balance"
+                        >
+                          <IconMaximize size={18} />
+                        </ActionIcon>
+                      </Group>
+
+                      {balance?.wrapped && (
+                        <Text size="xs" c="dimmed" mt={4}>
+                          Available:{" "}
+                          {Number(balance.wrapped).toLocaleString(undefined, {
+                            maximumFractionDigits: 6,
+                          })}{" "}
+                          {wrappedTokenSymbol}
+                        </Text>
+                      )}
+
+                      <Button
+                        onClick={handleUnwrap}
+                        color="violet"
+                        disabled={
+                          !isDeployed ||
+                          !isInitialized ||
+                          !tokenPairs.some(
+                            (p) =>
+                              p.original.toLowerCase() ===
+                              (selectedToken?.toLowerCase() ?? "")
+                          ) ||
+                          !unwrapAmount ||
+                          Number(unwrapAmount) <= 0 ||
+                          (balance?.wrapped &&
+                            Number(unwrapAmount) > Number(balance.wrapped))
+                        }
+                        mt="sm"
+                        fullWidth
+                        leftSection={<IconArrowUp size={16} />}
+                      >
+                        Unwrap {wrappedTokenSymbol}
+                      </Button>
+                    </Grid.Col>
+                  </Grid>
+                </Card>
+              )}
 
               {activeSection === "history" && (
                 <TransactionHistory
-                  combinedHistory={combinedHistory}
+                  combinedHistory={paginatedHistory}
                   allHistory={combinedHistory}
                   currentPage={currentPage}
                   totalPages={totalPages}
@@ -1825,6 +1329,7 @@ const Wallet2 = () => {
                         setSignResult(null);
                       }}
                       disabled={isSigning}
+                      leftSection={<IconX size={16} />}
                     >
                       Clear
                     </Button>
@@ -1834,6 +1339,7 @@ const Wallet2 = () => {
                       loading={isSigning}
                       disabled={isSigning || !messageToSign.trim()}
                       color="violet"
+                      leftSection={<IconCheck size={16} />}
                     >
                       Sign Message
                     </Button>
@@ -1890,6 +1396,7 @@ const Wallet2 = () => {
                               color: "green",
                             });
                           }}
+                          leftSection={<IconCopy size={14} />}
                         >
                           Copy signature
                         </Button>
@@ -1910,6 +1417,7 @@ const Wallet2 = () => {
                             color: "green",
                           });
                         }}
+                        leftSection={<IconCopy size={16} />}
                       >
                         Copy both
                       </Button>
@@ -1944,6 +1452,7 @@ const Wallet2 = () => {
                         onClick={handleSecureUpgrade}
                         loading={isSecureUpgradeFlow}
                         disabled={isScannerOpen}
+                        leftSection={<IconUpload size={16} />}
                       >
                         {secureUpgradeScans.length > 0
                           ? `Continue Secure Upgrade (${secureUpgradeScans.length}/2 keys scanned)`
@@ -1959,6 +1468,7 @@ const Wallet2 = () => {
                             setIsSecureUpgradeFlow(false);
                             setIsScannerOpen(false);
                           }}
+                          leftSection={<IconX size={16} />}
                         >
                           Cancel Upgrade
                         </Button>
@@ -1973,6 +1483,7 @@ const Wallet2 = () => {
                       <Button
                         color={blockchainColor}
                         onClick={handleLegacyUpgrade}
+                        leftSection={<IconUpload size={16} />}
                       >
                         Upgrade Contracts (Legacy)
                       </Button>
@@ -1983,21 +1494,71 @@ const Wallet2 = () => {
                     mt="md"
                     color={blockchainColor}
                     onClick={() => walletManager.emergencyRecover(appContext)}
+                    leftSection={<IconArrowDown size={16} />}
                   >
                     Recover tBNB from contract
                   </Button>
                 </Card>
               )}
 
-              <Group mt="xl">
-                <Button
-                  onClick={resetWalletState}
-                  color="red"
-                  variant="outline"
+              {activeSection === "admin" && (
+                <Card
+                  mt="md"
+                  shadow="sm"
+                  padding="lg"
+                  radius="md"
+                  withBorder
+                  style={styles.card}
                 >
-                  Erase Wallet Cache
-                </Button>
-              </Group>
+                  <Title order={4} mb="md">
+                    Wallet Management
+                  </Title>
+                  <Button
+                    onClick={resetWalletState}
+                    color="red"
+                    variant="outline"
+                    fullWidth
+                    leftSection={<IconTrash size={16} />}
+                  >
+                    Erase Wallet Cache
+                  </Button>
+                </Card>
+              )}
+
+              {activeSection === "admin" &&
+                isOwner &&
+                selectedBlockchain.isBridge &&
+                selectedToken === contractAddresses.yadaERC20Address && (
+                  <Card
+                    withBorder
+                    mt="md"
+                    radius="md"
+                    p="md"
+                    style={styles.card}
+                  >
+                    <Title order={4} mb="md">
+                      Token Management
+                    </Title>
+                    <TokenManagementForm
+                      walletManager={walletManager}
+                      appContext={appContext}
+                      webcamRef={webcamRef}
+                      tokenSymbol={tokenSymbol}
+                      wrappedTokenSymbol={wrappedTokenSymbol}
+                      styles={styles}
+                    />
+                  </Card>
+                )}
+
+              {activeSection === "admin" &&
+                isOwner &&
+                selectedBlockchain.isBridge && (
+                  <TokenPairsForm
+                    appContext={appContext}
+                    webcamRef={webcamRef}
+                    styles={styles}
+                  />
+                )}
 
               <QRScannerModal
                 isOpen={isScannerOpen}
@@ -2095,52 +1656,61 @@ const Wallet2 = () => {
       </AppShell.Main>
 
       <AppShell.Footer p="xs" withBorder>
-        <Group
-          grow
-          justify="center"
-          align="center"
-          style={{ maxWidth: 600, margin: "0 auto" }}
-        >
+        <Group grow justify="center" align="center" style={{ width: "100%" }}>
           <NavLink
-            label="Overview"
-            icon={<IconWallet size={22} />}
+            label={isSmOrLarger ? "Overview" : undefined}
+            leftSection={<IconWallet size={22} />}
             active={activeSection === "overview"}
             onClick={() => setActiveSection("overview")}
+            title="Overview"
           />
           <NavLink
-            label="Send"
-            icon={<IconSend size={22} />}
+            label={isSmOrLarger ? "Send" : undefined}
+            leftSection={<IconSend size={22} />}
             active={activeSection === "send"}
             onClick={() => setActiveSection("send")}
             disabled={!isInitialized}
+            title="Send"
           />
           <NavLink
-            label="Swap"
-            icon={<IconArrowsExchange size={22} />}
+            label={isSmOrLarger ? "Swap" : undefined}
+            leftSection={<IconArrowsExchange size={22} />}
             active={activeSection === "swap"}
             onClick={() => setActiveSection("swap")}
             disabled={selectedBlockchain.id !== "bsc" || !isInitialized}
+            title="Swap"
           />
           <NavLink
-            label="Bridge"
-            icon={<IconTransfer size={22} />}
-            active={activeSection === "bridge"}
-            onClick={() => setActiveSection("bridge")}
-            disabled={!selectedBlockchain.isBridge || !isInitialized}
+            label={isSmOrLarger ? "Wrap" : undefined}
+            leftSection={<IconTransfer size={22} />}
+            active={activeSection === "wrap"}
+            onClick={() => setActiveSection("wrap")}
+            disabled={!isInitialized}
+            title="Wrap"
           />
           <NavLink
-            label="History"
-            icon={<IconHistory size={22} />}
+            label={isSmOrLarger ? "History" : undefined}
+            leftSection={<IconHistory size={22} />}
             active={activeSection === "history"}
             onClick={() => setActiveSection("history")}
+            title="History"
+          />
+          <NavLink
+            label={isSmOrLarger ? "Sign" : undefined}
+            leftSection={<IconShieldLock size={22} />}
+            active={activeSection === "sign"}
+            onClick={() => setActiveSection("sign")}
+            disabled={!privateKey || !isInitialized}
+            title="Sign"
           />
           {isOwner && (
             <NavLink
-              label="Admin"
-              icon={<IconShieldLock size={22} />}
+              label={isSmOrLarger ? "Admin" : undefined}
+              leftSection={<IconShieldLock size={22} />}
               active={activeSection === "admin"}
               onClick={() => setActiveSection("admin")}
               color="orange"
+              title="Admin"
             />
           )}
         </Group>

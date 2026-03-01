@@ -20,7 +20,6 @@ const WalletStateHandler = ({
   log,
   onDeployContracts,
   onRotateKey,
-  onReset,
   isDeployed,
   styles,
 }) => {

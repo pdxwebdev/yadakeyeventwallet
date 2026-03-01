@@ -1,11 +1,11 @@
+import { Card, Text, Button, Group, Tooltip } from "@mantine/core";
 import {
-  Card,
-  Text,
-  Button,
-  Group,
-  Tooltip,
-} from "@mantine/core";
-import { IconInfoCircle } from "@tabler/icons-react";
+  IconInfoCircle,
+  IconRefresh,
+  IconCopy,
+  IconQrcode,
+} from "@tabler/icons-react";
+import TokenSelector from "./TokenSelector";
 
 const WalletBalance = ({
   balance,
@@ -31,6 +31,7 @@ const WalletBalance = ({
         </Text>
       )}
 
+      <TokenSelector styles={styles} />
       {balance ? (
         <>
           {selectedBlockchain.isBridge && (
@@ -66,9 +67,15 @@ const WalletBalance = ({
         </Text>
       )}
       <Group mt="md">
-        <Button onClick={onRefresh}>Refresh Balance</Button>
-        <Button onClick={onCopyAddress}>Copy Address</Button>
-        <Button onClick={onShowQR}>Show QR</Button>
+        <Button onClick={onRefresh} leftSection={<IconRefresh size={16} />}>
+          Refresh Balance
+        </Button>
+        <Button onClick={onCopyAddress} leftSection={<IconCopy size={16} />}>
+          Copy Address
+        </Button>
+        <Button onClick={onShowQR} leftSection={<IconQrcode size={16} />}>
+          Show QR
+        </Button>
       </Group>
     </Card>
   );

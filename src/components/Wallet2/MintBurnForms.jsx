@@ -6,6 +6,7 @@ import {
   Stack,
   FileButton,
   Text,
+  Divider,
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { ethers } from "ethers";
@@ -13,7 +14,7 @@ import React from "react";
 import { IconTrash, IconUpload } from "@tabler/icons-react";
 import AmountInput from "./AmountInput";
 
-const MintForm = ({
+const TokenManagementForm = ({
   walletManager,
   appContext,
   webcamRef,
@@ -23,30 +24,35 @@ const MintForm = ({
 }) => {
   const { selectedToken } = appContext;
 
-  const [entries, setEntries] = React.useState([
+  const [mintEntries, setMintEntries] = React.useState([
     { id: "1", address: "", amount: "" },
   ]);
 
-  const addEntry = () => {
-    setEntries([
-      ...entries,
+  const [burnEntries, setBurnEntries] = React.useState([
+    { id: "1", address: "", amount: "" },
+  ]);
+
+  // Mint operations
+  const addMintEntry = () => {
+    setMintEntries([
+      ...mintEntries,
       { id: Date.now().toString(), address: "", amount: "" },
     ]);
   };
 
-  const removeEntry = (id) => {
-    if (entries.length > 1) {
-      setEntries(entries.filter((e) => e.id !== id));
+  const removeMintEntry = (id) => {
+    if (mintEntries.length > 1) {
+      setMintEntries(mintEntries.filter((e) => e.id !== id));
     }
   };
 
-  const updateEntry = (id, field, value) => {
-    setEntries(
-      entries.map((e) => (e.id === id ? { ...e, [field]: value } : e))
+  const updateMintEntry = (id, field, value) => {
+    setMintEntries(
+      mintEntries.map((e) => (e.id === id ? { ...e, [field]: value } : e))
     );
   };
 
-  const handleCsvImport = (file) => {
+  const handleMintCsvImport = (file) => {
     if (!file) return;
 
     const reader = new FileReader();
@@ -106,7 +112,7 @@ const MintForm = ({
         return;
       }
 
-      setEntries(newEntries);
+      setMintEntries(newEntries);
       notifications.show({
         title: "Success",
         message: `Imported ${newEntries.length} recipients from CSV`,
@@ -118,7 +124,7 @@ const MintForm = ({
   };
 
   const handleMint = async () => {
-    const validEntries = entries.filter(
+    const validEntries = mintEntries.filter(
       (e) =>
         ethers.isAddress(e.address) &&
         e.amount &&
@@ -136,11 +142,10 @@ const MintForm = ({
     }
 
     try {
-      // Single bulk call with array of recipients
       await walletManager.mintTokens(
         appContext,
         webcamRef,
-        selectedToken, // kept for compatibility, but not used directly anymore
+        selectedToken,
         validEntries
       );
 
@@ -150,8 +155,7 @@ const MintForm = ({
         color: "green",
       });
 
-      // Reset form
-      setEntries([{ id: "1", address: "", amount: "" }]);
+      setMintEntries([{ id: "1", address: "", amount: "" }]);
       await walletManager.fetchBalance(appContext);
       await walletManager.buildTransactionHistory(appContext);
     } catch (error) {
@@ -163,119 +167,27 @@ const MintForm = ({
     }
   };
 
-  const isSubmitDisabled =
-    !selectedToken ||
-    entries.every(
-      (e) => !e.address || !e.amount || parseFloat(e.amount || "0") <= 0
-    );
-
-  return (
-    <Stack mt="md">
-      {entries.map((entry, index) => (
-        <Group key={entry.id} align="flex-end">
-          <TextInput
-            label={index === 0 ? "Recipient Address" : ""}
-            placeholder="Enter recipient address"
-            value={entry.address}
-            onChange={(e) =>
-              updateEntry(entry.id, "address", e.currentTarget.value)
-            }
-            error={entry.address !== "" && !ethers.isAddress(entry.address)}
-            style={{ flex: 1 }}
-            styles={styles.input}
-          />
-          <AmountInput
-            label={index === 0 ? `Amount (${wrappedTokenSymbol})` : ""}
-            placeholder="Amount to mint"
-            value={entry.amount}
-            onChange={(value) =>
-              updateEntry(
-                entry.id,
-                "amount",
-                value === undefined ? "" : value.toString()
-              )
-            }
-            decimalScale={18}
-            disabled={!selectedToken}
-            style={{ flex: 1 }}
-            styles={styles.input}
-          />
-          {entries.length > 1 && (
-            <ActionIcon
-              color="red"
-              variant="subtle"
-              onClick={() => removeEntry(entry.id)}
-              mb="sm"
-            >
-              <IconTrash size={20} />
-            </ActionIcon>
-          )}
-        </Group>
-      ))}
-
-      <Group justify="space-between">
-        <Group>
-          <Button variant="outline" onClick={addEntry}>
-            Add Recipient
-          </Button>
-          <FileButton onChange={handleCsvImport} accept=".csv,text/csv">
-            {(props) => (
-              <Button
-                {...props}
-                leftSection={<IconUpload size={16} />}
-                variant="outline"
-              >
-                Import CSV
-              </Button>
-            )}
-          </FileButton>
-        </Group>
-        <Button onClick={handleMint} disabled={isSubmitDisabled}>
-          Mint Tokens
-        </Button>
-      </Group>
-
-      <Text size="sm" color="dimmed">
-        CSV format: address,amount (one per line). Header row optional.
-      </Text>
-    </Stack>
-  );
-};
-
-const BurnForm = ({
-  walletManager,
-  appContext,
-  webcamRef,
-  tokenSymbol,
-  wrappedTokenSymbol,
-  styles,
-}) => {
-  const { selectedToken } = appContext;
-
-  const [entries, setEntries] = React.useState([
-    { id: "1", address: "", amount: "" },
-  ]);
-
-  const addEntry = () => {
-    setEntries([
-      ...entries,
+  // Burn operations
+  const addBurnEntry = () => {
+    setBurnEntries([
+      ...burnEntries,
       { id: Date.now().toString(), address: "", amount: "" },
     ]);
   };
 
-  const removeEntry = (id) => {
-    if (entries.length > 1) {
-      setEntries(entries.filter((e) => e.id !== id));
+  const removeBurnEntry = (id) => {
+    if (burnEntries.length > 1) {
+      setBurnEntries(burnEntries.filter((e) => e.id !== id));
     }
   };
 
-  const updateEntry = (id, field, value) => {
-    setEntries(
-      entries.map((e) => (e.id === id ? { ...e, [field]: value } : e))
+  const updateBurnEntry = (id, field, value) => {
+    setBurnEntries(
+      burnEntries.map((e) => (e.id === id ? { ...e, [field]: value } : e))
     );
   };
 
-  const handleCsvImport = (file) => {
+  const handleBurnCsvImport = (file) => {
     if (!file) return;
 
     const reader = new FileReader();
@@ -335,7 +247,7 @@ const BurnForm = ({
         return;
       }
 
-      setEntries(newEntries);
+      setBurnEntries(newEntries);
       notifications.show({
         title: "Success",
         message: `Imported ${newEntries.length} accounts from CSV`,
@@ -347,7 +259,7 @@ const BurnForm = ({
   };
 
   const handleBurn = async () => {
-    const validEntries = entries.filter(
+    const validEntries = burnEntries.filter(
       (e) =>
         ethers.isAddress(e.address) &&
         e.amount &&
@@ -365,7 +277,6 @@ const BurnForm = ({
     }
 
     try {
-      // Single bulk call with array of accounts to burn from
       await walletManager.burnTokens(
         appContext,
         webcamRef,
@@ -379,8 +290,7 @@ const BurnForm = ({
         color: "green",
       });
 
-      // Reset form
-      setEntries([{ id: "1", address: "", amount: "" }]);
+      setBurnEntries([{ id: "1", address: "", amount: "" }]);
       await walletManager.fetchBalance(appContext);
       await walletManager.buildTransactionHistory(appContext);
     } catch (error) {
@@ -392,83 +302,179 @@ const BurnForm = ({
     }
   };
 
-  const isSubmitDisabled =
+  const isMintDisabled =
     !selectedToken ||
-    entries.every(
+    mintEntries.every(
+      (e) => !e.address || !e.amount || parseFloat(e.amount || "0") <= 0
+    );
+
+  const isBurnDisabled =
+    !selectedToken ||
+    burnEntries.every(
       (e) => !e.address || !e.amount || parseFloat(e.amount || "0") <= 0
     );
 
   return (
-    <Stack mt="md">
-      {entries.map((entry, index) => (
-        <Group key={entry.id} align="flex-end">
-          <TextInput
-            label={index === 0 ? "Account Address" : ""}
-            placeholder="Enter account address"
-            value={entry.address}
-            onChange={(e) =>
-              updateEntry(entry.id, "address", e.currentTarget.value)
-            }
-            error={entry.address !== "" && !ethers.isAddress(entry.address)}
-            style={{ flex: 1 }}
-            styles={styles.input}
-          />
-          <AmountInput
-            label={index === 0 ? `Amount (${wrappedTokenSymbol})` : ""}
-            placeholder="Amount to burn"
-            value={entry.amount}
-            onChange={(value) =>
-              updateEntry(
-                entry.id,
-                "amount",
-                value === undefined ? "" : value.toString()
-              )
-            }
-            decimalScale={18}
-            disabled={!selectedToken}
-            style={{ flex: 1 }}
-            styles={styles.input}
-          />
-          {entries.length > 1 && (
-            <ActionIcon
-              color="red"
-              variant="subtle"
-              onClick={() => removeEntry(entry.id)}
-              mb="sm"
-            >
-              <IconTrash size={20} />
-            </ActionIcon>
-          )}
-        </Group>
-      ))}
+    <Stack gap="lg">
+      {/* Mint Section */}
+      <div>
+        <Text size="sm" fw={500} mb="md">
+          Mint Tokens
+        </Text>
+        <Stack gap="sm">
+          {mintEntries.map((entry, index) => (
+            <Group key={entry.id} align="flex-end">
+              <TextInput
+                label={index === 0 ? "Recipient Address" : ""}
+                placeholder="Enter recipient address"
+                value={entry.address}
+                onChange={(e) =>
+                  updateMintEntry(entry.id, "address", e.currentTarget.value)
+                }
+                error={entry.address !== "" && !ethers.isAddress(entry.address)}
+                style={{ flex: 1 }}
+                styles={styles.input}
+              />
+              <AmountInput
+                label={index === 0 ? `Amount (${wrappedTokenSymbol})` : ""}
+                placeholder="Amount to mint"
+                value={entry.amount}
+                onChange={(value) =>
+                  updateMintEntry(
+                    entry.id,
+                    "amount",
+                    value === undefined ? "" : value.toString()
+                  )
+                }
+                decimalScale={18}
+                disabled={!selectedToken}
+                style={{ flex: 1 }}
+                styles={styles.input}
+              />
+              {mintEntries.length > 1 && (
+                <ActionIcon
+                  color="red"
+                  variant="subtle"
+                  onClick={() => removeMintEntry(entry.id)}
+                  mb="sm"
+                >
+                  <IconTrash size={20} />
+                </ActionIcon>
+              )}
+            </Group>
+          ))}
 
-      <Group justify="space-between">
-        <Group>
-          <Button variant="outline" onClick={addEntry}>
-            Add Account
-          </Button>
-          <FileButton onChange={handleCsvImport} accept=".csv,text/csv">
-            {(props) => (
-              <Button
-                {...props}
-                leftSection={<IconUpload size={16} />}
-                variant="outline"
-              >
-                Import CSV
+          <Group justify="space-between">
+            <Group>
+              <Button variant="outline" onClick={addMintEntry}>
+                Add Recipient
               </Button>
-            )}
-          </FileButton>
-        </Group>
-        <Button onClick={handleBurn} disabled={isSubmitDisabled}>
-          Burn Tokens
-        </Button>
-      </Group>
+              <FileButton onChange={handleMintCsvImport} accept=".csv,text/csv">
+                {(props) => (
+                  <Button
+                    {...props}
+                    leftSection={<IconUpload size={16} />}
+                    variant="outline"
+                  >
+                    Import CSV
+                  </Button>
+                )}
+              </FileButton>
+            </Group>
+            <Button onClick={handleMint} disabled={isMintDisabled}>
+              Mint Tokens
+            </Button>
+          </Group>
 
-      <Text size="sm" color="dimmed">
-        CSV format: address,amount (one per line). Header row optional.
-      </Text>
+          <Text size="xs" c="dimmed">
+            CSV format: address,amount (one per line). Header row optional.
+          </Text>
+        </Stack>
+      </div>
+
+      <Divider />
+
+      {/* Burn Section */}
+      <div>
+        <Text size="sm" fw={500} mb="md">
+          Burn Tokens
+        </Text>
+        <Stack gap="sm">
+          {burnEntries.map((entry, index) => (
+            <Group key={entry.id} align="flex-end">
+              <TextInput
+                label={index === 0 ? "Account Address" : ""}
+                placeholder="Enter account address"
+                value={entry.address}
+                onChange={(e) =>
+                  updateBurnEntry(entry.id, "address", e.currentTarget.value)
+                }
+                error={entry.address !== "" && !ethers.isAddress(entry.address)}
+                style={{ flex: 1 }}
+                styles={styles.input}
+              />
+              <AmountInput
+                label={index === 0 ? `Amount (${wrappedTokenSymbol})` : ""}
+                placeholder="Amount to burn"
+                value={entry.amount}
+                onChange={(value) =>
+                  updateBurnEntry(
+                    entry.id,
+                    "amount",
+                    value === undefined ? "" : value.toString()
+                  )
+                }
+                decimalScale={18}
+                disabled={!selectedToken}
+                style={{ flex: 1 }}
+                styles={styles.input}
+              />
+              {burnEntries.length > 1 && (
+                <ActionIcon
+                  color="red"
+                  variant="subtle"
+                  onClick={() => removeBurnEntry(entry.id)}
+                  mb="sm"
+                >
+                  <IconTrash size={20} />
+                </ActionIcon>
+              )}
+            </Group>
+          ))}
+
+          <Group justify="space-between">
+            <Group>
+              <Button variant="outline" onClick={addBurnEntry}>
+                Add Account
+              </Button>
+              <FileButton onChange={handleBurnCsvImport} accept=".csv,text/csv">
+                {(props) => (
+                  <Button
+                    {...props}
+                    leftSection={<IconUpload size={16} />}
+                    variant="outline"
+                  >
+                    Import CSV
+                  </Button>
+                )}
+              </FileButton>
+            </Group>
+            <Button onClick={handleBurn} disabled={isBurnDisabled} color="red">
+              Burn Tokens
+            </Button>
+          </Group>
+
+          <Text size="xs" c="dimmed">
+            CSV format: address,amount (one per line). Header row optional.
+          </Text>
+        </Stack>
+      </div>
     </Stack>
   );
 };
 
-export { MintForm, BurnForm };
+// Export legacy names for backward compatibility
+const MintForm = TokenManagementForm;
+const BurnForm = TokenManagementForm;
+
+export { TokenManagementForm, MintForm, BurnForm };

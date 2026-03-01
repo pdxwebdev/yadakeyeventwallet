@@ -11,7 +11,7 @@ import {
   Title,
   ActionIcon,
 } from "@mantine/core";
-import { IconMaximize } from "@tabler/icons-react"; // or any max icon you like
+import { IconMaximize, IconX, IconPlus, IconSend } from "@tabler/icons-react"; // or any max icon you like
 import { useAppContext } from "../../context/AppContext";
 import { BLOCKCHAINS } from "../../shared/constants";
 import { useState } from "react";
@@ -99,6 +99,7 @@ const TransactionForm = ({
                 color="red"
                 variant="outline"
                 onClick={() => onRemoveRecipient(index)}
+                leftSection={<IconX size={16} />}
               >
                 Remove
               </Button>
@@ -108,10 +109,18 @@ const TransactionForm = ({
       })}
 
       <Group mt="md">
-        <Button onClick={onAddRecipient} variant="outline">
+        <Button
+          onClick={onAddRecipient}
+          variant="outline"
+          leftSection={<IconPlus size={16} />}
+        >
           Add Recipient
         </Button>
-        <Button onClick={onSendTransaction} color="teal">
+        <Button
+          onClick={onSendTransaction}
+          color="teal"
+          leftSection={<IconSend size={16} />}
+        >
           {sendWrapped ? "Send Y" + token?.symbol : "Send " + token?.symbol}
         </Button>
       </Group>

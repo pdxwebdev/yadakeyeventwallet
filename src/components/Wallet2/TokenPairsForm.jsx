@@ -9,6 +9,7 @@ import {
   Text,
   Title,
 } from "@mantine/core";
+import { IconX, IconPlus, IconCheck } from "@tabler/icons-react";
 import { useForm } from "@mantine/form";
 import { ethers } from "ethers";
 import { useAppContext } from "../../context/AppContext";
@@ -102,14 +103,21 @@ const TokenPairsForm = ({ appContext, webcamRef, styles }) => {
                 color="red"
                 onClick={() => removeTokenPair(index)}
                 disabled={form.values.tokenPairs.length === 1}
+                leftSection={<IconX size={16} />}
               >
                 Remove
               </Button>
             </Group>
           ))}
           <Group>
-            <Button onClick={addTokenPair}>Add Token Pair</Button>
-            <Button type="submit" loading={loading}>
+            <Button onClick={addTokenPair} leftSection={<IconPlus size={16} />}>
+              Add Token Pair
+            </Button>
+            <Button
+              type="submit"
+              loading={loading}
+              leftSection={<IconCheck size={16} />}
+            >
               Submit
             </Button>
           </Group>

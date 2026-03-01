@@ -9,6 +9,7 @@ import {
   Title,
   Switch,
 } from "@mantine/core";
+import { IconQrcode, IconSend } from "@tabler/icons-react";
 import { notifications } from "@mantine/notifications";
 import { useAppContext } from "../../context/AppContext";
 import { decompressPublicKey, fromWIF, getP2PKH } from "../../utils/hdWallet";
@@ -332,6 +333,7 @@ const SendBalanceForm = ({ appContext, webcamRef }) => {
           onClick={handleScanQR}
           disabled={isLoading}
           styles={styles.button}
+          leftSection={<IconQrcode size={16} />}
         >
           Scan QR Code
         </Button>
@@ -360,6 +362,7 @@ const SendBalanceForm = ({ appContext, webcamRef }) => {
             parseFloat(balance.value) <= 0
           }
           styles={styles.button}
+          leftSection={<IconSend size={16} />}
         >
           Send {balance ? balance.symbol : "Balance"}
         </Button>

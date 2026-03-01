@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { Card, Title, Group, NumberInput, Button, Text } from "@mantine/core";
+import { IconPlus, IconMinus } from "@tabler/icons-react";
 import { notifications } from "@mantine/notifications";
 import { ethers } from "ethers";
 import { styles } from "../../shared/styles";
@@ -142,6 +143,7 @@ export const LiquidityForm = ({ appContext, webcamRef, walletManager }) => {
           size="xs"
           variant={mode === "add" ? "filled" : "light"}
           onClick={() => setMode("add")}
+          leftSection={<IconPlus size={14} />}
         >
           Add
         </Button>
@@ -149,6 +151,7 @@ export const LiquidityForm = ({ appContext, webcamRef, walletManager }) => {
           size="xs"
           variant={mode === "remove" ? "filled" : "light"}
           onClick={() => setMode("remove")}
+          leftSection={<IconMinus size={14} />}
         >
           Remove
         </Button>
@@ -197,6 +200,7 @@ export const LiquidityForm = ({ appContext, webcamRef, walletManager }) => {
               parseFloat(amountUSDT) === 0 ||
               parseFloat(amountWYDA) === 0
             }
+            leftSection={<IconPlus size={16} />}
           >
             Add USDT/WYDA Liquidity
           </Button>
@@ -220,6 +224,7 @@ export const LiquidityForm = ({ appContext, webcamRef, walletManager }) => {
             onClick={removeLiquidity}
             loading={loading}
             disabled={!lpAmount || parseFloat(lpAmount) === 0}
+            leftSection={<IconMinus size={16} />}
           >
             Remove USDT/WYDA Liquidity
           </Button>

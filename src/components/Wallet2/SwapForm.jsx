@@ -9,6 +9,7 @@ import {
   Loader,
   Text,
 } from "@mantine/core";
+import { IconArrowsExchange } from "@tabler/icons-react";
 import { useAppContext } from "../../context/AppContext";
 import { notifications } from "@mantine/notifications";
 import { ethers } from "ethers";
@@ -293,6 +294,7 @@ export const SwapForm = ({ appContext, walletManager }) => {
         onClick={executeSwap}
         loading={loading}
         disabled={!canSwap}
+        leftSection={<IconArrowsExchange size={16} />}
       >
         {loading
           ? "Submitting…"
