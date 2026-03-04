@@ -8,8 +8,10 @@ import {
   Group,
   Select,
   Flex,
+  Loader,
 } from "@mantine/core";
-import { useState } from "react";
+import { useState, useEffect, useMemo } from "react";
+import { ethers } from "ethers";
 import { useAppContext } from "../../context/AppContext";
 import { BLOCKCHAINS } from "../../shared/constants";
 import { IconDownload } from "@tabler/icons-react";
@@ -24,20 +26,106 @@ const TransactionHistory = ({
   // Add this prop to get ALL history (not just paginated)
   allHistory = combinedHistory, // fallback to current if not provided
 }) => {
+  const { selectedToken, supportedTokens } = useAppContext();
   const [rowsPerPage, setRowsPerPage] = useState("3");
+  const [tokenTransfers, setTokenTransfers] = useState({});
+  const [transfersLoading, setTransfersLoading] = useState(false);
   const rowsPerPageNum = parseInt(rowsPerPage, 10);
   const calculatedTotalPages = Math.ceil(allHistory.length / rowsPerPageNum);
   const startIdx = (currentPage - 1) * rowsPerPageNum;
   const endIdx = startIdx + rowsPerPageNum;
-  const paginatedHistory = allHistory.slice(startIdx, endIdx);
-  let token;
+  const paginatedHistory = useMemo(
+    () => allHistory.slice(startIdx, endIdx),
+    [allHistory, startIdx, endIdx]
+  );
+  const pageKey = useMemo(
+    () => paginatedHistory.map((item) => item.id).join(","),
+    [paginatedHistory]
+  );
+
+  let tokenSymbol;
   if (selectedBlockchain.isBridge) {
-    const { selectedToken, supportedTokens } = useAppContext();
-    token = supportedTokens.find((entry) => entry.address === selectedToken);
-    if (!token) return <></>;
+    const found = supportedTokens.find(
+      (t) => t.address?.toLowerCase() === selectedToken?.toLowerCase()
+    );
+    tokenSymbol = found?.symbol ?? selectedToken?.slice(0, 6) ?? "Token";
   } else {
-    token = { symbol: "YDA" };
+    tokenSymbol = selectedBlockchain.id.toUpperCase();
   }
+
+  useEffect(() => {
+    if (!selectedBlockchain?.chainId) return;
+    const apiKey = import.meta.env.VITE_BSCSCAN_API_KEY;
+    if (!apiKey) return;
+
+    const isNative =
+      !selectedToken ||
+      selectedToken === ethers.ZeroAddress ||
+      selectedToken === "0x0000000000000000000000000000000000000000";
+
+    const chainId = selectedBlockchain.chainId;
+    const action = isNative ? "txlist" : "tokentx";
+
+    // Dedupe by address — fetch once per unique address visible on this page
+    const addressSet = new Set(
+      paginatedHistory
+        .map((item) => item.address || item.public_key_hash)
+        .filter(Boolean)
+    );
+
+    if (addressSet.size === 0) return;
+
+    setTransfersLoading(true);
+
+    const fetchAll = async () => {
+      const updates = {};
+
+      await Promise.all(
+        [...addressSet].map(async (address) => {
+          try {
+            let url = `https://api.etherscan.io/v2/api?chainid=${chainId}&module=account&action=${action}&address=${address}&sort=asc&apikey=${apiKey}`;
+            if (!isNative) {
+              url += `&contractaddress=${selectedToken}`;
+            }
+            const res = await fetch(url);
+            const data = await res.json();
+            const txList = Array.isArray(data?.result) ? data.result : [];
+
+            for (const tx of txList) {
+              const hash = tx.hash?.toLowerCase();
+              if (!hash) continue;
+              const isReceived = tx.to?.toLowerCase() === address.toLowerCase();
+              const rawValue = tx.value ?? "0";
+              let formatted;
+              try {
+                formatted = isNative
+                  ? ethers.formatEther(BigInt(rawValue))
+                  : ethers.formatUnits(
+                      BigInt(rawValue),
+                      parseInt(tx.tokenDecimal ?? "18", 10)
+                    );
+              } catch {
+                formatted = "0";
+              }
+              // Key by address so all rows for that address share the same lookup
+              updates[address.toLowerCase()] = {
+                value: formatted,
+                isReceived,
+                symbol: isNative ? tokenSymbol : tx.tokenSymbol || tokenSymbol,
+              };
+            }
+          } catch (e) {
+            console.warn(`Error fetching transfers for ${address}:`, e);
+          }
+        })
+      );
+
+      setTokenTransfers((prev) => ({ ...prev, ...updates }));
+      setTransfersLoading(false);
+    };
+
+    fetchAll();
+  }, [pageKey, selectedToken, selectedBlockchain?.chainId]);
 
   // Function to convert data to CSV and trigger download
   const downloadCSV = () => {
@@ -73,7 +161,7 @@ const TransactionHistory = ({
             ...base,
             output.to || "",
             output.value || "",
-            token.symbol,
+            tokenSymbol,
             item.status || (item.mempool ? "Pending" : "Confirmed"),
             item.totalReceived || "",
             item.totalSent || "",
@@ -83,7 +171,7 @@ const TransactionHistory = ({
             ...base,
             "", // To
             "", // Amount
-            token.symbol,
+            tokenSymbol,
             item.status || (item.mempool ? "Pending" : "Confirmed"),
             item.totalReceived || "",
             item.totalSent || "",
@@ -157,24 +245,53 @@ const TransactionHistory = ({
                         TxID: {item.id?.slice(0, 8)}...
                       </a>
                     </Text>
-                    {item.outputs?.length > 0 ? (
-                      item.outputs.map((output, idx) => (
-                        <Text key={idx}>
-                          To: {output.to} / Amount: {output.value}{" "}
-                          {token.symbol}
-                        </Text>
-                      ))
-                    ) : (
-                      <Text>No outputs available</Text>
-                    )}
-                    <Text>Date: {item.date}</Text>
+                    {(() => {
+                      const addrKey = (
+                        item.address || item.public_key_hash
+                      )?.toLowerCase();
+                      const live = addrKey ? tokenTransfers[addrKey] : null;
+                      if (live) {
+                        return (
+                          <Text c={live.isReceived ? "green" : "red"} fw={500}>
+                            {live.isReceived ? "+" : "-"}
+                            {live.value} {live.symbol}
+                          </Text>
+                        );
+                      }
+                      if (!live && transfersLoading) {
+                        return <Loader size="xs" />;
+                      }
+                      // Fallback: key events or no live data yet
+                      if (item.outputs?.length > 0) {
+                        return item.outputs.map((output, idx) => {
+                          const isSent = item.type?.includes("Sent");
+                          const isReceived = item.type?.includes("Received");
+                          return (
+                            <Text
+                              key={idx}
+                              c={
+                                isSent ? "red" : isReceived ? "green" : "dimmed"
+                              }
+                              fw={500}
+                            >
+                              {isSent ? "-" : isReceived ? "+" : ""}
+                              {output.value} {tokenSymbol}
+                            </Text>
+                          );
+                        });
+                      }
+                      return <Text c="dimmed">N/A</Text>;
+                    })()}
+                    <Text size="sm" c="dimmed">
+                      Date: {item.date}
+                    </Text>
                     {item.type === "Sent Key Event" && (
                       <>
-                        <Text>
-                          Total Received: {item.totalReceived} {token.symbol}
+                        <Text size="sm">
+                          Total Received: {item.totalReceived} {tokenSymbol}
                         </Text>
-                        <Text>
-                          Total Sent: {item.totalSent} {token.symbol}
+                        <Text size="sm">
+                          Total Sent: {item.totalSent} {tokenSymbol}
                         </Text>
                       </>
                     )}
