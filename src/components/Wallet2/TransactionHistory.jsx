@@ -10,7 +10,7 @@ import {
   Flex,
   Loader,
 } from "@mantine/core";
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { ethers } from "ethers";
 import { useAppContext } from "../../context/AppContext";
 import { BLOCKCHAINS } from "../../shared/constants";
@@ -27,9 +27,32 @@ const TransactionHistory = ({
   allHistory = combinedHistory, // fallback to current if not provided
 }) => {
   const { selectedToken, supportedTokens } = useAppContext();
-  const [rowsPerPage, setRowsPerPage] = useState("3");
+  const [rowsPerPage, setRowsPerPage] = useState("5");
   const [tokenTransfers, setTokenTransfers] = useState({});
   const [transfersLoading, setTransfersLoading] = useState(false);
+  const [refetchKey, setRefetchKey] = useState(0);
+  // Stable ref so the fetch effect can check already-loaded addresses without
+  // adding tokenTransfers as a dep (which would cause infinite loops).
+  const tokenTransfersRef = useRef(tokenTransfers);
+  useEffect(() => {
+    tokenTransfersRef.current = tokenTransfers;
+  }, [tokenTransfers]);
+
+  // Clear in-memory cache whenever token or chain changes so stale entries
+  // don't block fetching for the new selection.
+  useEffect(() => {
+    setTokenTransfers({});
+  }, [selectedToken, selectedBlockchain?.chainId]);
+
+  const clearCache = () => {
+    const chainId = selectedBlockchain?.chainId;
+    const prefix = `token_transfers_${chainId}_`;
+    Object.keys(localStorage)
+      .filter((k) => k.startsWith(prefix))
+      .forEach((k) => localStorage.removeItem(k));
+    setTokenTransfers({});
+    setRefetchKey((k) => k + 1); // force the fetch effect to re-run
+  };
   const rowsPerPageNum = parseInt(rowsPerPage, 10);
   const calculatedTotalPages = Math.ceil(allHistory.length / rowsPerPageNum);
   const startIdx = (currentPage - 1) * rowsPerPageNum;
@@ -66,66 +89,138 @@ const TransactionHistory = ({
     const chainId = selectedBlockchain.chainId;
     const action = isNative ? "txlist" : "tokentx";
 
-    // Dedupe by address — fetch once per unique address visible on this page
+    // Dedupe by address — skip addresses already loaded in state or cache
+    const alreadyLoaded = tokenTransfersRef.current;
     const addressSet = new Set(
       paginatedHistory
         .map((item) => item.address || item.public_key_hash)
         .filter(Boolean)
+        .filter((addr) => !alreadyLoaded[addr.toLowerCase()])
     );
 
     if (addressSet.size === 0) return;
 
     setTransfersLoading(true);
 
+    const REQUEST_INTERVAL_MS = 210; // just under 5/sec
+    const MAX_RETRIES = 3;
+
     const fetchAll = async () => {
       const updates = {};
+      const addressList = [...addressSet];
 
-      await Promise.all(
-        [...addressSet].map(async (address) => {
-          try {
-            let url = `https://api.etherscan.io/v2/api?chainid=${chainId}&module=account&action=${action}&address=${address}&sort=asc&apikey=${apiKey}`;
-            if (!isNative) {
-              url += `&contractaddress=${selectedToken}`;
-            }
-            const res = await fetch(url);
-            const data = await res.json();
-            const txList = Array.isArray(data?.result) ? data.result : [];
+      const fetchAddress = async (address) => {
+        const cacheKey = `token_transfers_${chainId}_${address.toLowerCase()}_${
+          selectedToken ?? "native"
+        }`;
 
-            for (const tx of txList) {
-              const hash = tx.hash?.toLowerCase();
-              if (!hash) continue;
-              const isReceived = tx.to?.toLowerCase() === address.toLowerCase();
-              const rawValue = tx.value ?? "0";
-              let formatted;
-              try {
-                formatted = isNative
-                  ? ethers.formatEther(BigInt(rawValue))
-                  : ethers.formatUnits(
-                      BigInt(rawValue),
-                      parseInt(tx.tokenDecimal ?? "18", 10)
-                    );
-              } catch {
-                formatted = "0";
-              }
-              // Key by address so all rows for that address share the same lookup
-              updates[address.toLowerCase()] = {
-                value: formatted,
-                isReceived,
-                symbol: isNative ? tokenSymbol : tx.tokenSymbol || tokenSymbol,
-              };
-            }
-          } catch (e) {
-            console.warn(`Error fetching transfers for ${address}:`, e);
+        // Check localStorage cache first
+        try {
+          const cached = localStorage.getItem(cacheKey);
+          if (cached) {
+            updates[address.toLowerCase()] = JSON.parse(cached);
+            return;
           }
-        })
-      );
+        } catch {
+          // ignore malformed cache
+        }
+
+        try {
+          let url = `https://api.etherscan.io/v2/api?chainid=${chainId}&module=account&action=${action}&address=${address}&sort=asc&apikey=${apiKey}`;
+          if (!isNative) {
+            url += `&contractaddress=${selectedToken}`;
+          }
+
+          let data;
+          for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+            const res = await fetch(url);
+            data = await res.json();
+            const isRateLimit =
+              data?.status !== "1" &&
+              typeof data?.result === "string" &&
+              data.result.toLowerCase().includes("rate limit");
+            if (!isRateLimit) break;
+            // Back off 1s per attempt before retrying
+            await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
+          }
+
+          // "No transactions found" is a valid empty result — cache it as zero.
+          const noTxs =
+            data?.status === "0" &&
+            typeof data?.result === "string" &&
+            data.result.toLowerCase().includes("no transactions");
+
+          // For any other non-success response (bad key, unknown error) skip caching.
+          if (data?.status !== "1" && !Array.isArray(data?.result) && !noTxs) {
+            console.warn(
+              `Etherscan error for ${address}:`,
+              data?.message ?? data?.result
+            );
+            return;
+          }
+
+          const txList = Array.isArray(data?.result) ? data.result : [];
+
+          // Prefer the first received transaction; fall back to any tx.
+          const addrLower = address.toLowerCase();
+          const receivedTx = txList.find(
+            (tx) => tx.to?.toLowerCase() === addrLower
+          );
+          const tx = receivedTx ?? txList[0];
+
+          if (tx) {
+            const isReceived = tx.to?.toLowerCase() === addrLower;
+            const rawValue = tx.value ?? "0";
+            let formatted;
+            try {
+              formatted = isNative
+                ? ethers.formatEther(BigInt(rawValue))
+                : ethers.formatUnits(
+                    BigInt(rawValue),
+                    parseInt(tx.tokenDecimal ?? "18", 10)
+                  );
+            } catch {
+              formatted = "0";
+            }
+            updates[addrLower] = {
+              value: formatted,
+              isReceived,
+              symbol: isNative ? tokenSymbol : tx.tokenSymbol || tokenSymbol,
+            };
+          }
+
+          // Only cache a zero entry when the API confirmed no transactions exist.
+          // (data.status === "1" with empty result means genuinely no txs.)
+          const entry = updates[addrLower] ?? {
+            value: "0",
+            isReceived: false,
+            symbol: tokenSymbol,
+          };
+          updates[addrLower] = entry;
+          try {
+            localStorage.setItem(cacheKey, JSON.stringify(entry));
+          } catch {
+            // ignore storage quota errors
+          }
+        } catch (e) {
+          console.warn(`Error fetching transfers for ${address}:`, e);
+        }
+      };
+
+      // Sequential with 210ms gap — stays under etherscan's 5 req/sec hard limit
+      for (let i = 0; i < addressList.length; i++) {
+        await fetchAddress(addressList[i]);
+        if (i + 1 < addressList.length) {
+          await new Promise((r) => setTimeout(r, REQUEST_INTERVAL_MS));
+        }
+      }
 
       setTokenTransfers((prev) => ({ ...prev, ...updates }));
       setTransfersLoading(false);
     };
 
     fetchAll();
-  }, [pageKey, selectedToken, selectedBlockchain?.chainId]);
+  }, [pageKey, selectedToken, selectedBlockchain?.chainId, refetchKey]);
 
   // Function to convert data to CSV and trigger download
   const downloadCSV = () => {
@@ -145,40 +240,30 @@ const TransactionHistory = ({
       "Total Sent",
     ];
 
-    const rows = allHistory
-      .map((item) => {
-        const base = [
-          item.type || "",
-          item.rotation ?? "",
-          item.public_key_hash || "N/A",
-          item.id || "",
-          item.date || "",
-        ];
+    const rows = allHistory.map((item) => {
+      const addrKey = (item.address || item.public_key_hash)?.toLowerCase();
+      const live = addrKey ? tokenTransfers[addrKey] : null;
+      const amount = live?.value ?? item.outputs?.[0]?.value ?? "";
+      const symbol = live?.symbol ?? tokenSymbol;
+      const toAddress = item.outputs?.[0]?.to || "";
+      const base = [
+        item.type || "",
+        item.rotation ?? "",
+        item.public_key_hash || "N/A",
+        item.id || "",
+        item.date || "",
+      ];
 
-        // Handle multiple outputs
-        if (item.outputs && item.outputs.length > 0) {
-          return item.outputs.map((output) => [
-            ...base,
-            output.to || "",
-            output.value || "",
-            tokenSymbol,
-            item.status || (item.mempool ? "Pending" : "Confirmed"),
-            item.totalReceived || "",
-            item.totalSent || "",
-          ]);
-        } else {
-          return [
-            ...base,
-            "", // To
-            "", // Amount
-            tokenSymbol,
-            item.status || (item.mempool ? "Pending" : "Confirmed"),
-            item.totalReceived || "",
-            item.totalSent || "",
-          ];
-        }
-      })
-      .flat();
+      return [
+        ...base,
+        toAddress,
+        amount,
+        symbol,
+        item.status || (item.mempool ? "Pending" : "Confirmed"),
+        item.totalReceived || "",
+        item.totalSent || "",
+      ];
+    });
 
     const csvContent = [
       headers.join(","),
@@ -251,9 +336,19 @@ const TransactionHistory = ({
                       )?.toLowerCase();
                       const live = addrKey ? tokenTransfers[addrKey] : null;
                       if (live) {
+                        const isZero = parseFloat(live.value) === 0;
                         return (
-                          <Text c={live.isReceived ? "green" : "red"} fw={500}>
-                            {live.isReceived ? "+" : "-"}
+                          <Text
+                            c={
+                              isZero
+                                ? "dimmed"
+                                : live.isReceived
+                                ? "green"
+                                : "red"
+                            }
+                            fw={500}
+                          >
+                            {isZero ? "" : live.isReceived ? "+" : "-"}
                             {live.value} {live.symbol}
                           </Text>
                         );
@@ -318,24 +413,29 @@ const TransactionHistory = ({
           />
           <Select
             placeholder="Rows per page"
-            data={["3", "10", "20", "50"]}
+            data={["5", "10", "20"]}
             value={rowsPerPage}
             onChange={(value) => {
-              setRowsPerPage(value || "3");
+              setRowsPerPage(value || "5");
               onPageChange(1); // Reset to first page when changing rows per page
             }}
             w={120}
           />
         </Flex>
-        <Button
-          leftSection={<IconDownload size={16} />}
-          variant="outline"
-          color="gray"
-          onClick={downloadCSV}
-          disabled={allHistory.length === 0}
-        >
-          Export to CSV
-        </Button>
+        <Group gap="xs">
+          <Button variant="subtle" color="red" size="xs" onClick={clearCache}>
+            Clear Cache
+          </Button>
+          <Button
+            leftSection={<IconDownload size={16} />}
+            variant="outline"
+            color="gray"
+            onClick={downloadCSV}
+            disabled={allHistory.length === 0}
+          >
+            Export to CSV
+          </Button>
+        </Group>
       </Group>
     </Card>
   );
