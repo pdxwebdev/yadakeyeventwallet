@@ -1,9 +1,7 @@
 // SPDX-License-Identifier: YadaCoin Open Source License (YOSL) v1.1
 pragma solidity 0.8.24;
 
-import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
-import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
-import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
 
 struct KeyData {
     bytes publicKey;
@@ -25,7 +23,7 @@ struct KeyLogEntry {
     KeyEventFlag flag;
 }
 
-contract KeyLogRegistry is Initializable, OwnableUpgradeable, UUPSUpgradeable {
+contract KeyLogRegistry is Ownable {
 
     KeyLogEntry[] public keyLogEntries;
 
@@ -45,15 +43,7 @@ contract KeyLogRegistry is Initializable, OwnableUpgradeable, UUPSUpgradeable {
     error ZeroAddress();
     error InvalidOwnershipTransfer();
 
-    /// @custom:oz-upgrades-unsafe-allow constructor
-    constructor() {
-        _disableInitializers(); // Prevents initialization in the implementation contract
-    }
-
-    function initialize(address initialOwner) public initializer {
-        __Ownable_init(initialOwner);
-        __UUPSUpgradeable_init();
-    }
+    constructor(address initialOwner) Ownable(initialOwner) {}
 
     modifier onlyAuthorized() {
         require(msg.sender == authorizedCaller || msg.sender == owner(), "Not authorized");
@@ -107,9 +97,21 @@ contract KeyLogRegistry is Initializable, OwnableUpgradeable, UUPSUpgradeable {
             emit KeyRotated(publicKeyHash, newIndex);
         }
 
-        // Update chain indexing: inception entry
-        chainOf[publicKeyHash] = publicKeyHash;
-        latestInChain[publicKeyHash] = publicKeyHash;
+        // Update chain indexing
+        address inceptionHash;
+        if (key.prevPublicKeyHash == address(0)) {
+            // Inception: this key is the chain root
+            inceptionHash = publicKeyHash;
+        } else {
+            // Rotation: inherit chain root from the previous key
+            inceptionHash = chainOf[key.prevPublicKeyHash];
+            if (inceptionHash == address(0)) {
+                // Previous key not yet registered; treat as new chain root
+                inceptionHash = publicKeyHash;
+            }
+        }
+        chainOf[publicKeyHash] = inceptionHash;
+        latestInChain[inceptionHash] = publicKeyHash;
 
         if (owner() == publicKeyHash) {
             _transferOwnershipForKeyRotation(key.prerotatedKeyHash);
@@ -172,6 +174,18 @@ contract KeyLogRegistry is Initializable, OwnableUpgradeable, UUPSUpgradeable {
             byTwicePrerotatedKeyHash[confirmingKey.twicePrerotatedKeyHash] = confirmingIndex + 1;
         }
 
+        // Update chain indexing FIRST so ownership validation can read the chain
+        address inceptionHash;
+        if (unconfirmedKey.prevPublicKeyHash == address(0)) {
+            // INCEPTION pair: start a new chain rooted at the unconfirmed key
+            inceptionHash = unconfirmedPublicKeyHash;
+        } else {
+            inceptionHash = chainOf[unconfirmedKey.prevPublicKeyHash];
+        }
+        chainOf[unconfirmedPublicKeyHash] = inceptionHash;
+        chainOf[confirmingPublicKeyHash] = inceptionHash;
+        latestInChain[inceptionHash] = confirmingPublicKeyHash;
+
         if (owner() == unconfirmedPublicKeyHash) {
             _transferOwnershipForKeyRotation(confirmingKey.prerotatedKeyHash);
         }
@@ -179,12 +193,6 @@ contract KeyLogRegistry is Initializable, OwnableUpgradeable, UUPSUpgradeable {
         emit KeyLogRegistered(unconfirmedPublicKeyHash, unconfirmedIndex);
         emit KeyLogRegistered(confirmingPublicKeyHash, confirmingIndex);
         emit KeyRotated(confirmingPublicKeyHash, confirmingIndex);
-
-        // Update chain indexing: get inception from previous entry in chain
-        address inceptionHash = chainOf[unconfirmedKey.prevPublicKeyHash];
-        chainOf[unconfirmedPublicKeyHash] = inceptionHash;
-        chainOf[confirmingPublicKeyHash] = inceptionHash;
-        latestInChain[inceptionHash] = confirmingPublicKeyHash;
     }
 
     function validateTransaction(
@@ -192,7 +200,11 @@ contract KeyLogRegistry is Initializable, OwnableUpgradeable, UUPSUpgradeable {
         KeyData memory confirming,
         bool isPair
     ) public view returns (KeyEventFlag, KeyEventFlag) {
-        (KeyLogEntry memory lastEntry, bool hasEntries) = getLatestChainEntry(unconfirmed.publicKey);
+        // Look up the predecessor's chain entry: if prevPublicKeyHash is non-zero, the
+        // predecessor must already be on-chain and must have this key as its prerotated hash.
+        // Using getLatestChainEntry(unconfirmed.publicKey) was wrong because the incoming key
+        // has no chain entry yet, which caused valid rotation events to be rejected.
+        (KeyLogEntry memory lastEntry, bool hasEntries) = getLatestChainEntry(unconfirmed.prevPublicKeyHash);
         address unconfirmedPublicKeyHash = getAddressFromPublicKey(unconfirmed.publicKey);
         address confirmingPublicKeyHash;  // only computed for pairs
 
@@ -248,6 +260,22 @@ contract KeyLogRegistry is Initializable, OwnableUpgradeable, UUPSUpgradeable {
 
     function getInceptionHash(address anyKeyInChain) internal view returns (address) {
         return chainOf[anyKeyInChain];
+    }
+
+    /**
+     * @notice Return the inception (root) key hash for any key in a chain.
+     *         Two keys share a chain root iff they belong to the same physical owner.
+     * @param publicKeyHash  Any key hash that may or may not be registered
+     * @return root    The inception key hash (== publicKeyHash when it is itself the root)
+     * @return exists  False when publicKeyHash has never been registered
+     */
+    function getChainRoot(address publicKeyHash)
+        public
+        view
+        returns (address root, bool exists)
+    {
+        root = chainOf[publicKeyHash];
+        exists = root != address(0);
     }
 
     function getLatestEntryByPrerotatedKeyHash(address prerotatedKeyHash) public view returns (KeyLogEntry memory, bool) {
@@ -393,11 +421,7 @@ contract KeyLogRegistry is Initializable, OwnableUpgradeable, UUPSUpgradeable {
         return latest.prerotatedKeyHash == newOwner && latest.flag != KeyEventFlag.UNCONFIRMED;
     }
 
-    function _authorizeUpgrade(address newImplementation) internal override {
-        require(msg.sender == authorizedCaller, "Only bridge can upgrade");
-    }
-
-    function _transferOwnershipForKeyRotation(address newOwner) internal onlyAuthorized {
+    function _transferOwnershipForKeyRotation(address newOwner) internal {
         if (newOwner == address(0)) revert ZeroAddress();
         if (!this.isValidOwnershipTransfer(owner(), newOwner)) revert InvalidOwnershipTransfer();
         _transferOwnership(newOwner);

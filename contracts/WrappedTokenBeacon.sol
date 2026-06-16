@@ -10,8 +10,8 @@ interface IBridge {
 contract WrappedTokenBeacon is UpgradeableBeacon {
     address public bridgeAddress;
 
-    constructor(address implementation, address _bridgeAddress) 
-        UpgradeableBeacon(implementation, IBridge(_bridgeAddress).getOwner()) 
+    constructor(address implementation, address _bridgeAddress, address _initialOwner) 
+        UpgradeableBeacon(implementation, _initialOwner) 
     {
         bridgeAddress = _bridgeAddress;
     }

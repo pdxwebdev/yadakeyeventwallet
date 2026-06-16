@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: YOSL-1.1
 pragma solidity ^0.8.0;
 
-import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
-import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import "./WrappedTokenProxy.sol";
 
 interface IBridge {
@@ -19,20 +17,20 @@ interface IWrappedToken {
     ) external;
 }
 
-contract WrappedTokenFactory is OwnableUpgradeable, UUPSUpgradeable {
+contract WrappedTokenFactory {
     address public bridge;
     address public beacon;
 
     event TokenDeployed(address proxy);
 
-    /// @custom:oz-upgrades-unsafe-allow constructor
-    constructor() {
-        _disableInitializers();
+    modifier onlyOwner() {
+        require(msg.sender == IBridge(bridge).getOwner(), "Not owner");
+        _;
     }
 
-    function initialize(address _beacon, address _owner, address _bridge) public initializer {
-        __Ownable_init(_owner);
-        __UUPSUpgradeable_init();
+    constructor(address _beacon, address _bridge) {
+        require(_beacon != address(0), "Zero address");
+        require(_bridge != address(0), "Zero address");
         beacon = _beacon;
         bridge = _bridge;
     }
@@ -56,11 +54,7 @@ contract WrappedTokenFactory is OwnableUpgradeable, UUPSUpgradeable {
         return address(proxy);
     }
 
-    function owner() public view override returns (address) {
+    function owner() public view returns (address) {
         return IBridge(bridge).getOwner();
-    }
-
-    function _authorizeUpgrade(address newImplementation) internal override {
-        require(msg.sender == bridge, "Only bridge can upgrade");
     }
 }
