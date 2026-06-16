@@ -52,7 +52,15 @@ contract MockERC20 is Initializable, ERC20Upgradeable, ERC20PermitUpgradeable, U
         _burn(from, amount);
     }
 
+    function setBridge(address _bridge) external onlyOwner {
+        require(_bridge != address(0), "Zero address");
+        bridge = _bridge;
+    }
+
     function _authorizeUpgrade(address newImplementation) internal override {
-        require(msg.sender == bridge, "Only bridge can upgrade");
+        require(
+            msg.sender == bridge || msg.sender == IBridge(bridge).getOwner(),
+            "Only bridge can upgrade"
+        );
     }
 }

@@ -1,18 +1,12 @@
 // SPDX-License-Identifier: YadaCoin Open Source License (YOSL) v1.1
 pragma solidity 0.8.24;
 
-import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
-import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
-import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
-import "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
-import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Utils.sol";
-import "@openzeppelin/contracts/interfaces/draft-IERC1822.sol";
-import "@openzeppelin/contracts/proxy/beacon/IBeacon.sol";
 import "./WrappedToken.sol";
 import "./KeyLogRegistry.sol";
 import "./WrappedTokenFactory.sol";
@@ -40,14 +34,6 @@ interface IERC20Permit2 {
     ) external;
     function nonces(address owner) external view returns (uint256);
     function DOMAIN_SEPARATOR() external view returns (bytes32);
-}
-
-interface IUpgradeableBeacon {
-    function upgradeTo(address newImplementation) external;
-}
-
-interface IUpgradeable {
-    function upgradeToAndCall(address newImplementation, bytes memory data) external;
 }
 
 struct FeeInfo {
@@ -101,22 +87,6 @@ struct Params {
     address outputAddress;
 }
 
-struct UpgradeContext {
-    address bridgeImplementation;
-    address keyLogRegistryImplementation;
-    address wrappedTokenBeaconImplementation;
-    address wrappedTokenFactoryImplementation;
-    address wrappedTokenProxy;
-    address wrappedTokenImplementation;
-    address mockERC20Proxy;
-    address mockERC20Implementation;
-    PermitData[] permits;
-    Params unconfirmed;
-    bytes unconfirmedSignature;
-    Params confirming;
-    bytes confirmingSignature;
-}
-
 struct TokenPair {
     address originalToken;
     string tokenName;
@@ -135,12 +105,7 @@ struct RegisterKeyPairContext {
     bytes confirmingSignature;
 }
 
-contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, ReentrancyGuardUpgradeable {
-    /// @custom:oz-upgrades-unsafe-allow constructor
-    constructor() {
-        _disableInitializers();
-    }
-
+contract Bridge is Ownable, ReentrancyGuard {
     using SafeERC20 for IERC20;
     using ECDSA for bytes32;
     using MessageHashUtils for bytes32;
@@ -150,7 +115,6 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
     address public feeSigner;
     address public wrappedTokenBeacon;
     address public wrappedTokenFactory;
-    bool private _upgradeInProgress;
 
     struct TokenPairData {
         address originalToken;
@@ -160,8 +124,6 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
     mapping(address => TokenPairData) public tokenPairs;
     mapping(address => uint256) public nonces;
     address[] public supportedOriginalTokens;
-
-    error UpgradeFailed(address contractAddress, string reason);
 
     error ZeroAddress();
     error TokenPairExists();
@@ -199,12 +161,9 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
         string bitcoinAddress
     );
 
-    function initialize(address _keyLogRegistry, address _wrappedTokenBeacon, address _wrappedTokenFactory) public initializer {
-        __Ownable_init(msg.sender);
-        __UUPSUpgradeable_init();
-        __ReentrancyGuard_init();
+    constructor(address _keyLogRegistry, address _wrappedTokenBeacon, address _wrappedTokenFactory) Ownable(msg.sender) {
         if (_keyLogRegistry == address(0)) revert ZeroAddress();
-        if (_wrappedTokenFactory == address(0)) revert ZeroAddress();
+        // _wrappedTokenFactory may be zero here; set via setWrappedTokenFactory after deploy
         keyLogRegistry = KeyLogRegistry(_keyLogRegistry);
         wrappedTokenBeacon = _wrappedTokenBeacon;
         wrappedTokenFactory = _wrappedTokenFactory;
@@ -213,6 +172,17 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
     function setFeeSigner(address _signer) external onlyOwner {
         if (_signer == address(0)) revert ZeroAddress();
         feeSigner = _signer;
+    }
+
+    function rescueNative() external onlyOwner {
+        uint256 amount = address(this).balance;
+        require(amount > 0, "Nothing to rescue");
+        _transferNative(owner(), amount);
+    }
+
+    function rescueERC20(address token, address to, uint256 amount) external onlyOwner {
+        require(to != address(0), "Zero address");
+        IERC20(token).safeTransfer(to, amount);
     }
 
     function deregisterTokenPair(address token) external onlyOwner {
@@ -667,10 +637,6 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
         return address(uint160(uint256(hash)));
     }
 
-    function _authorizeUpgrade(address newImplementation) internal override {
-        require(_upgradeInProgress, "Must use upgradeWithKeyRotation");
-    }
-
     function getOwner() external view returns (address) {
         return owner();
     }
@@ -683,183 +649,6 @@ contract Bridge is Initializable, OwnableUpgradeable, UUPSUpgradeable, Reentranc
     function setWrappedTokenFactory(address _wrappedTokenFactory) external onlyOwner {
         if (_wrappedTokenFactory == address(0)) revert ZeroAddress();
         wrappedTokenFactory = _wrappedTokenFactory;
-    }
-
-    function getTestString() external pure returns (string memory) {
-      return 'bridge v46';
-    }
-
-    function upgradeWithKeyRotation(
-        UpgradeContext memory ctx
-    ) external payable onlyOwner onlyProxy nonReentrant {
-        address unconfirmedPublicKeyHash = getAddressFromPublicKey(ctx.unconfirmed.publicKey);
-        require(msg.sender == unconfirmedPublicKeyHash, "Invalid public key owner");
-        uint256 nonce = nonces[msg.sender];
-        uint256[] memory emptyArray = new uint256[](0);
-        bytes32 unconfirmedHash = keccak256(abi.encode(
-            ctx.bridgeImplementation,
-            ctx.keyLogRegistryImplementation,
-            ctx.wrappedTokenBeaconImplementation,
-            ctx.wrappedTokenFactoryImplementation,
-            ctx.wrappedTokenProxy,
-            ctx.wrappedTokenImplementation,
-            ctx.mockERC20Proxy,
-            ctx.mockERC20Implementation,
-            emptyArray,
-            ctx.unconfirmed,
-            nonce
-        ));
-
-        require(
-            _verifySignature(
-                unconfirmedHash,
-                ctx.unconfirmedSignature,
-                unconfirmedPublicKeyHash
-            ),
-            "Invalid unconfirmed upgrade signature"
-        );
-
-        bytes32 confirmingHash = keccak256(abi.encode(
-            ctx.bridgeImplementation,
-            ctx.keyLogRegistryImplementation,
-            ctx.wrappedTokenBeaconImplementation,
-            ctx.wrappedTokenFactoryImplementation,
-            ctx.wrappedTokenProxy,
-            ctx.wrappedTokenImplementation,
-            ctx.mockERC20Proxy,
-            ctx.mockERC20Implementation,
-            emptyArray,
-            ctx.confirming,
-            nonce + 1
-        ));
-
-        require(
-            _verifySignature(
-                confirmingHash,
-                ctx.confirmingSignature,
-                getAddressFromPublicKey(ctx.confirming.publicKey)
-            ),
-            "Invalid confirming upgrade signature"
-        );
-
-        (KeyLogEntry memory latest, bool exists) = keyLogRegistry.getLatestChainEntry(ctx.unconfirmed.publicKey);
-        require(exists, "Key log not initialized.");
-
-        if (ctx.permits.length > 0) {
-            _executePermits(
-                PermitContext({
-                    token: address(0),
-                    user: msg.sender,
-                    feeInfo: FeeInfo({
-                        token: address(0),
-                        fee: 0,
-                        expires: 0,
-                        signature: ""
-                    }),
-                    prerotatedKeyHash: ctx.confirming.prerotatedKeyHash,
-                    publicKey: ctx.unconfirmed.publicKey,
-                    permits: ctx.permits
-                })
-            );
-        }
-
-        keyLogRegistry.registerKeyLogPair(
-            KeyData({
-                publicKey: ctx.unconfirmed.publicKey,
-                prerotatedKeyHash: ctx.unconfirmed.prerotatedKeyHash,
-                twicePrerotatedKeyHash: ctx.unconfirmed.twicePrerotatedKeyHash,
-                prevPublicKeyHash: ctx.unconfirmed.prevPublicKeyHash,
-                outputAddress: ctx.unconfirmed.outputAddress
-            }),
-            KeyData({
-                publicKey: ctx.confirming.publicKey,
-                prerotatedKeyHash: ctx.confirming.prerotatedKeyHash,
-                twicePrerotatedKeyHash: ctx.confirming.twicePrerotatedKeyHash,
-                prevPublicKeyHash:ctx.confirming.prevPublicKeyHash,
-                outputAddress: ctx.confirming.outputAddress
-            })
-        );
-
-        // Upgrade Bridge
-        if (ctx.bridgeImplementation != address(0)) {
-            require(
-                ctx.bridgeImplementation.code.length > 0,
-                "Bridge implementation has no code"
-            );
-            require(
-                IERC1822Proxiable(ctx.bridgeImplementation).proxiableUUID()
-                    == ERC1967Utils.IMPLEMENTATION_SLOT,
-                "Bridge implementation is not UUPS compatible"
-            );
-            _upgradeInProgress = true;
-            upgradeToAndCall(ctx.bridgeImplementation, "");
-            _upgradeInProgress = false;
-        }
-
-        // Upgrade KeyLogRegistry
-        if (ctx.keyLogRegistryImplementation != address(0)) {
-            require(
-                ctx.keyLogRegistryImplementation.code.length > 0,
-                "KeyLogRegistry implementation has no code"
-            );
-            keyLogRegistry.upgradeToAndCall(ctx.keyLogRegistryImplementation, "");
-        }
-
-        // Upgrade WrappedTokenBeacon
-        if (ctx.wrappedTokenBeaconImplementation != address(0)) {
-            require(
-                ctx.wrappedTokenBeaconImplementation.code.length > 0,
-                "WrappedTokenBeacon implementation has no code"
-            );
-            // Note: WrappedTokenBeacon uses UpgradeableBeacon which stores implementation directly
-            // The Bridge must call this via BeaconProxy pattern
-            // This assumes wrappedTokenBeacon is a UpgradeableBeacon address
-            IUpgradeableBeacon(wrappedTokenBeacon).upgradeTo(ctx.wrappedTokenBeaconImplementation);
-        }
-
-        // Upgrade WrappedTokenFactory
-        if (ctx.wrappedTokenFactoryImplementation != address(0)) {
-            require(
-                ctx.wrappedTokenFactoryImplementation.code.length > 0,
-                "WrappedTokenFactory implementation has no code"
-            );
-            IUpgradeable(wrappedTokenFactory).upgradeToAndCall(ctx.wrappedTokenFactoryImplementation, "");
-        }
-
-        // Upgrade WrappedToken (proxy-specific)
-        if (ctx.wrappedTokenImplementation != address(0)) {
-            require(ctx.wrappedTokenProxy != address(0), "WrappedToken proxy required");
-            require(
-                ctx.wrappedTokenImplementation.code.length > 0,
-                "WrappedToken implementation has no code"
-            );
-            require(
-                IERC1822Proxiable(ctx.wrappedTokenImplementation).proxiableUUID()
-                    == ERC1967Utils.IMPLEMENTATION_SLOT,
-                "WrappedToken implementation is not UUPS compatible"
-            );
-            IUpgradeable(ctx.wrappedTokenProxy).upgradeToAndCall(ctx.wrappedTokenImplementation, "");
-        }
-
-        // Upgrade MockERC20 (proxy-specific)
-        if (ctx.mockERC20Implementation != address(0)) {
-            require(ctx.mockERC20Proxy != address(0), "MockERC20 proxy required");
-            require(
-                ctx.mockERC20Implementation.code.length > 0,
-                "MockERC20 implementation has no code"
-            );
-            require(
-                IERC1822Proxiable(ctx.mockERC20Implementation).proxiableUUID()
-                    == ERC1967Utils.IMPLEMENTATION_SLOT,
-                "MockERC20 implementation is not UUPS compatible"
-            );
-            IUpgradeable(ctx.mockERC20Proxy).upgradeToAndCall(ctx.mockERC20Implementation, "");
-        }
-
-        if (owner() == msg.sender) {
-            transferOwnership(ctx.confirming.prerotatedKeyHash);
-        }
-        nonces[msg.sender] += NONCE_INCREMENT;
     }
 
     function unwrap(

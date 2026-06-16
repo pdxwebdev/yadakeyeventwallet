@@ -8,6 +8,7 @@ import WrappedTokenUpgradeArtifact from "../utils/abis/WrappedTokenUpgrade.json"
 import WrappedNativeTokenArtifact from "../utils/abis/WrappedNativeToken.json";
 import MockERC20Artifact from "../utils/abis/MockERC20.json";
 import MockERC20UpgradeArtifact from "../utils/abis/MockERC20Upgrade.json";
+import AgentRegistryArtifact from "../utils/abis/AgentRegistry.json";
 export const BRIDGE_ABI = BridgeArtifact.abi;
 export const BRIDGE_UPGRADE_ABI = BridgeUpgradeArtifact.abi;
 export const KEYLOG_REGISTRY_ABI = KeyLogRegistryArtifact.abi;
@@ -17,6 +18,7 @@ export const WRAPPED_TOKEN_UPGRADE_ABI = WrappedTokenUpgradeArtifact.abi;
 export const WRAPPED_NATIVE_TOKEN_ABI = WrappedNativeTokenArtifact.abi;
 export const ERC20_ABI = MockERC20Artifact.abi;
 export const ERC20_UPGRADE_ABI = MockERC20UpgradeArtifact.abi;
+export const AGENT_REGISTRY_ABI = AgentRegistryArtifact.abi;
 
 export const DEPLOY_ENV = "mainnet"; //import.meta.env.VITE_DEPLOY_ENV;
 export let localProvider =
@@ -134,13 +136,14 @@ export const BLOCKCHAINS = [
 export const addresses =
   DEPLOY_ENV === "mainnet"
     ? {
-        keyLogRegistryAddress: "0xB00915d9Ea033d9f3918A0F54d416EB7A12EDb03",
-        bridgeAddress: "0xBa61F5428aE4F43EE526aB5ED0d85018fA218577",
+        keyLogRegistryAddress: "0xaF230c7BE49a9ce41e5592B40833a8e6dc4dd484",
+        bridgeAddress: "0xFFedae898798aeb9Ba54A320639A56F33868Dc46",
         wrappedTokenImplementation:
-          "0x469ae1ca5fedB3f3a0151BD4cc6291F4b6B98953",
-        beaconAddress: "0x54De45901EE4202979cf0A2b131aC795B805AF8F",
-        factoryAddress: "0x707C03d34957bF600C17b8596BD48438E2B2a58f",
+          "0x191E7A36214186d90aD827d9769a053539D0C76D",
+        beaconAddress: "0x51E38E4CA68734BC35587af5a10A7C80c674f3B5",
+        factoryAddress: "0xAa5e83c729A4411871D08310BE0b1125DB3a2C8d",
         yadaERC20Address: "0xD84B7E8b295d9Fa9656527AC33Bf4F683aE7d2C4",
+        agentRegistryAddress: "", // Set after deploying AgentRegistry to BSC mainnet
         configured: true,
       }
     : {
@@ -151,6 +154,7 @@ export const addresses =
         beaconAddress: "0x554A1c97a049F1d442cc876d569eB55737a4DCdc",
         factoryAddress: "0x76E9E0Fd7F1EeBA70221990E82BD4cD89c3C43BA",
         yadaERC20Address: "0x6147dBD0980f3203c14BCD667F547c1264911d7d",
+        agentRegistryAddress: "", // Set after deploying AgentRegistry to BSC testnet
         configured: true,
       };
 
