@@ -59,7 +59,7 @@ contract MockERC20 is Initializable, ERC20Upgradeable, ERC20PermitUpgradeable, U
 
     function _authorizeUpgrade(address newImplementation) internal override {
         require(
-            msg.sender == bridge || msg.sender == IBridge(bridge).getOwner(),
+            msg.sender == bridge,
             "Only bridge can upgrade"
         );
     }

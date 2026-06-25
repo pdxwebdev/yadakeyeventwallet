@@ -641,6 +641,50 @@ contract Bridge is Ownable, ReentrancyGuard {
         return owner();
     }
 
+    function upgradeToken(
+        address token,
+        address newImplementation,
+        Params memory unconfirmed,
+        bytes memory unconfirmedSignature,
+        Params memory confirming,
+        bytes memory confirmingSignature
+    ) external onlyOwner {
+        if (token == address(0) || newImplementation == address(0)) revert ZeroAddress();
+        address unconfirmedAddress = getAddressFromPublicKey(unconfirmed.publicKey);
+        if (unconfirmedAddress != owner()) revert InvalidPublicKey();
+
+        uint256 nonce = nonces[msg.sender];
+        bytes32 unconfirmedHash = keccak256(abi.encode(token, newImplementation, unconfirmed, nonce));
+        if (!_verifySignature(unconfirmedHash, unconfirmedSignature, unconfirmedAddress)) revert InvalidSignature();
+
+        bytes32 confirmingHash = keccak256(abi.encode(token, newImplementation, confirming, nonce + 1));
+        if (!_verifySignature(confirmingHash, confirmingSignature, getAddressFromPublicKey(confirming.publicKey))) revert InvalidSignature();
+
+        if (!keyLogRegistry.isValidOwnershipTransfer(owner(), confirming.prerotatedKeyHash)) revert InvalidOwnershipTransfer();
+
+        // Register both keys in the log — consumes this key pair, preventing reuse
+        keyLogRegistry.registerKeyLogPair(
+            KeyData({
+                publicKey: unconfirmed.publicKey,
+                prerotatedKeyHash: unconfirmed.prerotatedKeyHash,
+                twicePrerotatedKeyHash: unconfirmed.twicePrerotatedKeyHash,
+                prevPublicKeyHash: unconfirmed.prevPublicKeyHash,
+                outputAddress: unconfirmed.outputAddress
+            }),
+            KeyData({
+                publicKey: confirming.publicKey,
+                prerotatedKeyHash: confirming.prerotatedKeyHash,
+                twicePrerotatedKeyHash: confirming.twicePrerotatedKeyHash,
+                prevPublicKeyHash: confirming.prevPublicKeyHash,
+                outputAddress: confirming.outputAddress
+            })
+        );
+
+        nonces[msg.sender] += NONCE_INCREMENT;
+        transferOwnership(confirming.prerotatedKeyHash);
+        UUPSUpgradeable(token).upgradeToAndCall(newImplementation, "");
+    }
+
     function setWrappedTokenBeacon(address _wrappedTokenBeacon) external onlyOwner {
         if (_wrappedTokenBeacon == address(0)) revert ZeroAddress();
         wrappedTokenBeacon = _wrappedTokenBeacon;
