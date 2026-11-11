@@ -21,9 +21,11 @@ const SecurityAlerts = ({ parsedData, selectedBlockchain, onRotateKey }) => {
   const getRevertReason = async (txHash) => {
     try {
       // Create RPC provider based on network
-      const rpcUrl = selectedBlockchain.testnet
-        ? "https://data-seed-prebsc-1-s1.binance.org:8545"
-        : "https://bsc-dataseed.binance.org/";
+      const rpcUrl =
+        selectedBlockchain?.providerUrl ||
+        (selectedBlockchain.testnet
+          ? "https://data-seed-prebsc-1-s1.binance.org:8545"
+          : "https://bsc-dataseed.binance.org/");
 
       const provider = new ethers.JsonRpcProvider(rpcUrl);
 
@@ -84,7 +86,7 @@ const SecurityAlerts = ({ parsedData, selectedBlockchain, onRotateKey }) => {
 
   // Function to fetch failed transactions from BSCScan
   const fetchFailedTransactions = async (address) => {
-    if (!address || selectedBlockchain.id !== "bsc") return;
+    if (!address || !["bsc", "base"].includes(selectedBlockchain.id)) return;
 
     try {
       setIsPolling(true);
@@ -148,7 +150,10 @@ const SecurityAlerts = ({ parsedData, selectedBlockchain, onRotateKey }) => {
 
   // Poll for failed transactions every 30 seconds
   useEffect(() => {
-    if (!parsedData?.publicKeyHash || selectedBlockchain.id !== "bsc") {
+    if (
+      !parsedData?.publicKeyHash ||
+      !["bsc", "base"].includes(selectedBlockchain.id)
+    ) {
       setFailedTransactions([]);
       return;
     }

@@ -4,6 +4,8 @@ import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import {
   BLOCKCHAINS,
   localProvider,
+  addressesForChain,
+  setLocalProviderForChain,
   PANCAKE_ROUTER_ADDRESS,
   PANCAKE_ROUTER_ABI,
 } from "../shared/constants";
@@ -11,9 +13,18 @@ import {
 const AppContext = createContext();
 
 export const AppProvider = ({ children }) => {
-  const [selectedBlockchain, setSelectedBlockchain] = useState(
-    BLOCKCHAINS.find((chain) => chain.id === "base") || BLOCKCHAINS[0]
-  );
+  const initialChain =
+    BLOCKCHAINS.find((chain) => chain.id === "base") || BLOCKCHAINS[0];
+  setLocalProviderForChain(initialChain);
+  const [selectedBlockchain, setSelectedBlockchainState] = useState(initialChain);
+  const setSelectedBlockchain = (chain) => {
+    setLocalProviderForChain(chain);
+    setSelectedBlockchainState(chain);
+    setContractAddresses(addressesForChain(chain.id));
+    setIsDeployed(chain.id === "base" || chain.id === "bsc");
+    setTokenPairs([]);
+    setTokenPairsFetched(false);
+  };
   const [transactions, setTransactions] = useState([]);
   const [log, setLog] = useState([]);
   const [wif, setWif] = useState("");
@@ -38,8 +49,12 @@ export const AppProvider = ({ children }) => {
   const [supportedTokens, setSupportedTokens] = useState([]); // New: List of supported tokens
   const [selectedToken, setSelectedToken] = useState(ethers.ZeroAddress); // New: Selected token
   const [symbol, setSymbol] = useState(""); // New: Selected token
-  const [contractAddresses, setContractAddresses] = useState({});
-  const [isDeployed, setIsDeployed] = useState(false); // New state for deployment status
+  const [contractAddresses, setContractAddresses] = useState(
+    addressesForChain(initialChain.id)
+  );
+  const [isDeployed, setIsDeployed] = useState(
+    initialChain.id === "base" || initialChain.id === "bsc"
+  );
   const [sendWrapped, setSendWrapped] = useState(false);
   const [tokenPairsFetched, setTokenPairsFetched] = useState(false);
   const [pancakeRouter, setPancakeRouter] = useState(null);

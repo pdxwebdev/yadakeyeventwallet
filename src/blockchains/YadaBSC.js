@@ -10,6 +10,7 @@ import {
   HARDHAT_MNEMONIC,
   localProvider,
   addresses,
+  addressesForChain,
   deployed,
   DEPLOY_ENV,
   BRIDGE_ABI,
@@ -1438,22 +1439,10 @@ class YadaBSC {
       appContext;
     try {
       if (selectedBlockchain?.id === "base") {
-        try {
-          const response = await axios.post(
-            "http://localhost:3001/check-deployment",
-            { chain: "base" }
-          );
-          if (response.data.deployed && response.data.addresses) {
-            setContractAddresses(response.data.addresses);
-            setIsDeployed(true);
-            return { status: true, addresses: response.data.addresses };
-          }
-        } catch (error) {
-          console.error("Base deployment check failed:", error);
-        }
-        setContractAddresses({});
-        setIsDeployed(false);
-        return { status: false };
+        const baseAddresses = addressesForChain("base");
+        setContractAddresses(baseAddresses);
+        setIsDeployed(true);
+        return { status: true, addresses: baseAddresses };
       }
       let deployedz, addressesz;
       if (DEPLOY_ENV === "localhost") {

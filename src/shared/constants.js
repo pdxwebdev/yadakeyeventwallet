@@ -17,7 +17,7 @@ export const ERC20_UPGRADE_ABI = MockERC20Artifact.abi;
 export const AGENT_REGISTRY_ABI = AgentRegistryArtifact.abi;
 
 export const DEPLOY_ENV = "mainnet"; //import.meta.env.VITE_DEPLOY_ENV;
-export let localProvider =
+const bscProvider =
   DEPLOY_ENV === "mainnet"
     ? new ethers.JsonRpcProvider(
         "https://bsc-dataseed1.binance.org/", // BSC Mainnet RPC URL
@@ -40,6 +40,15 @@ export let localProvider =
         chainId: 31337,
         name: "hardhat",
       });
+export const baseProvider = new ethers.JsonRpcProvider(
+  "https://mainnet.base.org",
+  { chainId: 8453, name: "base" },
+  { batchMaxCount: 1 }
+);
+export let localProvider = baseProvider;
+export const setLocalProviderForChain = (chain) => {
+  localProvider = chain?.id === "bsc" ? bscProvider : chain?.id === "base" ? baseProvider : localProvider;
+};
 export let localSwapProvider =
   DEPLOY_ENV === "mainnet"
     ? new ethers.JsonRpcProvider(
@@ -141,6 +150,21 @@ export const BLOCKCHAINS = [
     isKeyEventLog: true,
   },
 ];
+
+export const baseAddresses = {
+  keyLogRegistryAddress: "0x9E47882d784c17cD7b91dad45F2A97e461DEE117",
+  bridgeAddress: "0xcf7a96a17DE098c88367360412D2Db2375e64745",
+  wrappedTokenImplementation: "0x6CAD92725F3DD4E12108DEa5144Dbc0B2a3e30F6",
+  beaconAddress: "0x42CF9fa8740D1FaD129e00EA2fC5022AA2b790E9",
+  factoryAddress: "0xFb75e22F830b5F73107079AD927D77E7fDC22159",
+  yadaERC20Address: "0x1E9c172610b6251A1e3Bf916b9Ea47f506072651",
+  poolAddress: "0x7beCd9Bbe91DE47eD60da5DE70eb280f947Dd44B",
+  usdcAddress: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+  configured: true,
+};
+
+export const addressesForChain = (chainId) =>
+  chainId === "base" ? baseAddresses : addresses;
 
 export const addresses =
   DEPLOY_ENV === "mainnet"

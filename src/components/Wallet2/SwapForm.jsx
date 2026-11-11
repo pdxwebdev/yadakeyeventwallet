@@ -15,7 +15,7 @@ import { notifications } from "@mantine/notifications";
 import { ethers } from "ethers";
 import { useEffect, useState, useCallback } from "react";
 import { styles } from "../../shared/styles";
-import { addresses, localProvider } from "../../shared/constants";
+import { addresses, baseAddresses, localProvider } from "../../shared/constants";
 import AmountInput from "./AmountInput";
 
 const WYDA = addresses.yadaERC20Address;
@@ -46,6 +46,113 @@ const getQuote = async (router, fromToken, toToken, amountIn) => {
     console.warn("Quote failed:", e);
     return null;
   }
+};
+
+const POOL_ABI = [
+  "function reserveUsdc() view returns (uint256)",
+  "function reserveWyda() view returns (uint256)",
+  "function swapUsdcForWyda(uint256 amountIn, uint256 minOut) returns (uint256)",
+];
+const ERC20_ABI = [
+  "function approve(address spender, uint256 amount) returns (bool)",
+  "function allowance(address owner, address spender) view returns (uint256)",
+];
+
+const BasePoolSwap = ({ appContext, walletManager }) => {
+  const { privateKey, parsedData } = appContext;
+  const [amountIn, setAmountIn] = useState("");
+  const [amountOut, setAmountOut] = useState("");
+  const [loading, setLoading] = useState(false);
+  const poolAddress = baseAddresses.poolAddress;
+  const usdcAddress = baseAddresses.usdcAddress;
+
+  const quote = useCallback(async () => {
+    if (!amountIn || Number(amountIn) <= 0) {
+      setAmountOut("");
+      return;
+    }
+    try {
+      const pool = new ethers.Contract(poolAddress, POOL_ABI, localProvider);
+      const [reserveUsdc, reserveWyda] = await Promise.all([
+        pool.reserveUsdc(),
+        pool.reserveWyda(),
+      ]);
+      if (reserveUsdc === 0n || reserveWyda === 0n) {
+        setAmountOut("0");
+        return;
+      }
+      const inWei = ethers.parseUnits(amountIn, 6);
+      const out = (reserveWyda * inWei) / (reserveUsdc + inWei);
+      setAmountOut(ethers.formatUnits(out, 18));
+    } catch (error) {
+      console.warn("Base quote failed:", error);
+      setAmountOut("");
+    }
+  }, [amountIn, poolAddress]);
+
+  useEffect(() => {
+    quote();
+  }, [quote]);
+
+  const executeSwap = async () => {
+    if (!privateKey?.privateKey) return;
+    setLoading(true);
+    try {
+      const signer = new ethers.Wallet(
+        ethers.hexlify(privateKey.privateKey),
+        localProvider
+      );
+      const amount = ethers.parseUnits(amountIn, 6);
+      const minOut = ethers.parseUnits(amountOut || "0", 18) * 99n / 100n;
+      const usdc = new ethers.Contract(usdcAddress, ERC20_ABI, signer);
+      const allowance = await usdc.allowance(signer.address, poolAddress);
+      if (allowance < amount) {
+        await (await usdc.approve(poolAddress, amount)).wait();
+      }
+      const pool = new ethers.Contract(poolAddress, POOL_ABI, signer);
+      const tx = await pool.swapUsdcForWyda(amount, minOut);
+      await tx.wait();
+      await walletManager.fetchBalance(appContext);
+      notifications.show({ title: "Swap successful", color: "green" });
+    } catch (error) {
+      notifications.show({
+        title: "Swap failed",
+        message: error.message || "Unknown error",
+        color: "red",
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <Card withBorder mt="md" radius="md" p="md" style={styles.card}>
+      <Title order={4}>Swap USDC / WYDA via Base pool</Title>
+      <Text size="sm" c="dimmed" mt="xs">
+        Pool {poolAddress}. Wallet {parsedData?.publicKeyHash || ""}
+      </Text>
+      <Group mt="md" grow>
+        <AmountInput
+          label="USDC in"
+          value={amountIn}
+          onChange={(v) => setAmountIn(v?.toString() ?? "")}
+          placeholder="0.0"
+          min={0}
+          decimalScale={6}
+        />
+        <TextInput label="WYDA out (est.)" value={amountOut} disabled />
+      </Group>
+      <Button
+        mt="md"
+        fullWidth
+        onClick={executeSwap}
+        loading={loading}
+        disabled={!amountIn || !amountOut || amountOut === "0"}
+      >
+        Approve USDC, then swapUsdcForWyda
+      </Button>
+    </Card>
+  );
 };
 
 export const SwapForm = ({ appContext, walletManager }) => {
@@ -124,34 +231,29 @@ export const SwapForm = ({ appContext, walletManager }) => {
       const approveIfNeeded = async (token) => {
         if (token === NATIVE) return; // BNB never needs approve
 
-        // ERC-20 contract with **provider** (read-only)
-        const erc20Read = new ethers.Contract(
+        const spender = routerWithSigner.target;
+        const owner = await signer.getAddress();
+
+        const erc20 = new ethers.Contract(
           token,
           [
             "function allowance(address owner, address spender) view returns (uint256)",
+            "function approve(address spender, uint256 amount) returns (bool)",
           ],
-          routerReadOnly.runner // provider
-        );
-
-        const owner = await signer.getAddress();
-        const allowance = await erc20Read.allowance(
-          owner,
-          routerWithSigner.target
-        );
-
-        if (allowance >= amountInWei) return; // already enough
-
-        // ERC-20 contract with **signer** (write)
-        const erc20Write = new ethers.Contract(
-          token,
-          ["function approve(address spender, uint256 amount) returns (bool)"],
           signer
         );
 
-        const approveTx = await erc20Write.approve(
-          routerWithSigner.target,
-          amountInWei
-        );
+        const allowance = await erc20.allowance(owner, spender);
+
+        if (allowance >= amountInWei) return; // already enough
+
+        // Some tokens (e.g. USDT-style) require resetting to 0 before re-approving
+        if (allowance > 0n) {
+          const resetTx = await erc20.approve(spender, 0n);
+          await resetTx.wait();
+        }
+
+        const approveTx = await erc20.approve(spender, amountInWei);
         await approveTx.wait();
       };
 
@@ -212,6 +314,16 @@ export const SwapForm = ({ appContext, walletManager }) => {
       setLoading(false);
     }
   };
+
+  if (selectedBlockchain.id === "base") {
+    return (
+      <BasePoolSwap
+        appContext={appContext}
+        walletManager={walletManager}
+        refreshAfterTx={refreshAfterTx}
+      />
+    );
+  }
 
   // === GUARD: BSC + Router ===
   if (selectedBlockchain.id !== "bsc" || !pancakeRouter) {

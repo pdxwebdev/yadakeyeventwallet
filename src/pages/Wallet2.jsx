@@ -284,7 +284,7 @@ const Wallet2 = () => {
     }
 
     try {
-      if (selectedBlockchain.id !== "bsc") {
+      if (!["bsc", "base"].includes(selectedBlockchain.id)) {
         setIsOwner(false);
         return;
       }
@@ -937,7 +937,8 @@ const Wallet2 = () => {
   };
 
   const getPancakeRouter = useCallback(() => {
-    if (!privateKey || selectedBlockchain.id !== "bsc") return null;
+    if (!privateKey || !["bsc", "base"].includes(selectedBlockchain.id))
+      return null;
     const signer = new ethers.Wallet(
       ethers.hexlify(privateKey.privateKey),
       localSwapProvider
@@ -1148,7 +1149,7 @@ const Wallet2 = () => {
               )}
 
               {activeSection === "swap" &&
-                selectedBlockchain.id === "bsc" &&
+                ["bsc", "base"].includes(selectedBlockchain.id) &&
                 isInitialized && (
                   <>
                     <SwapForm
@@ -1161,6 +1162,7 @@ const Wallet2 = () => {
                       wrappedTokenSymbol={wrappedTokenSymbol}
                       refreshAfterTx={refreshAfterTx}
                     />
+                    {selectedBlockchain.id === "bsc" && (
                     <LiquidityForm
                       appContext={appContext}
                       webcamRef={webcamRef}
@@ -1177,6 +1179,7 @@ const Wallet2 = () => {
                       appContext={appContext}
                       walletManager={walletManager}
                     />
+                    )}
                   </>
                 )}
 
@@ -1846,7 +1849,9 @@ const Wallet2 = () => {
             leftSection={<IconArrowsExchange size={22} />}
             active={activeSection === "swap"}
             onClick={() => setActiveSection("swap")}
-            disabled={selectedBlockchain.id !== "bsc" || !isInitialized}
+            disabled={
+              !["bsc", "base"].includes(selectedBlockchain.id) || !isInitialized
+            }
             title="Swap"
           />
           <NavLink
