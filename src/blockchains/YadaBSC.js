@@ -1129,6 +1129,32 @@ class YadaBSC {
         outputAddress,
         []
       );
+
+      // Always ensure a native BNB permit is included for inception
+      // (new bridge may have no token pairs yet, so generatePermitsForTokens returns empty)
+      if (!permits.find((p) => p.token === ethers.ZeroAddress)) {
+        const bnbBalance = await localProvider.getBalance(signer.address);
+        if (bnbBalance > 0n) {
+          permits.push({
+            token: ethers.ZeroAddress,
+            amount: bnbBalance,
+            deadline: 0,
+            v: 0,
+            r: ethers.zeroPadBytes("0x", 32),
+            s: ethers.zeroPadBytes("0x", 32),
+            recipients: [
+              {
+                recipientAddress: outputAddress,
+                amount: bnbBalance,
+                wrap: false,
+                unwrap: false,
+                mint: false,
+                burn: false,
+              },
+            ],
+          });
+        }
+      }
       const publicKey = decompressPublicKey(
         Buffer.from(privateKey.publicKey)
       ).slice(1);
@@ -1193,10 +1219,11 @@ class YadaBSC {
         );
       }
 
-      permits.find((p) => p.token === ethers.ZeroAddress).amount -= gasCost;
-      permits.find(
-        (p) => p.token === ethers.ZeroAddress
-      ).recipients[0].amount -= gasCost;
+      const bnbPermit = permits.find((p) => p.token === ethers.ZeroAddress);
+      if (bnbPermit) {
+        bnbPermit.amount -= gasCost;
+        bnbPermit.recipients[0].amount -= gasCost;
+      }
 
       const tx = await bridge.registerKeyPairWithTransfer(
         {
@@ -1407,8 +1434,27 @@ class YadaBSC {
 
   // Check if contracts are deployed
   async checkDeployment(appContext) {
-    const { setContractAddresses, setIsDeployed } = appContext;
+    const { setContractAddresses, setIsDeployed, selectedBlockchain } =
+      appContext;
     try {
+      if (selectedBlockchain?.id === "base") {
+        try {
+          const response = await axios.post(
+            "http://localhost:3001/check-deployment",
+            { chain: "base" }
+          );
+          if (response.data.deployed && response.data.addresses) {
+            setContractAddresses(response.data.addresses);
+            setIsDeployed(true);
+            return { status: true, addresses: response.data.addresses };
+          }
+        } catch (error) {
+          console.error("Base deployment check failed:", error);
+        }
+        setContractAddresses({});
+        setIsDeployed(false);
+        return { status: false };
+      }
       let deployedz, addressesz;
       if (DEPLOY_ENV === "localhost") {
         const response = await axios.post(
@@ -1513,9 +1559,47 @@ class YadaBSC {
 
   // Deploy function to send POST request with three WIFs
   async deploy(appContext, wif1, wif2, wif3, cprkh, ctprkh, clean) {
-    const { setContractAddresses, setIsDeployed } = appContext;
+    const { setContractAddresses, setIsDeployed, selectedBlockchain } =
+      appContext;
 
     try {
+      if (selectedBlockchain?.id === "base") {
+        const deployer = new ethers.Wallet(
+          ethers.hexlify(fromWIF(wif1).privateKey)
+        );
+        const baseProvider = new ethers.JsonRpcProvider(
+          selectedBlockchain.providerUrl || "https://mainnet.base.org",
+          { chainId: 8453, name: "base" }
+        );
+        const balance = await baseProvider.getBalance(deployer.address);
+        if (balance === 0n) {
+          return {
+            status: false,
+            error: `Send Base ETH to the deployer ${deployer.address}. Base balance is 0.`,
+          };
+        }
+        const response = await axios.post("http://localhost:3001/deploy", {
+          deployEnv: "deploybase",
+          wif1,
+          wif2,
+          wif3,
+          cprkh,
+          ctprkh,
+          clean,
+        });
+        const { status, addresses, error } = response.data;
+        if (status && addresses) {
+          setContractAddresses(addresses);
+          setIsDeployed(true);
+          notifications.show({
+            title: "Base deployment successful",
+            message: `Bridge ${addresses.bridgeAddress}`,
+            color: "green",
+          });
+          return { status: true, addresses };
+        }
+        throw new Error(error || "Base deploy failed");
+      }
       const response = await axios.post("http://localhost:3001/deploy", {
         deployEnv:
           DEPLOY_ENV === "mainnet"
@@ -1556,232 +1640,6 @@ class YadaBSC {
     }
   }
 
-  // Deploy function to send POST request with three WIFs
-  async upgrade(appContext, scannedNextKey = null) {
-    const { contractAddresses, privateKey, setLog } = appContext;
-
-    if (!privateKey || !contractAddresses.bridgeAddress) {
-      throw new Error("Wallet not loaded or bridge not deployed");
-    }
-
-    const signer = new ethers.Wallet(
-      ethers.hexlify(privateKey.privateKey),
-      localProvider
-    );
-    // Detect bridge version
-    const bridgeBase = new ethers.Contract(
-      contractAddresses.bridgeAddress,
-      BRIDGE_UPGRADE_ABI,
-      localProvider
-    );
-
-    let isNewVersion = false;
-    try {
-      await bridgeBase.getTestString(); // Only exists in BridgeUpgrade
-      isNewVersion = true;
-    } catch (error) {
-      isNewVersion = false;
-    }
-    isNewVersion = false;
-
-    // Prepare base payload for /upgrade endpoint
-    const upgradeEnv =
-      DEPLOY_ENV === "mainnet"
-        ? "upgrademain"
-        : DEPLOY_ENV === "testnet"
-        ? "upgradetest"
-        : "upgrade";
-
-    const payloads = [
-      {
-        upgradeEnv: upgradeEnv,
-        bridgeProxyAddress: contractAddresses.bridgeAddress,
-        keyLogRegistryProxyAddress: contractAddresses.keyLogRegistryAddress,
-        wrappedTokenProxyAddresses: [contractAddresses.yadaERC20Address],
-        wif: appContext.wif,
-      },
-    ];
-    if (DEPLOY_ENV === "mainnet") {
-      payloads.push({
-        upgradeEnv: "upgradewydamain",
-        bridgeProxyAddress: contractAddresses.bridgeAddress,
-        keyLogRegistryProxyAddress: contractAddresses.keyLogRegistryAddress,
-        wrappedTokenProxyAddresses: [contractAddresses.yadaERC20Address],
-        wif: appContext.wif,
-      });
-      payloads.push({
-        upgradeEnv: "upgradewrappedmain",
-        bridgeProxyAddress: contractAddresses.bridgeAddress,
-        keyLogRegistryProxyAddress: contractAddresses.keyLogRegistryAddress,
-        wrappedTokenProxyAddresses: [contractAddresses.yadaERC20Address],
-        wif: appContext.wif,
-      });
-      payloads.push({
-        upgradeEnv: "upgradebeaconmain",
-        bridgeProxyAddress: contractAddresses.bridgeAddress,
-        keyLogRegistryProxyAddress: contractAddresses.keyLogRegistryAddress,
-        wrappedTokenProxyAddresses: [contractAddresses.yadaERC20Address],
-        wif: appContext.wif,
-      });
-      payloads.push({
-        upgradeEnv: "upgradefactorymain",
-        bridgeProxyAddress: contractAddresses.bridgeAddress,
-        keyLogRegistryProxyAddress: contractAddresses.keyLogRegistryAddress,
-        wrappedTokenProxyAddresses: [contractAddresses.yadaERC20Address],
-        wif: appContext.wif,
-      });
-    }
-
-    // Call the single /upgrade endpoint
-    console.log(
-      isNewVersion
-        ? "Secure upgrade via /upgrade with scanned key"
-        : "Legacy upgrade via /upgrade"
-    );
-    for (let i = 0; i < payloads.length; i++) {
-      let payload = payloads[i];
-      // If new version → add scanned confirming key data
-      let supportedTokens;
-      if (isNewVersion) {
-        if (!scannedNextKey || !scannedNextKey.parsed) {
-          throw new Error(
-            "SCAN_REQUIRED: Confirming key scan needed for secure upgrade"
-          );
-        }
-        ``;
-
-        const confirmingWallet = fromWIF(scannedNextKey.parsed.wif);
-        const confirmingSigner = new ethers.Wallet(
-          ethers.hexlify(confirmingWallet.privateKey),
-          localProvider
-        );
-
-        // Fetch all token pairs and supported tokens
-        const tokenPairs = await this.fetchTokenPairs(appContext);
-        supportedTokens = [
-          ...tokenPairs.map((p) => ({ address: p.original })),
-          ...tokenPairs
-            .map((p) => ({ address: p.wrapped }))
-            .filter((a) => a.address !== ethers.ZeroAddress),
-          { address: ethers.ZeroAddress }, // BNB
-        ];
-
-        // Generate full permits (including BNB faux permit)
-        let permits = await this.generatePermitsForTokens(
-          appContext,
-          signer,
-          supportedTokens,
-          scannedNextKey.parsed.prerotatedKeyHash, // rotate to next key
-          [] // no exclusions
-        );
-
-        permits = permits.map((permit) => ({
-          ...permit,
-          amount: permit.amount.toString(),
-          deadline: Number(permit.deadline), // safe: deadline is uint256 but small
-          recipients: permit.recipients.map((r) => ({
-            ...r,
-            amount: r.amount.toString(),
-          })),
-        }));
-
-        payload.wif2 = scannedNextKey.parsed.wif;
-        payload.confirmingPrerotatedKeyHash =
-          scannedNextKey.parsed.prerotatedKeyHash;
-        payload.confirmingTwicePrerotatedKeyHash =
-          scannedNextKey.parsed.twicePrerotatedKeyHash;
-        payload.permits = [];
-      }
-      const response = await axios.post(
-        "http://localhost:3001/upgrade",
-        payload
-      );
-
-      const { status, addresses, txHash, error } = response.data;
-
-      if (!status) {
-        throw new Error(error || "Upgrade failed");
-      }
-    }
-    if (isNewVersion) {
-      console.log(await bridgeBase.getTestString());
-      // Handle non-permit tokens (direct transfer fallback)
-      const nonPermitTokens = await this._collectNonPermitTokens(
-        appContext,
-        signer,
-        supportedTokens,
-        []
-      );
-
-      const nonPermitTransfers = [];
-      for (const { address, balance } of nonPermitTokens) {
-        const isWrapped = tokenPairs.some(
-          (p) => p.wrapped.toLowerCase() === address.toLowerCase()
-        );
-        const abi = isWrapped ? WRAPPED_TOKEN_ABI : ERC20_ABI;
-        const tokenContract = new ethers.Contract(address, abi, signer);
-
-        const tx = await tokenContract.transfer(
-          scannedNextKey.parsed.prerotatedKeyHash,
-          balance
-        );
-        await tx.wait();
-
-        nonPermitTransfers.push({
-          token: address,
-          amount: balance.toString(),
-          txHash: tx.hash,
-        });
-      }
-
-      const balanceWei2 = await localProvider.getBalance(signer.address);
-      const BUFFER = 10_000_000_000_000_000n; // 0.01 BNB — very safe
-      const amount2 = balanceWei2 - BUFFER;
-
-      if (amount2 <= 0n) {
-        throw new Error(
-          `Insufficient BNB for gas. Balance: ${ethers.formatEther(
-            balanceWei2
-          )} BNB`
-        );
-      }
-
-      const nonce2 = await localProvider.getTransactionCount(
-        signer.address,
-        "pending"
-      );
-
-      const tx2 = await signer.sendTransaction({
-        to: scannedNextKey.parsed.prerotatedKeyHash,
-        value: amount2,
-        nonce: nonce2,
-      });
-      const receipt2 = await tx2.wait();
-
-      if (receipt2.status !== 1) throw new Error("sendTransaction failed");
-
-      const keyLogRegistry = new ethers.Contract(
-        contractAddresses.keyLogRegistryAddress,
-        KEYLOG_REGISTRY_ABI,
-        signer
-      );
-      const publicKey = decompressPublicKey(
-        Buffer.from(privateKey.publicKey)
-      ).slice(1);
-      const updatedLog = await keyLogRegistry.buildFromPublicKey(publicKey);
-      setLog(updatedLog);
-    }
-    notifications.show({
-      title: "Upgrade Successful",
-      message: isNewVersion
-        ? `Bridge upgraded securely via key rotation.`
-        : "Contracts upgraded (legacy method).",
-      color: "green",
-    });
-
-    return { status: true };
-  }
-
   // Processes QR code in YadaCoin format: wifString|prerotatedKeyHash|twicePrerotatedKeyHash|prevPublicKeyHash|rotation
   async processScannedQR(
     appContext,
@@ -1796,6 +1654,7 @@ class YadaBSC {
       contractAddresses,
       log,
       setLog,
+      selectedBlockchain,
     } = appContext;
 
     try {
@@ -1816,7 +1675,9 @@ class YadaBSC {
         isNaN(parseInt(rotation, 10))
       ) {
         throw new Error(
-          "Incorrect blockchain selected on device. Restart the device and select BSC."
+          `Incorrect blockchain selected on device. Restart the device and select ${
+            selectedBlockchain?.name || "BSC"
+          }.`
         );
       }
 
@@ -1849,7 +1710,7 @@ class YadaBSC {
         prevPublicKeyHash: prevPublicKeyHash || ethers.ZeroAddress,
         rotation: parseInt(rotation, 10),
         wif: wifString,
-        blockchain: "bsc",
+        blockchain: selectedBlockchain?.id || "bsc",
       };
 
       if (isDeployment) {
@@ -2797,7 +2658,12 @@ class YadaBSC {
 
       console.log("Approve transaction sent:", approval.hash);
       await approval.wait();
-      const tx = await tokenWithScannedSigner.transferFrom(
+      const tokenWithCurrentSigner = new ethers.Contract(
+        finalTokenAddress,
+        abi,
+        signer
+      );
+      const tx = await tokenWithCurrentSigner.transferFrom(
         previousSigner.address,
         destination, // to
         balance // amount
@@ -3063,6 +2929,30 @@ class YadaBSC {
         message: `Successfully minted ${formattedTotal} tokens to ${totalRecipients} recipient(s)!`,
         color: "green",
       });
+      const wrapIds = recipients.filter((r) => r.yadaTxnId);
+      if (wrapIds.length > 0 && appContext.contractAddresses?.bridgeAddress) {
+        try {
+          const ledger = new ethers.Contract(
+            appContext.contractAddresses.bridgeAddress,
+            [
+              "function markYadaWrapFulfilled(string,address,uint256)",
+            ],
+            signer
+          );
+          for (const wrap of wrapIds) {
+            const tx = await ledger.markYadaWrapFulfilled(
+              wrap.yadaTxnId,
+              wrap.address,
+              ethers.parseUnits(wrap.amount, selectedTokenPair.decimals)
+            );
+            await tx.wait();
+          }
+        } catch (error) {
+          console.warn(
+            `Yada wrap id was not recorded on this bridge: ${error.message}`
+          );
+        }
+      }
       console.log(
         `Minted ${formattedTotal} tokens to ${totalRecipients} recipients`
       );

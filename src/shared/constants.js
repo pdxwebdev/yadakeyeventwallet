@@ -1,23 +1,19 @@
 import { ethers } from "ethers";
 import BridgeArtifact from "../utils/abis/Bridge.json";
-import BridgeUpgradeArtifact from "../utils/abis/BridgeUpgrade.json";
 import KeyLogRegistryArtifact from "../utils/abis/KeyLogRegistry.json";
-import KeyLogRegistryUpgradeArtifact from "../utils/abis/KeyLogRegistryUpgrade.json";
 import WrappedTokenArtifact from "../utils/abis/WrappedToken.json";
-import WrappedTokenUpgradeArtifact from "../utils/abis/WrappedTokenUpgrade.json";
 import WrappedNativeTokenArtifact from "../utils/abis/WrappedNativeToken.json";
 import MockERC20Artifact from "../utils/abis/MockERC20.json";
-import MockERC20UpgradeArtifact from "../utils/abis/MockERC20Upgrade.json";
 import AgentRegistryArtifact from "../utils/abis/AgentRegistry.json";
 export const BRIDGE_ABI = BridgeArtifact.abi;
-export const BRIDGE_UPGRADE_ABI = BridgeUpgradeArtifact.abi;
+export const BRIDGE_UPGRADE_ABI = BridgeArtifact.abi;
 export const KEYLOG_REGISTRY_ABI = KeyLogRegistryArtifact.abi;
-export const KEYLOG_REGISTRY_UPGRADE_ABI = KeyLogRegistryUpgradeArtifact.abi;
+export const KEYLOG_REGISTRY_UPGRADE_ABI = KeyLogRegistryArtifact.abi;
 export const WRAPPED_TOKEN_ABI = WrappedTokenArtifact.abi;
-export const WRAPPED_TOKEN_UPGRADE_ABI = WrappedTokenUpgradeArtifact.abi;
+export const WRAPPED_TOKEN_UPGRADE_ABI = WrappedTokenArtifact.abi;
 export const WRAPPED_NATIVE_TOKEN_ABI = WrappedNativeTokenArtifact.abi;
 export const ERC20_ABI = MockERC20Artifact.abi;
-export const ERC20_UPGRADE_ABI = MockERC20UpgradeArtifact.abi;
+export const ERC20_UPGRADE_ABI = MockERC20Artifact.abi;
 export const AGENT_REGISTRY_ABI = AgentRegistryArtifact.abi;
 
 export const DEPLOY_ENV = "mainnet"; //import.meta.env.VITE_DEPLOY_ENV;
@@ -71,7 +67,7 @@ export let localSwapProvider =
 export const HARDHAT_MNEMONIC =
   "test test test test test test test test test test test junk";
 
-export const BLOCKCHAINS = [
+const BSC_CHAIN =
   DEPLOY_ENV === "mainnet"
     ? {
         id: "bsc",
@@ -103,7 +99,30 @@ export const BLOCKCHAINS = [
         hardwareInstruction: "Select BSC on your device.",
         color: "yellow",
         isKeyEventLog: true,
-      },
+      };
+
+export const BLOCKCHAINS = [
+  {
+    id: "base",
+    name: "Base (Coinbase)",
+    chainId: 8453,
+    isBridge: true,
+    providerUrl: "https://mainnet.base.org",
+    hardwareInstruction: "Select Base on your device.",
+    color: "blue",
+    isKeyEventLog: true,
+  },
+  BSC_CHAIN,
+  {
+    id: "btc",
+    name: "Bitcoin",
+    chainId: 657, // Ethereum mainnet
+    providerUrl: "https://blockchain.info", // Ethereum RPC URL
+    hardwareInstruction: "Bitcoin coming soon!",
+    color: "orange",
+    isKeyEventLog: false,
+    disabled: true,
+  },
   // {
   //   id: 'eth',
   //   name: 'Ethereum',
@@ -121,16 +140,6 @@ export const BLOCKCHAINS = [
     color: "teal",
     isKeyEventLog: true,
   },
-  {
-    id: "btc",
-    name: "Bitcoin",
-    chainId: 657, // Ethereum mainnet
-    providerUrl: "https://blockchain.info", // Ethereum RPC URL
-    hardwareInstruction: "Bitcoin coming soon!",
-    color: "orange",
-    isKeyEventLog: false,
-    disabled: true,
-  },
 ];
 
 export const addresses =
@@ -144,6 +153,8 @@ export const addresses =
         factoryAddress: "0xAa5e83c729A4411871D08310BE0b1125DB3a2C8d",
         yadaERC20Address: "0xD84B7E8b295d9Fa9656527AC33Bf4F683aE7d2C4",
         agentRegistryAddress: "", // Set after deploying AgentRegistry to BSC mainnet
+        yadaPriceMarketAddress: "", // Set after deploying YadaPriceMarket to BSC mainnet
+        yadaMarginVaultAddress: "", // Set after deploying YadaMarginVault to BSC mainnet
         configured: true,
       }
     : {
@@ -155,6 +166,8 @@ export const addresses =
         factoryAddress: "0x76E9E0Fd7F1EeBA70221990E82BD4cD89c3C43BA",
         yadaERC20Address: "0x6147dBD0980f3203c14BCD667F547c1264911d7d",
         agentRegistryAddress: "", // Set after deploying AgentRegistry to BSC testnet
+        yadaPriceMarketAddress: "0x0165878A594ca255338adfa4d48449f69242Eb8F",
+        yadaMarginVaultAddress: "0x9A676e781A523b5d0C0e43731313A708CB607508",
         configured: true,
       };
 
@@ -162,7 +175,10 @@ export const deployed = true;
 
 export const PANCAKE_ROUTER_ADDRESS =
   "0x10ED43C718714eb63d5aA57B78B54704E256024E"; // PancakeSwap V2 Router
-export const USDT_ADDRESS = "0x55d398326f99059fF775485246999027B3197955"; // BSC USDT
+export const USDT_ADDRESS =
+  DEPLOY_ENV === "mainnet" || DEPLOY_ENV === "testnet"
+    ? "0x55d398326f99059fF775485246999027B3197955"
+    : "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512"; // local mock from deployYadaPriceMarket
 export const PANCAKESWAP_V2_FACTORY =
   "0xcA143Ce32Fe78f1f7019d7d551a6402fC5350c73";
 export const INIT_CODE_HASH =
@@ -184,4 +200,35 @@ export const PANCAKE_ROUTER_ABI = [
 
   // === CRITICAL: Add this line ===
   "function getAmountsOut(uint amountIn, address[] calldata path) external view returns (uint[] memory amounts)",
+];
+
+export const YADA_PRICE_MARKET_ABI = [
+  "function stakeToken() view returns (address)",
+  "function spotPrice() view returns (uint256)",
+  "function currentRoundId() view returns (uint256)",
+  "function minBet() view returns (uint256)",
+  "function getRound(uint256 roundId) view returns (tuple(uint64 startTime, uint64 endTime, uint256 strikePrice, uint256 settlementPrice, uint256 longPot, uint256 shortPot, bool settled, uint8 winningSide))",
+  "function getPosition(uint256 roundId, address user) view returns (tuple(uint256 longAmount, uint256 shortAmount, bool claimed))",
+  "function pendingPayout(uint256 roundId, address user) view returns (uint256)",
+  "function placeBet(bool isShort, uint256 amount)",
+  "function settle()",
+  "function claim(uint256 roundId)",
+  "function createRound(uint256 duration)",
+];
+
+export const YADA_MARGIN_VAULT_ABI = [
+  "function collateralToken() view returns (address)",
+  "function markPrice() view returns (uint256)",
+  "function insuranceFund() view returns (uint256)",
+  "function minCollateral() view returns (uint256)",
+  "function getPosition(address user) view returns (tuple(bool open, bool isShort, uint256 collateral, uint256 leverage, uint256 entryPrice, uint256 notional))",
+  "function pnlOf(address user) view returns (int256)",
+  "function equityOf(address user) view returns (uint256)",
+  "function maintenanceOf(address user) view returns (uint256)",
+  "function isLiquidatable(address user) view returns (bool)",
+  "function openPosition(bool isShort, uint256 collateral, uint256 leverage)",
+  "function addCollateral(uint256 amount)",
+  "function closePosition()",
+  "function liquidate(address user)",
+  "function seedInsurance(uint256 amount)",
 ];

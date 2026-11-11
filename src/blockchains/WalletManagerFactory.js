@@ -5,6 +5,7 @@ import YadaCoin from "./YadaCoin";
 export const walletManagerFactory = (blockchainId) => {
   switch (blockchainId) {
     case "bsc":
+    case "base":
       return new YadaBSC();
     case "eth":
       // return new YadaETH(appContext);

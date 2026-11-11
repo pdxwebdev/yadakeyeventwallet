@@ -10,6 +10,8 @@ import {
   Title,
 } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
+import { useEffect, useState } from "react";
+import { ethers } from "ethers";
 import Flasher from "./Flasher";
 
 const WalletStateHandler = ({
@@ -22,8 +24,34 @@ const WalletStateHandler = ({
   onRotateKey,
   isDeployed,
   styles,
+  selectedBlockchain,
 }) => {
   const [opened, { toggle }] = useDisclosure(false);
+  const [deployerBalance, setDeployerBalance] = useState("");
+  let deployerAddress = "";
+  try {
+    const stored = localStorage.getItem(
+      `walletParsedData_${selectedBlockchain?.id}_QR1`
+    );
+    deployerAddress = stored ? JSON.parse(stored).publicKeyHash : "";
+  } catch {
+    deployerAddress = "";
+  }
+
+  useEffect(() => {
+    if (!deployerAddress || selectedBlockchain?.id !== "base") {
+      setDeployerBalance("");
+      return;
+    }
+    const provider = new ethers.JsonRpcProvider(
+      selectedBlockchain.providerUrl,
+      { chainId: selectedBlockchain.chainId, name: "base" }
+    );
+    provider
+      .getBalance(deployerAddress)
+      .then((balance) => setDeployerBalance(ethers.formatEther(balance)))
+      .catch(() => setDeployerBalance(""));
+  }, [deployerAddress, selectedBlockchain]);
 
   if (!privateKey) {
     return (
@@ -94,6 +122,12 @@ const WalletStateHandler = ({
         <Text>
           Contracts are not deployed. Please deploy contracts to proceed.
         </Text>
+        {deployerAddress && (
+          <Text>
+            Deployer {deployerAddress}
+            {deployerBalance ? ` has ${deployerBalance} ETH on Base` : ""}
+          </Text>
+        )}
         <Button onClick={onDeployContracts} color="blue" variant="filled">
           Deploy Contracts
         </Button>

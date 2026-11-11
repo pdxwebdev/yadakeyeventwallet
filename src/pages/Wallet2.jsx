@@ -49,6 +49,8 @@ import { ethers } from "ethers";
 import SendBalanceForm from "../components/Wallet2/SendBalanceForm";
 import { SwapForm } from "../components/Wallet2/SwapForm";
 import { LiquidityForm } from "../components/Wallet2/LiquidityForm";
+import { ShortForm } from "../components/Wallet2/ShortForm";
+import { MarginForm } from "../components/Wallet2/MarginForm";
 import { useDisclosure, useMediaQuery } from "@mantine/hooks";
 import AmountInput from "../components/Wallet2/AmountInput";
 import {
@@ -73,6 +75,11 @@ import {
   IconPlayerPlay,
 } from "@tabler/icons-react";
 import { glossaryTerms } from "../shared/glossary";
+import AgentManager from "../components/Wallet2/AgentManager";
+import AgentPlanReview from "../components/Wallet2/AgentPlanReview";
+import AgentKeyScanner from "../components/Wallet2/AgentKeyScanner";
+import { yadaAgents } from "../blockchains/YadaAgents";
+import { IconRobot } from "@tabler/icons-react";
 
 const ITEMS_PER_PAGE = 5;
 
@@ -146,6 +153,44 @@ const Wallet2 = () => {
   const [signResult, setSignResult] = useState(null);
   const [isSigning, setIsSigning] = useState(false);
 
+  // ── Agent workflow state ─────────────────────────────────────
+  const [isPlanReviewOpen, setIsPlanReviewOpen] = useState(false);
+  const [isAgentApprovalScannerOpen, setIsAgentApprovalScannerOpen] =
+    useState(false);
+  const [isAgentKeyScannerOpen, setIsAgentKeyScannerOpen] = useState(false);
+  const [activePlanId, setActivePlanId] = useState(null);
+
+  // Fetch agents + plans once the wallet is initialised
+  useEffect(() => {
+    if (
+      isInitialized &&
+      contractAddresses?.agentRegistryAddress &&
+      privateKey
+    ) {
+      yadaAgents.fetchAgents(appContext).catch(() => {});
+      yadaAgents.fetchPlans(appContext).catch(() => {});
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isInitialized, contractAddresses?.agentRegistryAddress]);
+
+  const handlePlanReceived = (planId) => {
+    setActivePlanId(planId);
+    setIsPlanReviewOpen(true);
+  };
+
+  const handlePlanApproved = (planId) => {
+    setActivePlanId(planId);
+    // Open the approval scanner (mode="approve") — user scans 1 identity key
+    // to prove who is approving.  On completion, the execute scanner opens.
+    setIsAgentApprovalScannerOpen(true);
+  };
+
+  const handlePlanExecuteRequired = (planId) => {
+    setActivePlanId(planId);
+    // Plan is already APPROVED — skip approval scanner, go straight to execute.
+    setIsAgentKeyScannerOpen(true);
+  };
+
   const [glossaryOpen, { open: openGlossary, close: closeGlossary }] =
     useDisclosure(false);
   const [demoModalOpen, { open: openDemo, close: closeDemo }] =
@@ -182,6 +227,7 @@ const Wallet2 = () => {
         "history",
         "sign",
         "admin",
+        "agents",
       ].includes(saved)
     ) {
       setActiveSection(saved);
@@ -611,6 +657,16 @@ const Wallet2 = () => {
       const cprkh = qrResults[2].newParsedData.prerotatedKeyHash;
       const ctprkh = qrResults[2].newParsedData.twicePrerotatedKeyHash;
       const clean = true;
+      qrResults.forEach((result, index) => {
+        localStorage.setItem(
+          `walletParsedData_${selectedBlockchain.id}_QR${index + 1}`,
+          JSON.stringify(result.newParsedData)
+        );
+      });
+      const lastResult = qrResults[qrResults.length - 1];
+      setPrivateKey(lastResult.newPrivateKey);
+      setWif(lastResult.newParsedData.wif);
+      setParsedData(lastResult.newParsedData);
       setLoading(true);
 
       const deployResult = await walletManager.deploy(
@@ -1003,6 +1059,7 @@ const Wallet2 = () => {
                     onRotateKey={() => handleRotateKey(appContext)}
                     isDeployed={isDeployed}
                     styles={styles}
+                    selectedBlockchain={selectedBlockchain}
                   />
 
                   {privateKey &&
@@ -1111,6 +1168,14 @@ const Wallet2 = () => {
                       supportedTokens={supportedTokens}
                       balance={balance}
                       refreshAfterTx={refreshAfterTx}
+                    />
+                    <ShortForm
+                      appContext={appContext}
+                      walletManager={walletManager}
+                    />
+                    <MarginForm
+                      appContext={appContext}
+                      walletManager={walletManager}
                     />
                   </>
                 )}
@@ -1587,6 +1652,42 @@ const Wallet2 = () => {
                   />
                 )}
 
+              {/* ── Agents section ────────────────────────────── */}
+              {activeSection === "agents" && (
+                <AgentManager
+                  onPlanReceived={handlePlanReceived}
+                  onScanRequired={handlePlanApproved}
+                  onExecuteRequired={handlePlanExecuteRequired}
+                />
+              )}
+
+              {/* Agent plan review modal (shown on top of any section) */}
+              <AgentPlanReview
+                opened={isPlanReviewOpen}
+                onClose={() => setIsPlanReviewOpen(false)}
+                onApproved={handlePlanApproved}
+              />
+
+              {/* Approval scanner — scans 1 identity key and calls approvePlan */}
+              <AgentKeyScanner
+                opened={isAgentApprovalScannerOpen}
+                onClose={() => setIsAgentApprovalScannerOpen(false)}
+                onComplete={() => {
+                  setIsAgentApprovalScannerOpen(false);
+                  setIsAgentKeyScannerOpen(true);
+                }}
+                planId={activePlanId}
+                mode="approve"
+              />
+
+              {/* Execute scanner — scans rotation keys and calls executePlan */}
+              <AgentKeyScanner
+                opened={isAgentKeyScannerOpen}
+                onClose={() => setIsAgentKeyScannerOpen(false)}
+                planId={activePlanId}
+                mode="execute"
+              />
+
               <QRScannerModal
                 isOpen={isScannerOpen}
                 onClose={() => {
@@ -1724,6 +1825,15 @@ const Wallet2 = () => {
             title="Overview"
           />
           <NavLink
+            label={isSmOrLarger ? "Agents" : undefined}
+            leftSection={<IconRobot size={22} />}
+            active={activeSection === "agents"}
+            onClick={() => setActiveSection("agents")}
+            color="violet"
+            title="AI Agents"
+            disabled={!isInitialized}
+          />
+          <NavLink
             label={isSmOrLarger ? "Send" : undefined}
             leftSection={<IconSend size={22} />}
             active={activeSection === "send"}
@@ -1753,6 +1863,7 @@ const Wallet2 = () => {
             active={activeSection === "history"}
             onClick={() => setActiveSection("history")}
             title="History"
+            disabled={!isInitialized}
           />
           <NavLink
             label={isSmOrLarger ? "Sign" : undefined}
@@ -1762,16 +1873,14 @@ const Wallet2 = () => {
             disabled={!privateKey || !isInitialized}
             title="Sign"
           />
-          {isOwner && (
-            <NavLink
-              label={isSmOrLarger ? "Admin" : undefined}
-              leftSection={<IconShieldLock size={22} />}
-              active={activeSection === "admin"}
-              onClick={() => setActiveSection("admin")}
-              color="orange"
-              title="Admin"
-            />
-          )}
+          <NavLink
+            label={isSmOrLarger ? "Admin" : undefined}
+            leftSection={<IconShieldLock size={22} />}
+            active={activeSection === "admin"}
+            onClick={() => setActiveSection("admin")}
+            color="orange"
+            title="Admin"
+          />
         </Group>
       </AppShell.Footer>
     </AppShell>

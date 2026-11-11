@@ -30,7 +30,9 @@ export const ThemeContext = createContext({
 
 // Root component
 function Root() {
-  const [primaryColor, setPrimaryColor] = useState(BLOCKCHAINS[0].color); // Initial primary color
+  const [primaryColor, setPrimaryColor] = useState(
+    (BLOCKCHAINS.find((chain) => chain.id === "base") || BLOCKCHAINS[0]).color
+  );
 
   // Create dynamic theme based on state
   const theme = createTheme({
@@ -97,6 +99,20 @@ function Root() {
     </ThemeContext.Provider>
   );
 }
+
+// ── Global error logging ─────────────────────────────────────────────────
+window.addEventListener("error", (event) => {
+  console.error(
+    "[global error]",
+    event.message,
+    event.filename,
+    `L${event.lineno}:${event.colno}`,
+    event.error
+  );
+});
+window.addEventListener("unhandledrejection", (event) => {
+  console.error("[unhandled promise rejection]", event.reason);
+});
 
 // Render the app
 const container = document.getElementById("root");

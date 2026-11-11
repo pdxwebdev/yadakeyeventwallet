@@ -11,7 +11,9 @@ import {
 const AppContext = createContext();
 
 export const AppProvider = ({ children }) => {
-  const [selectedBlockchain, setSelectedBlockchain] = useState(BLOCKCHAINS[0]); // Default to BSC
+  const [selectedBlockchain, setSelectedBlockchain] = useState(
+    BLOCKCHAINS.find((chain) => chain.id === "base") || BLOCKCHAINS[0]
+  );
   const [transactions, setTransactions] = useState([]);
   const [log, setLog] = useState([]);
   const [wif, setWif] = useState("");
@@ -42,6 +44,14 @@ export const AppProvider = ({ children }) => {
   const [tokenPairsFetched, setTokenPairsFetched] = useState(false);
   const [pancakeRouter, setPancakeRouter] = useState(null);
   const [useLpToken, setUseLpToken] = useState(false);
+
+  // ── Agent state ───────────────────────────────────────────────────────────
+  const [agents, setAgents] = useState([]);
+  const [agentPlans, setAgentPlans] = useState([]);
+  const [pendingAgentPlan, setPendingAgentPlan] = useState(null);
+  const [guardianVerdict, setGuardianVerdict] = useState(null);
+  const [isAgentKeyScanning, setIsAgentKeyScanning] = useState(false);
+  const [executionResults, setExecutionResults] = useState(null);
 
   useEffect(() => {
     if (
@@ -130,6 +140,18 @@ export const AppProvider = ({ children }) => {
       setPancakeRouter,
       useLpToken,
       setUseLpToken,
+      agents,
+      setAgents,
+      agentPlans,
+      setAgentPlans,
+      pendingAgentPlan,
+      setPendingAgentPlan,
+      guardianVerdict,
+      setGuardianVerdict,
+      isAgentKeyScanning,
+      setIsAgentKeyScanning,
+      executionResults,
+      setExecutionResults,
     }),
     [
       selectedBlockchain,
@@ -163,6 +185,12 @@ export const AppProvider = ({ children }) => {
       tokenPairsFetched,
       pancakeRouter,
       useLpToken,
+      agents,
+      agentPlans,
+      pendingAgentPlan,
+      guardianVerdict,
+      isAgentKeyScanning,
+      executionResults,
     ]
   );
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
