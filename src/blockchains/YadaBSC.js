@@ -890,11 +890,15 @@ class YadaBSC {
       const lastLogEntry = uniqueLog[uniqueLog.length - 1];
       if (parsedData.prerotatedKeyHash === lastLogEntry.prerotatedKeyHash) {
         if (uniqueLog.length > 0) {
+          const sameAddr = (a, b) =>
+            a && b && a.toLowerCase() === b.toLowerCase();
           const isValidContinuity =
-            lastLogEntry.publicKeyHash === parsedData.prevPublicKeyHash &&
-            lastLogEntry.prerotatedKeyHash === address &&
-            lastLogEntry.twicePrerotatedKeyHash ===
-              parsedData.prerotatedKeyHash;
+            sameAddr(lastLogEntry.publicKeyHash, parsedData.prevPublicKeyHash) &&
+            sameAddr(lastLogEntry.prerotatedKeyHash, address) &&
+            sameAddr(
+              lastLogEntry.twicePrerotatedKeyHash,
+              parsedData.prerotatedKeyHash
+            );
 
           if (!isValidContinuity) {
             return { status: "invalid_continuity" };
@@ -1495,7 +1499,11 @@ class YadaBSC {
     try {
       notifications.show({
         title: "Key Rotation Required",
-        message: `Please scan the QR code for the next key (rotation ${log.length}).`,
+        message: `Please scan the QR code for the next key (rotation ${log.length}${
+          log[log.length - 1]?.prerotatedKeyHash
+            ? `, ${log[log.length - 1].prerotatedKeyHash}`
+            : ""
+        }).`,
         color: "yellow",
       });
       setIsScannerOpen(true);
@@ -1835,34 +1843,34 @@ class YadaBSC {
           );
         }
 
+        const same = (a, b) =>
+          a && b && a.toLowerCase() === b.toLowerCase();
         let isValidContinuity = false;
         if (index === 0 && isTransactionFlow && isInitialized && privateKey) {
           const signer = new ethers.Wallet(
             ethers.hexlify(privateKey.privateKey),
             localProvider
           );
-          isValidContinuity =
-            data.prevPublicKeyHash === signer.address &&
-            (!data.prevPublicKeyHash ||
-              signer.address === data.prevPublicKeyHash);
+          isValidContinuity = same(data.prevPublicKeyHash, signer.address);
         } else if (index > 0) {
           isValidContinuity =
-            data.prevPublicKeyHash === qrResults[index - 1].publicKeyHash &&
-            data.prerotatedKeyHash ===
-              qrResults[index - 1].twicePrerotatedKeyHash;
+            same(data.prevPublicKeyHash, qrResults[index - 1].publicKeyHash) &&
+            same(
+              data.prerotatedKeyHash,
+              qrResults[index - 1].twicePrerotatedKeyHash
+            );
         } else {
           isValidContinuity =
-            lastEntry.prerotatedKeyHash === newPublicKeyHash &&
-            lastEntry.twicePrerotatedKeyHash === data.prerotatedKeyHash &&
+            same(lastEntry.prerotatedKeyHash, newPublicKeyHash) &&
+            same(lastEntry.twicePrerotatedKeyHash, data.prerotatedKeyHash) &&
             (!data.prevPublicKeyHash ||
-              lastEntry.publicKeyHash === data.prevPublicKeyHash);
+              data.prevPublicKeyHash === ethers.ZeroAddress ||
+              same(lastEntry.publicKeyHash, data.prevPublicKeyHash));
         }
 
         if (!isValidContinuity) {
           throw new Error(
-            `The scanned key (rotation ${data.rotation}) at position ${
-              index + 1
-            } does not maintain continuity. Check your PIN and try again.`
+            `Scanned ${newPublicKeyHash} (rotation ${data.rotation}). The on-chain log expects ${lastEntry.prerotatedKeyHash} next, with prerotated ${lastEntry.twicePrerotatedKeyHash} and previous ${lastEntry.publicKeyHash}.`
           );
         }
       }
@@ -2439,11 +2447,22 @@ class YadaBSC {
         "error InvalidPermits()",
       ];
 
-      const iface = new ethers.Interface(errors.map((e) => e));
-      const revertData = error.data;
-      const parsed = iface.parseError(revertData);
+      let parsed = null;
+      const revertData =
+        error.data || error.info?.error?.data || error.error?.data;
+      if (revertData) {
+        try {
+          const iface = new ethers.Interface(errors.map((e) => e));
+          parsed = iface.parseError(revertData);
+        } catch (parseError) {
+          parsed = null;
+        }
+      }
       console.error("Error in buildAndExecuteTransaction:", error, parsed);
-      return { status: false, message: error.message };
+      return {
+        status: false,
+        message: parsed?.name || error.shortMessage || error.message,
+      };
     } finally {
       setLoading(false);
     }

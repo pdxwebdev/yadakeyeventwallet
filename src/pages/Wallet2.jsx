@@ -1163,22 +1163,24 @@ const Wallet2 = () => {
                       refreshAfterTx={refreshAfterTx}
                     />
                     {selectedBlockchain.id === "bsc" && (
-                    <LiquidityForm
-                      appContext={appContext}
-                      webcamRef={webcamRef}
-                      walletManager={walletManager}
-                      supportedTokens={supportedTokens}
-                      balance={balance}
-                      refreshAfterTx={refreshAfterTx}
-                    />
-                    <ShortForm
-                      appContext={appContext}
-                      walletManager={walletManager}
-                    />
-                    <MarginForm
-                      appContext={appContext}
-                      walletManager={walletManager}
-                    />
+                      <>
+                        <LiquidityForm
+                          appContext={appContext}
+                          webcamRef={webcamRef}
+                          walletManager={walletManager}
+                          supportedTokens={supportedTokens}
+                          balance={balance}
+                          refreshAfterTx={refreshAfterTx}
+                        />
+                        <ShortForm
+                          appContext={appContext}
+                          walletManager={walletManager}
+                        />
+                        <MarginForm
+                          appContext={appContext}
+                          walletManager={walletManager}
+                        />
+                      </>
                     )}
                   </>
                 )}

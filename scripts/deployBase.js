@@ -198,7 +198,7 @@ async function main() {
             amount: nativeAmount,
             recipients: [
               {
-                recipientAddress: deployer.address,
+                recipientAddress: next.address,
                 amount: nativeAmount,
                 wrap: false,
                 unwrap: false,
@@ -216,7 +216,7 @@ async function main() {
             amount: MINT,
             recipients: [
               {
-                recipientAddress: deployer.address,
+                recipientAddress: next.address,
                 amount: MINT,
                 wrap: false,
                 unwrap: false,
@@ -246,6 +246,33 @@ async function main() {
     );
     await tx.wait();
     deployments.wydaMinted = MINT.toString();
+    save(deployments);
+  }
+
+  if (!deployments.sweptToNextKey) {
+    const nextAddress = next.address;
+    const wydaToken = await ethers.getContractAt(
+      ["function balanceOf(address) view returns (uint256)", "function transfer(address,uint256) returns (bool)"],
+      deployments.yadaERC20Address,
+      deployer
+    );
+    const wydaBalance = await wydaToken.balanceOf(deployer.address);
+    if (wydaBalance > 0n) {
+      await (await wydaToken.transfer(nextAddress, wydaBalance)).wait();
+    }
+    const ethBalance = await ethers.provider.getBalance(deployer.address);
+    const fee = await ethers.provider.getFeeData();
+    const gasPrice = fee.gasPrice ?? 1_000_000n;
+    const gasReserve = gasPrice * 21000n * 2n;
+    if (ethBalance > gasReserve) {
+      await (
+        await deployer.sendTransaction({
+          to: nextAddress,
+          value: ethBalance - gasReserve,
+        })
+      ).wait();
+    }
+    deployments.sweptToNextKey = nextAddress;
     save(deployments);
   }
 

@@ -139,11 +139,13 @@ const WalletStateHandler = ({
     return (
       log.length !== parsedData.rotation && (
         <Stack align="center" spacing="md">
-          {
-            <Text>
-              Please scan key rotation <strong>{log.length}</strong> to proceed.
-            </Text>
-          }
+          <Text>
+            Please scan key rotation <strong>{log.length}</strong>
+            {log[log.length - 1]?.prerotatedKeyHash
+              ? ` (${log[log.length - 1].prerotatedKeyHash})`
+              : ""}{" "}
+            to proceed.
+          </Text>
           <Button
             onClick={onRotateKey}
             color="teal"
