@@ -198,9 +198,29 @@ class YadaBSC {
         };
       }
 
+      let version = "1";
+      try {
+        const domainReader = new ethers.Contract(
+          tokenAddress,
+          [
+            "function eip712Domain() view returns (bytes1 fields, string name, string version, uint256 chainId, address verifyingContract, bytes32 salt, uint256[] extensions)",
+          ],
+          signer
+        );
+        const eip712 = await domainReader.eip712Domain();
+        if (eip712.name) name = eip712.name;
+        if (eip712.version) version = eip712.version;
+      } catch {
+        if (
+          tokenAddress.toLowerCase() ===
+          "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913"
+        ) {
+          version = "2";
+        }
+      }
       const domain = {
         name,
-        version: "1",
+        version,
         chainId: (await localProvider.getNetwork()).chainId,
         verifyingContract: tokenAddress,
       };
@@ -982,6 +1002,7 @@ class YadaBSC {
       log,
       parsedData,
       loading,
+      selectedBlockchain,
     } = appContext;
 
     if (!privateKey || !selectedToken || !contractAddresses.bridgeAddress)
@@ -1008,7 +1029,7 @@ class YadaBSC {
       const hasWrapped = wrappedToken !== ethers.ZeroAddress;
 
       if (selectedToken === ethers.ZeroAddress) {
-        setSymbol("bnb");
+        setSymbol(selectedBlockchain?.id === "base" ? "eth" : "bnb");
         originalBalance = await localProvider.getBalance(address);
         if (hasWrapped) {
           const wrappedContract = new ethers.Contract(
@@ -1043,15 +1064,28 @@ class YadaBSC {
         original: originalBalance,
         wrapped: wrappedBalance,
       };
+      let originalDecimals = 18;
+      if (selectedToken !== ethers.ZeroAddress) {
+        const tokenContract = new ethers.Contract(
+          selectedToken,
+          ERC20_ABI,
+          signer
+        );
+        originalDecimals = Number(await tokenContract.decimals());
+      }
       if (setStateVars)
         setBalance({
-          original: ethers.formatEther(originalBalance),
+          original: ethers.formatUnits(originalBalance, originalDecimals),
           wrapped: ethers.formatEther(wrappedBalance),
         });
       notifications.show({
         title: "Success",
         message: `Balance refreshed for ${
-          selectedToken === ethers.ZeroAddress ? "BNB" : "selected token"
+          selectedToken === ethers.ZeroAddress
+            ? selectedBlockchain?.id === "base"
+              ? "ETH"
+              : "BNB"
+            : "selected token"
         }`,
         color: "green",
       });
@@ -1891,7 +1925,8 @@ class YadaBSC {
   }
 
   async fetchTokenPairs(appContext) {
-    const { setLoading, contractAddresses, setTokenPairs } = appContext;
+    const { setLoading, contractAddresses, setTokenPairs, selectedBlockchain } =
+      appContext;
     if (!contractAddresses.bridgeAddress) {
       console.warn("Bridge address not set, cannot fetch token pairs");
       return [];
@@ -1917,8 +1952,8 @@ class YadaBSC {
                 original.toLowerCase() ===
                 "0x0000000000000000000000000000000000000000"
               ) {
-                name = "Binance Coin";
-                symbol = "BNB";
+                name = selectedBlockchain?.id === "base" ? "Ether" : "Binance Coin";
+                symbol = selectedBlockchain?.id === "base" ? "ETH" : "BNB";
               } else {
                 const wrappedContract = new ethers.Contract(
                   pair.wrappedToken,
@@ -2143,6 +2178,7 @@ class YadaBSC {
       setIsScannerOpen,
       setIsTransactionFlow,
       selectedToken,
+      selectedBlockchain,
       log,
       contractAddresses,
       privateKey,
@@ -2211,14 +2247,15 @@ class YadaBSC {
       if (permit) permits.push(permit);
 
       const lpTokenAddress = LP_ADDRESS;
-
-      // Get LP token balance
-      const lpTokenContract = new ethers.Contract(
-        lpTokenAddress,
-        ERC20_ABI,
-        signer
-      );
-      const lpBalance = await lpTokenContract.balanceOf(signer.address);
+      let lpBalance = 0n;
+      if (selectedBlockchain?.id !== "base") {
+        const lpTokenContract = new ethers.Contract(
+          lpTokenAddress,
+          ERC20_ABI,
+          signer
+        );
+        lpBalance = await lpTokenContract.balanceOf(signer.address);
+      }
 
       let lpPermit = null;
       if (lpBalance > 0n) {
@@ -2509,13 +2546,15 @@ class YadaBSC {
     // Resolve token address
     // --------------------------------------------------------------
 
-    const lpTokenAddress = await getLpTokenAddress(
-      addresses.yadaERC20Address,
-      USDT_ADDRESS
-    );
     let finalTokenAddress = selectedToken;
     if (useLpToken) {
-      finalTokenAddress = lpTokenAddress;
+      if (selectedBlockchain?.id === "base") {
+        throw new Error("LP token send is BSC only");
+      }
+      finalTokenAddress = await getLpTokenAddress(
+        addresses.yadaERC20Address,
+        USDT_ADDRESS
+      );
     } else {
       const pair = tokenPairs.find((t) => t.original === selectedToken);
       if (tokenPairs.length > 0 && sendWrapped && pair) {

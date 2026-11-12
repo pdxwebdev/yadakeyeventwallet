@@ -72,7 +72,8 @@ const SendBalanceForm = ({ appContext, webcamRef }) => {
   // Get token symbol for display
   const getTokenSymbol = (tokenAddress) => {
     if (tokenAddress === LP_ADDRESS) return "WYDA-USDT LP Token";
-    if (tokenAddress === ethers.ZeroAddress) return "BNB";
+    if (tokenAddress === ethers.ZeroAddress)
+      return selectedBlockchain.id === "base" ? "ETH" : "BNB";
     const token = supportedTokens.find(
       (t) => t.address.toLowerCase() === tokenAddress.toLowerCase()
     );
@@ -87,7 +88,10 @@ const SendBalanceForm = ({ appContext, webcamRef }) => {
 
     // Add BNB option
     if (!seenAddresses.has(ethers.ZeroAddress)) {
-      options.push({ value: ethers.ZeroAddress, label: "BNB" });
+      options.push({
+        value: ethers.ZeroAddress,
+        label: selectedBlockchain.id === "base" ? "ETH" : "BNB",
+      });
       seenAddresses.add(ethers.ZeroAddress);
     }
 
@@ -111,7 +115,11 @@ const SendBalanceForm = ({ appContext, webcamRef }) => {
       setIsLoading(true);
       if (selectedBlockchain.isBridge) {
         let decimals = 18;
-        let symbol = "BNB";
+        let symbol = selectedBlockchain.id === "base" ? "ETH" : "BNB";
+        if (tokenAddress && tokenAddress !== ethers.ZeroAddress) {
+          const token = new ethers.Contract(tokenAddress, ERC20_ABI, localProvider);
+          decimals = Number(await token.decimals());
+        }
         const balanceRes = await walletManager.fetchBalance(
           appContext,
           address,
@@ -195,12 +203,12 @@ const SendBalanceForm = ({ appContext, webcamRef }) => {
       // Convert WIF to wallet
       const wallet = fromWIF(wifString);
 
-      const lpTokenAddress = await getLpTokenAddress(
-        addresses.yadaERC20Address,
-        USDT_ADDRESS
-      );
       let finalTokenAddress = selectedToken;
       if (useLpToken) {
+        const lpTokenAddress = await getLpTokenAddress(
+          addresses.yadaERC20Address,
+          USDT_ADDRESS
+        );
         finalTokenAddress = lpTokenAddress;
       } else {
         const pair = tokenPairs.find((t) => t.original === selectedToken);
@@ -252,13 +260,12 @@ const SendBalanceForm = ({ appContext, webcamRef }) => {
       });
       return;
     }
-
-    const lpTokenAddress = await getLpTokenAddress(
-      addresses.yadaERC20Address,
-      USDT_ADDRESS
-    );
     let finalTokenAddress = selectedToken;
     if (useLpToken) {
+      const lpTokenAddress = await getLpTokenAddress(
+        addresses.yadaERC20Address,
+        USDT_ADDRESS
+      );
       finalTokenAddress = lpTokenAddress;
     } else {
       const pair = tokenPairs.find((t) => t.original === selectedToken);

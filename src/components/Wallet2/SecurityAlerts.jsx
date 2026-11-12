@@ -93,7 +93,12 @@ const SecurityAlerts = ({ parsedData, selectedBlockchain, onRotateKey }) => {
 
       // Determine API URL and chain ID for V2 API (uses etherscan.io even for BSC)
       const apiUrl = "https://api.etherscan.io/v2/api";
-      const chainId = selectedBlockchain.testnet ? "97" : "56";
+      const chainId =
+        selectedBlockchain.id === "base"
+          ? "8453"
+          : selectedBlockchain.testnet
+          ? "97"
+          : "56";
 
       const apiKey = import.meta.env.VITE_BSCSCAN_API_KEY || "YourApiKeyToken";
 
@@ -104,8 +109,8 @@ const SecurityAlerts = ({ parsedData, selectedBlockchain, onRotateKey }) => {
       const data = await response.json();
       console.log("BSCScan API Response:", data);
 
-      if (!data.result) {
-        console.log("No transactions found or error in response");
+      if (!Array.isArray(data.result)) {
+        console.log("No transactions found or error in response", data.result);
         return;
       }
 

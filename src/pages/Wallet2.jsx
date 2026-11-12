@@ -48,7 +48,7 @@ import axios from "axios";
 import { ethers } from "ethers";
 import SendBalanceForm from "../components/Wallet2/SendBalanceForm";
 import { SwapForm } from "../components/Wallet2/SwapForm";
-import { LiquidityForm } from "../components/Wallet2/LiquidityForm";
+import { BaseLiquidityForm, LiquidityForm } from "../components/Wallet2/LiquidityForm";
 import { ShortForm } from "../components/Wallet2/ShortForm";
 import { MarginForm } from "../components/Wallet2/MarginForm";
 import { useDisclosure, useMediaQuery } from "@mantine/hooks";
@@ -266,8 +266,8 @@ const Wallet2 = () => {
       );
       if (pair) {
         wrappedTokenSymbol = pair.symbol || wrappedTokenSymbol;
-      } else if (tokenSymbol === "BNB") {
-        wrappedTokenSymbol = "BNB";
+      } else if (tokenSymbol === "BNB" || tokenSymbol === "ETH") {
+        wrappedTokenSymbol = tokenSymbol;
       } else {
         wrappedTokenSymbol = null;
       }
@@ -1093,7 +1093,9 @@ const Wallet2 = () => {
                             >
                               {balance <= 0
                                 ? `Cannot initialize wallet (${
-                                    selectedBlockchain.isBridge
+                                      selectedBlockchain.id === "base"
+                                      ? "ETH"
+                                      : selectedBlockchain.isBridge
                                       ? "BNB"
                                       : selectedBlockchain.id.toUpperCase()
                                   } balance is 0)`
@@ -1162,6 +1164,12 @@ const Wallet2 = () => {
                       wrappedTokenSymbol={wrappedTokenSymbol}
                       refreshAfterTx={refreshAfterTx}
                     />
+                    {selectedBlockchain.id === "base" && (
+                      <BaseLiquidityForm
+                        appContext={appContext}
+                        walletManager={walletManager}
+                      />
+                    )}
                     {selectedBlockchain.id === "bsc" && (
                       <>
                         <LiquidityForm

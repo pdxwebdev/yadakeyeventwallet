@@ -40,10 +40,12 @@ const bscProvider =
         chainId: 31337,
         name: "hardhat",
       });
+export const BASE_RPC_URL = import.meta.env.DEV
+  ? `${window.location.origin}/base-rpc`
+  : "https://mainnet.base.org";
 export const baseProvider = new ethers.JsonRpcProvider(
-  "https://mainnet.base.org",
-  { chainId: 8453, name: "base" },
-  { batchMaxCount: 1 }
+  BASE_RPC_URL,
+  { chainId: 8453, name: "base" }
 );
 export let localProvider = baseProvider;
 export const setLocalProviderForChain = (chain) => {
@@ -116,7 +118,7 @@ export const BLOCKCHAINS = [
     name: "Base (Coinbase)",
     chainId: 8453,
     isBridge: true,
-    providerUrl: "https://mainnet.base.org",
+    providerUrl: BASE_RPC_URL,
     hardwareInstruction: "Select Base on your device.",
     color: "blue",
     isKeyEventLog: true,

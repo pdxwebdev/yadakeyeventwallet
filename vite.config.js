@@ -63,4 +63,13 @@ export default defineConfig({
     },
   },
   base: "/wallet/",
+  server: {
+    proxy: {
+      "/base-rpc": {
+        target: "https://mainnet.base.org",
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/base-rpc/, ""),
+      },
+    },
+  },
 });

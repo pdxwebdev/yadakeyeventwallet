@@ -6,6 +6,8 @@ import { ethers } from "ethers";
 import { styles } from "../../shared/styles";
 import {
   addresses,
+  baseAddresses,
+  localProvider,
   PANCAKE_ROUTER_ADDRESS,
   USDT_ADDRESS,
 } from "../../shared/constants";
@@ -13,6 +15,115 @@ import AmountInput from "./AmountInput";
 
 // === CONFIG: USDT & WYDA (Update these addresses if needed) ===
 const WYDA_ADDRESS = addresses.yadaERC20Address; // Replace with actual WYDA address
+
+const POOL_ABI = [
+  "function addLiquidity(uint256 usdcAmount, uint256 wydaAmount)",
+  "function reserveUsdc() view returns (uint256)",
+  "function reserveWyda() view returns (uint256)",
+];
+const ERC20_ABI = [
+  "function approve(address spender, uint256 amount) returns (bool)",
+  "function allowance(address owner, address spender) view returns (uint256)",
+  "function balanceOf(address) view returns (uint256)",
+];
+
+export const BaseLiquidityForm = ({ appContext, walletManager }) => {
+  const { privateKey } = appContext;
+  const [usdcAmount, setUsdcAmount] = useState("");
+  const [wydaAmount, setWydaAmount] = useState("");
+  const [loading, setLoading] = useState(false);
+  const poolAddress = baseAddresses.poolAddress;
+
+  const fillMax = async (tokenAddress, decimals, setAmount) => {
+    if (!privateKey?.privateKey) return;
+    const signer = new ethers.Wallet(
+      ethers.hexlify(privateKey.privateKey),
+      localProvider
+    );
+    const token = new ethers.Contract(tokenAddress, ERC20_ABI, localProvider);
+    const balance = await token.balanceOf(signer.address);
+    setAmount(ethers.formatUnits(balance, decimals));
+  };
+
+  const addLiquidity = async () => {
+    if (!privateKey?.privateKey || !usdcAmount || !wydaAmount) return;
+    setLoading(true);
+    try {
+      const signer = new ethers.Wallet(
+        ethers.hexlify(privateKey.privateKey),
+        localProvider
+      );
+      const usdcWei = ethers.parseUnits(usdcAmount, 6);
+      const wydaWei = ethers.parseUnits(wydaAmount, 18);
+      const usdc = new ethers.Contract(baseAddresses.usdcAddress, ERC20_ABI, signer);
+      const wyda = new ethers.Contract(baseAddresses.yadaERC20Address, ERC20_ABI, signer);
+      if ((await usdc.allowance(signer.address, poolAddress)) < usdcWei) {
+        await (await usdc.approve(poolAddress, usdcWei)).wait();
+      }
+      if ((await wyda.allowance(signer.address, poolAddress)) < wydaWei) {
+        await (await wyda.approve(poolAddress, wydaWei)).wait();
+      }
+      const pool = new ethers.Contract(poolAddress, POOL_ABI, signer);
+      await (await pool.addLiquidity(usdcWei, wydaWei)).wait();
+      await walletManager.fetchBalance(appContext);
+      notifications.show({ title: "Liquidity added", color: "green" });
+    } catch (error) {
+      notifications.show({
+        title: "Add liquidity failed",
+        message: error.shortMessage || error.message,
+        color: "red",
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <Card withBorder mt="md" radius="md" p="md" style={styles.card}>
+      <Title order={4}>Add Base pool liquidity</Title>
+      <Text size="sm" c="dimmed" mt="xs">
+        Pool {poolAddress}. USDC has 6 decimals. This uses the connected key only.
+      </Text>
+      <Group mt="md" grow align="flex-end">
+        <div>
+          <Button
+            size="xs"
+            variant="subtle"
+            onClick={() => fillMax(baseAddresses.usdcAddress, 6, setUsdcAmount)}
+          >
+            Max USDC
+          </Button>
+          <AmountInput
+            label="USDC"
+            value={usdcAmount}
+            onChange={(v) => setUsdcAmount(v?.toString() ?? "")}
+            min={0}
+            decimalScale={6}
+          />
+        </div>
+        <div>
+          <Button
+            size="xs"
+            variant="subtle"
+            onClick={() => fillMax(baseAddresses.yadaERC20Address, 18, setWydaAmount)}
+          >
+            Max WYDA
+          </Button>
+          <AmountInput
+            label="WYDA"
+            value={wydaAmount}
+            onChange={(v) => setWydaAmount(v?.toString() ?? "")}
+            min={0}
+            decimalScale={18}
+          />
+        </div>
+      </Group>
+      <Button mt="md" fullWidth loading={loading} onClick={addLiquidity} leftSection={<IconPlus size={16} />}>
+        Approve and addLiquidity
+      </Button>
+    </Card>
+  );
+};
 
 export const LiquidityForm = ({ appContext, webcamRef, walletManager }) => {
   const router = appContext.getPancakeRouter?.();
