@@ -1,4 +1,5 @@
 import {
+  Badge,
   Button,
   Group,
   TextInput,
@@ -7,12 +8,40 @@ import {
   FileButton,
   Text,
   Divider,
+  Table,
+  Anchor,
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { ethers } from "ethers";
+import axios from "axios";
 import React from "react";
 import { IconTrash, IconUpload } from "@tabler/icons-react";
 import AmountInput from "./AmountInput";
+import { getP2PKH } from "../../utils/hdWallet";
+import { BRIDGE_ABI, localProvider } from "../../shared/constants";
+
+const WRAP_ADDRESS = "16U1gAmHazqqEkbRE9KFPShAperjJreMRA";
+const WRAP_START_HEIGHT = 620273;
+const BASE_BRIDGE_START_BLOCK = 56248238;
+const LOG_SPAN = 90000;
+const baseLogProvider = new ethers.JsonRpcProvider(
+  "https://base.rpc.blxrbdn.com",
+  8453,
+  { staticNetwork: true }
+);
+const FULFILLED_KEY = "yadaWrapFulfilled";
+
+const loadFulfilled = () => {
+  try {
+    return new Set(JSON.parse(localStorage.getItem(FULFILLED_KEY) || "[]"));
+  } catch {
+    return new Set();
+  }
+};
+
+const saveFulfilled = (ids) => {
+  localStorage.setItem(FULFILLED_KEY, JSON.stringify([...ids]));
+};
 
 const TokenManagementForm = ({
   walletManager,
@@ -25,8 +54,12 @@ const TokenManagementForm = ({
   const { selectedToken } = appContext;
 
   const [mintEntries, setMintEntries] = React.useState([
-    { id: "1", address: "", amount: "" },
+    { id: "1", address: "", amount: "", yadaTxnId: "" },
   ]);
+  const [wrapRequests, setWrapRequests] = React.useState([]);
+  const [wrapLoading, setWrapLoading] = React.useState(false);
+  const [unwrapRequests, setUnwrapRequests] = React.useState([]);
+  const [unwrapLoading, setUnwrapLoading] = React.useState(false);
 
   const [burnEntries, setBurnEntries] = React.useState([
     { id: "1", address: "", amount: "" },
@@ -36,7 +69,7 @@ const TokenManagementForm = ({
   const addMintEntry = () => {
     setMintEntries([
       ...mintEntries,
-      { id: Date.now().toString(), address: "", amount: "" },
+      { id: Date.now().toString(), address: "", amount: "", yadaTxnId: "" },
     ]);
   };
 
@@ -100,6 +133,7 @@ const TokenManagementForm = ({
           id: Date.now().toString() + i,
           address,
           amount,
+          yadaTxnId: "",
         });
       }
 
@@ -122,6 +156,123 @@ const TokenManagementForm = ({
 
     reader.readAsText(file);
   };
+
+  const loadWrapRequests = async () => {
+    setWrapLoading(true);
+    try {
+      const res = await axios.get(
+        `${import.meta.env.VITE_API_URL}/explorer-search?term=${WRAP_ADDRESS}`
+      );
+      const blocks = Array.isArray(res.data?.result) ? res.data.result : [];
+      const fulfilled = loadFulfilled();
+      const requests = [];
+      for (const block of blocks) {
+        if (Number(block.index) < WRAP_START_HEIGHT) continue;
+        for (const txn of block.transactions || []) {
+          let senderAddress = "";
+          try {
+            senderAddress = getP2PKH(Buffer.from(txn.public_key, "hex"));
+          } catch {
+            senderAddress = "";
+          }
+          if (senderAddress === WRAP_ADDRESS) continue;
+          const paid = (txn.outputs || []).find(
+            (output) =>
+              output.to === WRAP_ADDRESS && Number(output.value) > 0
+          );
+          if (!paid) continue;
+          if (!ethers.isAddress(txn.relationship || "")) continue;
+          requests.push({
+            id: txn.id,
+            block: block.index,
+            destination: txn.relationship,
+            amount: String(paid.value),
+            fulfilled: fulfilled.has(txn.id),
+          });
+        }
+      }
+      const bridgeAddress = appContext.contractAddresses?.bridgeAddress;
+      if (bridgeAddress) {
+        const bridge = new ethers.Contract(
+          bridgeAddress,
+          ["function isYadaWrapFulfilled(string) view returns (bool)"],
+          localProvider
+        );
+        await Promise.all(
+          requests.map(async (request) => {
+            try {
+              if (await bridge.isYadaWrapFulfilled(request.id)) {
+                request.fulfilled = true;
+                fulfilled.add(request.id);
+              }
+            } catch {
+              // current bridge has no fulfillment record yet
+            }
+          })
+        );
+        saveFulfilled(fulfilled);
+      }
+      setWrapRequests(requests);
+    } catch (error) {
+      notifications.show({
+        title: "Error",
+        message: error.message || "Failed to load wrap requests",
+        color: "red",
+      });
+    } finally {
+      setWrapLoading(false);
+    }
+  };
+
+  const loadUnwrapRequests = async () => {
+    setUnwrapLoading(true);
+    try {
+      const bridgeAddress = appContext.contractAddresses?.bridgeAddress;
+      if (!bridgeAddress) {
+        setUnwrapRequests([]);
+        return;
+      }
+      const network = await localProvider.getNetwork();
+      const chainId = Number(network.chainId);
+      const explorer =
+        chainId === 56 ? "https://bscscan.com" : "https://basescan.org";
+      const logProvider = chainId === 8453 ? baseLogProvider : localProvider;
+      const latest = await logProvider.getBlockNumber();
+      const start =
+        chainId === 8453 ? BASE_BRIDGE_START_BLOCK : Math.max(0, latest - 200000);
+      const bridge = new ethers.Contract(bridgeAddress, BRIDGE_ABI, logProvider);
+      const filter = bridge.filters.BurnForYadaCoinWithdrawal();
+      const logs = [];
+      for (let from = start; from <= latest; from += LOG_SPAN) {
+        const to = Math.min(from + LOG_SPAN - 1, latest);
+        logs.push(...(await bridge.queryFilter(filter, from, to)));
+      }
+      setUnwrapRequests(
+        logs
+          .map((log) => ({
+            id: `${log.transactionHash}-${log.index}`,
+            txHash: log.transactionHash,
+            explorer: `${explorer}/tx/${log.transactionHash}`,
+            destination: log.args.bitcoinAddress,
+            amount: ethers.formatUnits(log.args.amount, 18),
+          }))
+          .reverse()
+      );
+    } catch (error) {
+      notifications.show({
+        title: "Error",
+        message: error.message || "Failed to load unwrap requests",
+        color: "red",
+      });
+    } finally {
+      setUnwrapLoading(false);
+    }
+  };
+
+  React.useEffect(() => {
+    loadWrapRequests();
+    loadUnwrapRequests();
+  }, []);
 
   const handleMint = async () => {
     const validEntries = mintEntries.filter(
@@ -155,7 +306,13 @@ const TokenManagementForm = ({
         color: "green",
       });
 
-      setMintEntries([{ id: "1", address: "", amount: "" }]);
+      const fulfilled = loadFulfilled();
+      validEntries.forEach((entry) => {
+        if (entry.yadaTxnId) fulfilled.add(entry.yadaTxnId);
+      });
+      saveFulfilled(fulfilled);
+      setMintEntries([{ id: "1", address: "", amount: "", yadaTxnId: "" }]);
+      await loadWrapRequests();
       await walletManager.fetchBalance(appContext);
       await walletManager.buildTransactionHistory(appContext);
     } catch (error) {
@@ -318,6 +475,126 @@ const TokenManagementForm = ({
     <Stack gap="lg">
       {/* Mint Section */}
       <div>
+        <Text size="sm" fw={500} mb="md">
+          YadaCoin wrap requests
+        </Text>
+        <Group justify="space-between" mb="sm">
+          <Text size="xs" c="dimmed">
+            Deposits to {WRAP_ADDRESS} from block {WRAP_START_HEIGHT}. The explorer returns the latest blocks that touch this address.
+          </Text>
+          <Button variant="outline" onClick={loadWrapRequests} loading={wrapLoading}>
+            Refresh
+          </Button>
+        </Group>
+        <Table striped highlightOnHover mb="md">
+          <Table.Thead>
+            <Table.Tr>
+              <Table.Th>Txn</Table.Th>
+              <Table.Th>Destination</Table.Th>
+              <Table.Th>Amount</Table.Th>
+              <Table.Th>Status</Table.Th>
+              <Table.Th />
+            </Table.Tr>
+          </Table.Thead>
+          <Table.Tbody>
+            {wrapRequests.length === 0 ? (
+              <Table.Tr>
+                <Table.Td colSpan={5}>
+                  <Text size="sm" c="dimmed">
+                    {wrapLoading ? "Loading..." : "No wrap requests in range"}
+                  </Text>
+                </Table.Td>
+              </Table.Tr>
+            ) : (
+              wrapRequests.map((request) => (
+                <Table.Tr key={request.id}>
+                  <Table.Td>
+                    <Anchor
+                      href={`${import.meta.env.VITE_API_URL}/explorer?term=${encodeURIComponent(request.id)}`}
+                      target="_blank"
+                      size="sm"
+                    >
+                      {request.id.slice(0, 12)}...
+                    </Anchor>
+                  </Table.Td>
+                  <Table.Td>
+                    <Text size="xs">{request.destination}</Text>
+                  </Table.Td>
+                  <Table.Td>{request.amount}</Table.Td>
+                  <Table.Td>
+                    <Badge color={request.fulfilled ? "green" : "yellow"}>
+                      {request.fulfilled ? "Fulfilled" : "Pending"}
+                    </Badge>
+                  </Table.Td>
+                  <Table.Td>
+                    <Button
+                      size="xs"
+                      variant="light"
+                      disabled={request.fulfilled}
+                      onClick={() =>
+                        setMintEntries([
+                          {
+                            id: request.id,
+                            address: request.destination,
+                            amount: request.amount,
+                            yadaTxnId: request.id,
+                          },
+                        ])
+                      }
+                    >
+                      Mint
+                    </Button>
+                  </Table.Td>
+                </Table.Tr>
+              ))
+            )}
+          </Table.Tbody>
+        </Table>
+        <Text size="sm" fw={500} mb="md">
+          Pending unwrap requests
+        </Text>
+        <Group justify="space-between" mb="sm">
+          <Text size="xs" c="dimmed">
+            Bridge unwraps. The wrapped tokens are already burned. Send the amount to the YadaCoin address.
+          </Text>
+          <Button variant="outline" onClick={loadUnwrapRequests} loading={unwrapLoading}>
+            Refresh
+          </Button>
+        </Group>
+        <Table striped highlightOnHover mb="md">
+          <Table.Thead>
+            <Table.Tr>
+              <Table.Th>Txn</Table.Th>
+              <Table.Th>Destination</Table.Th>
+              <Table.Th>Amount</Table.Th>
+            </Table.Tr>
+          </Table.Thead>
+          <Table.Tbody>
+            {unwrapRequests.length === 0 ? (
+              <Table.Tr>
+                <Table.Td colSpan={3}>
+                  <Text size="sm" c="dimmed">
+                    {unwrapLoading ? "Loading..." : "No unwrap requests"}
+                  </Text>
+                </Table.Td>
+              </Table.Tr>
+            ) : (
+              unwrapRequests.map((request) => (
+                <Table.Tr key={request.id}>
+                  <Table.Td>
+                    <Anchor href={request.explorer} target="_blank" size="sm">
+                      {request.txHash.slice(0, 12)}...
+                    </Anchor>
+                  </Table.Td>
+                  <Table.Td>
+                    <Text size="xs">{request.destination}</Text>
+                  </Table.Td>
+                  <Table.Td>{request.amount}</Table.Td>
+                </Table.Tr>
+              ))
+            )}
+          </Table.Tbody>
+        </Table>
         <Text size="sm" fw={500} mb="md">
           Mint Tokens
         </Text>
