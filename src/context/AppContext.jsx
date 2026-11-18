@@ -1,6 +1,14 @@
 // src/context/AppContext.js
 import { ethers } from "ethers";
-import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   BLOCKCHAINS,
   localProvider,
@@ -13,15 +21,27 @@ import {
 const AppContext = createContext();
 
 export const AppProvider = ({ children }) => {
-  const initialChain =
-    BLOCKCHAINS.find((chain) => chain.id === "base") || BLOCKCHAINS[0];
-  setLocalProviderForChain(initialChain);
+  const initialChainRef = useRef(null);
+  if (!initialChainRef.current) {
+    initialChainRef.current =
+      BLOCKCHAINS.find((chain) => chain.id === "base") || BLOCKCHAINS[0];
+    setLocalProviderForChain(initialChainRef.current);
+  }
+  const initialChain = initialChainRef.current;
   const [selectedBlockchain, setSelectedBlockchainState] = useState(initialChain);
+  const selectedBlockchainRef = useRef(initialChain);
+  const balanceEpochRef = useRef(0);
+  useEffect(() => {
+    setLocalProviderForChain(selectedBlockchain);
+  }, [selectedBlockchain]);
   const setSelectedBlockchain = (chain) => {
+    selectedBlockchainRef.current = chain;
+    balanceEpochRef.current += 1;
     setLocalProviderForChain(chain);
     setSelectedBlockchainState(chain);
-    setContractAddresses(addressesForChain(chain.id));
-    setIsDeployed(chain.id === "base" || chain.id === "bsc");
+    const supportsContracts = chain.id === "base" || chain.id === "bsc";
+    setContractAddresses(supportsContracts ? addressesForChain(chain.id) : {});
+    setIsDeployed(true);
     setTokenPairs([]);
     setTokenPairsFetched(false);
   };
@@ -31,6 +51,7 @@ export const AppProvider = ({ children }) => {
   const [combinedHistory, setCombinedHistory] = useState([]);
   const [currentPage, setCurrentPage] = useState(1);
   const [isScannerOpen, setIsScannerOpen] = useState(false);
+  const [scanPrompt, setScanPrompt] = useState("");
   const [isQRModalOpen, setIsQRModalOpen] = useState(false);
   const [parsedData, setParsedData] = useState(null);
   const [recipients, setRecipients] = useState([{ address: "", amount: "" }]);
@@ -41,6 +62,13 @@ export const AppProvider = ({ children }) => {
   const [isTransactionFlow, setIsTransactionFlow] = useState(false);
   const [feeEstimate, setFeeEstimate] = useState(null);
   const [balance, setBalance] = useState(null);
+  // Chain-aware balance writes: an in-flight fetch for a chain the user has
+  // already switched away from must not overwrite the active chain's balance.
+  const setBalanceForChain = useCallback((chainId, value) => {
+    if (!chainId || selectedBlockchainRef.current?.id !== chainId) return;
+    setBalance(value);
+  }, []);
+  const getBalanceEpoch = useCallback(() => balanceEpochRef.current, []);
   const [isOwner, setIsOwner] = useState(false); // Add isOwner state
   const [loading, setLoading] = useState(false);
   const [signer, setSigner] = useState(null);
@@ -107,6 +135,8 @@ export const AppProvider = ({ children }) => {
       setCurrentPage,
       isScannerOpen,
       setIsScannerOpen,
+      scanPrompt,
+      setScanPrompt,
       isQRModalOpen,
       setIsQRModalOpen,
       parsedData,
@@ -127,6 +157,8 @@ export const AppProvider = ({ children }) => {
       setFeeEstimate,
       balance,
       setBalance,
+      setBalanceForChain,
+      getBalanceEpoch,
       supportedTokens,
       setSupportedTokens,
       selectedToken,
@@ -176,6 +208,7 @@ export const AppProvider = ({ children }) => {
       combinedHistory,
       currentPage,
       isScannerOpen,
+      scanPrompt,
       isQRModalOpen,
       parsedData,
       recipients,
@@ -186,6 +219,8 @@ export const AppProvider = ({ children }) => {
       isTransactionFlow,
       feeEstimate,
       balance,
+      setBalanceForChain,
+      getBalanceEpoch,
       supportedTokens,
       selectedToken,
       loading,

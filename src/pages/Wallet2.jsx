@@ -39,8 +39,11 @@ import {
   BLOCKCHAINS,
   BRIDGE_ABI,
   BRIDGE_UPGRADE_ABI,
+  baseAddresses,
+  baseProvider,
   localProvider,
   localSwapProvider,
+  providerForChain,
   PANCAKE_ROUTER_ABI,
   PANCAKE_ROUTER_ADDRESS,
 } from "../shared/constants";
@@ -82,6 +85,7 @@ import { yadaAgents } from "../blockchains/YadaAgents";
 import { IconRobot } from "@tabler/icons-react";
 
 const ITEMS_PER_PAGE = 5;
+const BASE_OWNER_STORAGE_KEY = "isBaseBridgeOwner";
 
 const Wallet2 = () => {
   const {
@@ -139,6 +143,11 @@ const Wallet2 = () => {
   const webcamRef = useRef(null);
   const appContext = useAppContext();
   const isDeploymentChecked = useRef(false);
+  const walletContextRef = useRef({ selectedBlockchain, privateKey });
+  walletContextRef.current = { selectedBlockchain, privateKey };
+  const activeRotation = log?.length ? log.length : parsedData?.rotation ?? 0;
+  const isActiveKey =
+    Boolean(log?.length) && (parsedData?.rotation ?? 0) === activeRotation;
 
   const [opened, { toggle }] = useDisclosure(false);
   const isSmOrLarger = useMediaQuery("(min-width: 576px)");
@@ -149,6 +158,9 @@ const Wallet2 = () => {
   const [isSecureUpgradeFlow, setIsSecureUpgradeFlow] = useState(false);
   const [secureUpgradeScans, setSecureUpgradeScans] = useState([]);
   const [isNewBridgeVersion, setIsNewBridgeVersion] = useState(null);
+  const [isBaseBridgeOwner, setIsBaseBridgeOwner] = useState(
+    () => localStorage.getItem(BASE_OWNER_STORAGE_KEY) === "true"
+  );
   const [messageToSign, setMessageToSign] = useState("");
   const [signResult, setSignResult] = useState(null);
   const [isSigning, setIsSigning] = useState(false);
@@ -215,23 +227,9 @@ const Wallet2 = () => {
   };
 
   useEffect(() => {
-    const saved = localStorage.getItem(`lastSection_${selectedBlockchain.id}`);
-    if (
-      saved &&
-      [
-        "overview",
-        "send",
-        "swap",
-        "wrap",
-        "bridge",
-        "history",
-        "sign",
-        "admin",
-        "agents",
-      ].includes(saved)
-    ) {
-      setActiveSection(saved);
-    }
+    // Always land on the overview when switching chains; a section remembered
+    // from another chain (e.g. Admin) can otherwise hide the wallet state.
+    setActiveSection("overview");
   }, [selectedBlockchain.id]);
 
   useEffect(() => {
@@ -291,32 +289,26 @@ const Wallet2 = () => {
       const bridge = new ethers.Contract(
         contractAddresses.bridgeAddress,
         BRIDGE_ABI,
-        localProvider
+        providerForChain(selectedBlockchain)
       );
 
       const owner = await bridge.getOwner();
       const signerAddress = parsedData?.publicKeyHash;
+      const isMatch =
+        Boolean(signerAddress) &&
+        owner.toLowerCase() === signerAddress.toLowerCase();
 
-      if (
-        signerAddress &&
-        owner.toLowerCase() === signerAddress.toLowerCase()
-      ) {
-        setIsOwner((prev) => {
-          if (prev !== true) {
-            console.log("Setting isOwner to true");
-            return true;
-          }
-          return prev;
-        });
-      } else {
-        setIsOwner((prev) => {
-          if (prev !== false) {
-            console.log("Setting isOwner to false");
-            return false;
-          }
-          return prev;
-        });
+      if (selectedBlockchain.id === "base") {
+        localStorage.setItem(BASE_OWNER_STORAGE_KEY, isMatch.toString());
       }
+
+      setIsOwner((prev) => {
+        if (prev !== isMatch) {
+          console.log(`Setting isOwner to ${isMatch}`);
+          return isMatch;
+        }
+        return prev;
+      });
     } catch (error) {
       console.error("Error checking owner status:", error);
       setIsOwner((prev) => {
@@ -339,7 +331,103 @@ const Wallet2 = () => {
   }, [isOwner]);
 
   useEffect(() => {
+    let cancelled = false;
+    const checkBaseBridgeOwner = async () => {
+      if (
+        selectedBlockchain.id !== "yda" ||
+        !baseAddresses.bridgeAddress
+      ) {
+        if (!cancelled) setIsBaseBridgeOwner(false);
+        return;
+      }
+
+      const candidates = new Set();
+      const addCandidate = (address) => {
+        if (ethers.isAddress(address)) candidates.add(address.toLowerCase());
+      };
+      const addStoredKey = (raw) => {
+        if (!raw) return;
+        const value = typeof raw === "string" ? raw.trim() : raw;
+        try {
+          const key = fromWIF(value);
+          addCandidate(new ethers.Wallet(ethers.hexlify(key.privateKey)).address);
+          return;
+        } catch {
+          // not a WIF; fall through to cached JSON formats
+        }
+        try {
+          const parsed = JSON.parse(value);
+          addCandidate(parsed?.publicKeyHash);
+          addCandidate(parsed?.address);
+          if (parsed?.wif) addStoredKey(parsed.wif);
+          if (parsed?.privateKey) {
+            try {
+              addCandidate(
+                new ethers.Wallet(ethers.hexlify(parsed.privateKey)).address
+              );
+            } catch {
+              // ignore malformed cached private key
+            }
+          }
+        } catch {
+          // ignore malformed cached keys
+        }
+      };
+
+      try {
+        const storedBase = JSON.parse(
+          localStorage.getItem("walletParsedData_base") || "null"
+        );
+        addCandidate(storedBase?.publicKeyHash);
+        addCandidate(storedBase?.address);
+        if (storedBase?.wif) addStoredKey(storedBase.wif);
+      } catch {
+        // ignore malformed cached base wallet
+      }
+      addStoredKey(localStorage.getItem("walletWif_base"));
+      addStoredKey(localStorage.getItem("walletPrivateKey_base"));
+
+      const cachedOwner = localStorage.getItem(BASE_OWNER_STORAGE_KEY);
+      if (candidates.size === 0) {
+        if (!cancelled) setIsBaseBridgeOwner(cachedOwner === "true");
+        return;
+      }
+
+      try {
+        const bridge = new ethers.Contract(
+          baseAddresses.bridgeAddress,
+          BRIDGE_ABI,
+          baseProvider
+        );
+        const owner = String(await bridge.getOwner()).toLowerCase();
+        const isMatch = candidates.has(owner);
+        console.log("Base bridge owner check", {
+          owner,
+          baseWalletCandidates: [...candidates],
+          isMatch,
+        });
+        localStorage.setItem(BASE_OWNER_STORAGE_KEY, isMatch.toString());
+        if (!cancelled) setIsBaseBridgeOwner(isMatch);
+      } catch (error) {
+        console.error("Error checking Base bridge owner:", error);
+        if (!cancelled) setIsBaseBridgeOwner(cachedOwner === "true");
+      }
+    };
+    checkBaseBridgeOwner();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedBlockchain.id]);
+
+  useEffect(() => {
     const checkDeploymentStatus = async (appContext) => {
+      if (!["bsc", "base"].includes(selectedBlockchain.id)) {
+        setIsDeployed(true);
+        setContractAddresses((prev) =>
+          prev && Object.keys(prev).length === 0 ? prev : {}
+        );
+        return;
+      }
       if (isDeployed && Object.keys(contractAddresses).length > 0) {
         await checkOwnerStatus(appContext);
         return;
@@ -394,7 +482,7 @@ const Wallet2 = () => {
       `walletIsInitialized_${selectedBlockchain.id}`
     );
 
-    if (storedPrivateKey && storedWif && storedParsedData) {
+    if (storedWif && storedParsedData) {
       try {
         const privateKeyObj = fromWIF(storedWif);
         const parsed = JSON.parse(storedParsedData);
@@ -426,69 +514,50 @@ const Wallet2 = () => {
       setIsInitialized(false);
       setIsOwner(false);
     }
-  }, [
-    selectedBlockchain,
-    setPrivateKey,
-    setWif,
-    setParsedData,
-    setIsInitialized,
-    setIsOwner,
-  ]);
+  }, [selectedBlockchain.id]);
 
   useEffect(() => {
-    if (privateKey && parsedData?.blockchain === selectedBlockchain.id) {
-      localStorage.setItem(
-        `walletPrivateKey_${selectedBlockchain.id}`,
-        JSON.stringify(privateKey)
-      );
-    } else {
-      localStorage.removeItem(`walletPrivateKey_${selectedBlockchain.id}`);
-    }
-  }, [privateKey, parsedData, selectedBlockchain]);
+    if (!wif || parsedData?.blockchain !== selectedBlockchain.id) return;
+    const id = selectedBlockchain.id;
+    localStorage.setItem(`walletWif_${id}`, wif);
+    localStorage.setItem(`walletPrivateKey_${id}`, wif);
+    localStorage.setItem(
+      `walletParsedData_${id}`,
+      JSON.stringify(parsedData)
+    );
+    localStorage.setItem(
+      `walletIsInitialized_${id}`,
+      isInitialized.toString()
+    );
+  }, [wif, parsedData, isInitialized, selectedBlockchain.id]);
 
   useEffect(() => {
-    if (wif && parsedData?.blockchain === selectedBlockchain.id) {
-      localStorage.setItem(`walletWif_${selectedBlockchain.id}`, wif);
-    } else {
-      localStorage.removeItem(`walletWif_${selectedBlockchain.id}`);
-    }
-  }, [wif, parsedData, selectedBlockchain]);
-
-  useEffect(() => {
-    if (parsedData && parsedData.blockchain === selectedBlockchain.id) {
-      const { ...dataToStore } = parsedData;
-      localStorage.setItem(
-        `walletParsedData_${selectedBlockchain.id}`,
-        JSON.stringify(dataToStore)
-      );
-    } else {
-      localStorage.removeItem(`walletParsedData_${selectedBlockchain.id}`);
-    }
-  }, [parsedData, selectedBlockchain]);
-
-  useEffect(() => {
-    if (parsedData?.blockchain === selectedBlockchain.id) {
-      localStorage.setItem(
-        `walletIsInitialized_${selectedBlockchain.id}`,
-        isInitialized.toString()
-      );
-    } else {
-      localStorage.removeItem(`walletIsInitialized_${selectedBlockchain.id}`);
-    }
-  }, [isInitialized, parsedData, selectedBlockchain]);
-
-  useEffect(() => {
-    const fetchLog = async () => {
-      await walletManager.fetchLog(appContext);
-    };
+    if (log.length !== 0 || !privateKey) return;
+    // Skip the stale key from the previous chain: on a chain switch this
+    // effect can run before the stored key for the new chain is restored.
+    if (parsedData?.blockchain !== selectedBlockchain.id) return;
     if (
-      log.length === 0 &&
-      contractAddresses.keyLogRegistryAddress &&
-      privateKey
+      !contractAddresses.keyLogRegistryAddress &&
+      ["bsc", "base"].includes(selectedBlockchain.id)
     ) {
-      fetchLog();
+      return;
     }
-  }, [contractAddresses, privateKey]);
+    const chainId = selectedBlockchain.id;
+    const requestKey = privateKey;
+    // Ignore a response that arrives after the user switched chains or keys;
+    // otherwise it can overwrite the new chain's log with the old empty one.
+    const shouldApplyLog = () =>
+      walletContextRef.current.selectedBlockchain?.id === chainId &&
+      walletContextRef.current.privateKey === requestKey;
+    walletManager.fetchLog({ ...appContext, shouldApplyLog });
+  }, [
+    contractAddresses,
+    privateKey,
+    selectedBlockchain.id,
+    parsedData?.blockchain,
+    log.length,
+    walletManager,
+  ]);
 
   const resetWalletState = () => {
     setPrivateKey(null);
@@ -576,7 +645,15 @@ const Wallet2 = () => {
     if (privateKey) {
       walletManager.fetchBalance(appContext);
     }
-  }, [privateKey, selectedToken]);
+  }, [
+    privateKey,
+    parsedData?.publicKeyHash,
+    parsedData?.prevPublicKeyHash,
+    parsedData?.rotation,
+    log?.length,
+    selectedToken,
+    selectedBlockchain.id,
+  ]);
 
   const handleDeployContracts = async () => {
     try {
@@ -1039,6 +1116,23 @@ const Wallet2 = () => {
 
           {!selectedBlockchain.disabled && (
             <>
+              {selectedBlockchain.id === "yda" && isBaseBridgeOwner && (
+                <Card withBorder mt="md" radius="md" p="md" style={styles.card}>
+                  <Title order={4} mb="md">
+                    Pending Base unwraps
+                  </Title>
+                  <TokenManagementForm
+                    walletManager={walletManager}
+                    appContext={appContext}
+                    webcamRef={webcamRef}
+                    tokenSymbol={tokenSymbol}
+                    wrappedTokenSymbol={wrappedTokenSymbol}
+                    styles={styles}
+                    unwrapOnly
+                  />
+                </Card>
+              )}
+
               {activeSection === "overview" && (
                 <>
                   <SecurityAlerts
@@ -1104,24 +1198,24 @@ const Wallet2 = () => {
                           )}
                         </Card>
 
-                        <WalletBalance
-                          balance={balance}
-                          parsedData={parsedData}
-                          log={log}
-                          onRefresh={() => {
-                            walletManager.fetchBalance(appContext);
-                            walletManager.buildTransactionHistory(appContext);
-                          }}
-                          onCopyAddress={copyAddressToClipboard}
-                          onShowQR={() => setIsQRModalOpen(true)}
-                          styles={styles}
-                          tokenSymbol={tokenSymbol}
-                          wrappedTokenSymbol={wrappedTokenSymbol}
-                          selectedBlockchain={selectedBlockchain}
-                          sendWrapped={sendWrapped}
-                        />
-
-                        {isInitialized && <></>}
+                        {parsedData && (
+                          <WalletBalance
+                            balance={balance}
+                            parsedData={parsedData}
+                            log={log}
+                            onRefresh={() => {
+                              walletManager.fetchBalance(appContext);
+                              walletManager.buildTransactionHistory(appContext);
+                            }}
+                            onCopyAddress={copyAddressToClipboard}
+                            onShowQR={() => setIsQRModalOpen(true)}
+                            styles={styles}
+                            tokenSymbol={tokenSymbol}
+                            wrappedTokenSymbol={wrappedTokenSymbol}
+                            selectedBlockchain={selectedBlockchain}
+                            sendWrapped={sendWrapped}
+                          />
+                        )}
                       </>
                     )}
                 </>
@@ -1129,7 +1223,7 @@ const Wallet2 = () => {
 
               {activeSection === "send" && isInitialized && (
                 <>
-                  {(parsedData?.rotation ?? 0) === log.length && (
+                  {isActiveKey && (
                     <TransactionForm
                       recipients={recipients}
                       onAddRecipient={addRecipient}
@@ -1714,6 +1808,7 @@ const Wallet2 = () => {
                 isTransactionFlow={isTransactionFlow}
                 isDeployed={isDeployed}
                 currentScanIndex={currentScanIndex}
+                scanPrompt={appContext.scanPrompt}
               />
               <QRDisplayModal
                 isOpen={isQRModalOpen}

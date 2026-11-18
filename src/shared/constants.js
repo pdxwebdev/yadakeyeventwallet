@@ -17,7 +17,7 @@ export const ERC20_UPGRADE_ABI = MockERC20Artifact.abi;
 export const AGENT_REGISTRY_ABI = AgentRegistryArtifact.abi;
 
 export const DEPLOY_ENV = "mainnet"; //import.meta.env.VITE_DEPLOY_ENV;
-const bscProvider =
+export const bscProvider =
   DEPLOY_ENV === "mainnet"
     ? new ethers.JsonRpcProvider(
         "https://bsc-dataseed1.binance.org/", // BSC Mainnet RPC URL
@@ -153,9 +153,22 @@ export const BLOCKCHAINS = [
   },
 ];
 
+export const chainById = (chainOrId) =>
+  typeof chainOrId === "string"
+    ? BLOCKCHAINS.find((chain) => chain.id === chainOrId)
+    : chainOrId;
+
+export const providerForChain = (chainOrId) => {
+  const id =
+    typeof chainOrId === "string" ? chainOrId : chainOrId?.id;
+  if (id === "bsc") return bscProvider;
+  if (id === "base") return baseProvider;
+  return localProvider;
+};
+
 export const baseAddresses = {
   keyLogRegistryAddress: "0x9E47882d784c17cD7b91dad45F2A97e461DEE117",
-  bridgeAddress: "0xcf7a96a17DE098c88367360412D2Db2375e64745",
+  bridgeAddress: "0xae07D13f34987832f6C6bE572616E17d6FEc94Bb",
   wrappedTokenImplementation: "0x6CAD92725F3DD4E12108DEa5144Dbc0B2a3e30F6",
   beaconAddress: "0x42CF9fa8740D1FaD129e00EA2fC5022AA2b790E9",
   factoryAddress: "0xFb75e22F830b5F73107079AD927D77E7fDC22159",
