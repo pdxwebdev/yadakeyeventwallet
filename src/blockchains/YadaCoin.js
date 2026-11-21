@@ -325,12 +325,18 @@ class YadaCoin {
         message: `Scan rotation ${scanRotation} on the device.`,
         color: "yellow",
       });
+      if (appContext.scanCancelRef) {
+        appContext.scanCancelRef.current = false;
+      }
       setIsScannerOpen(true);
 
       let qrData;
       let attempts = 0;
       const maxAttempts = 100;
       while (attempts < maxAttempts) {
+        if (appContext.scanCancelRef?.current) {
+          return;
+        }
         try {
           qrData = await capture(webcamRef);
           break;

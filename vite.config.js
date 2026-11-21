@@ -1,5 +1,6 @@
 // vite.config.js
 import { defineConfig } from "vite";
+import basicSsl from "@vitejs/plugin-basic-ssl";
 import react from "@vitejs/plugin-react";
 import { nodePolyfills } from "vite-plugin-node-polyfills";
 import wasm from "vite-plugin-wasm";
@@ -13,6 +14,7 @@ export default defineConfig({
     },
   },
   plugins: [
+    basicSsl(),
     wasm(),
     topLevelAwait(),
     react(),
