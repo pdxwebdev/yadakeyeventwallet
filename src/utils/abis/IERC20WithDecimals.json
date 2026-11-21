@@ -1,7 +1,7 @@
 {
   "_format": "hh-sol-artifact-1",
   "contractName": "IERC20WithDecimals",
-  "sourceName": "contracts/BridgeUpgrade.sol",
+  "sourceName": "contracts/Bridge.sol",
   "abi": [
     {
       "anonymous": false,

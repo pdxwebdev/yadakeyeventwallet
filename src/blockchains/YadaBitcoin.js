@@ -575,11 +575,26 @@ class YadaBitcoin {
 
   // FINAL fetchBalance — works perfectly with your covenant address
   async fetchBalance(appContext) {
-    const { parsedData, setBalance, setLoading } = appContext;
+    const { parsedData, setBalance, setBalanceForChain, getBalanceEpoch, setLoading } =
+      appContext;
+    const epoch =
+      typeof getBalanceEpoch === "function" ? getBalanceEpoch() : undefined;
+    const isCurrent = () =>
+      epoch === undefined ||
+      typeof getBalanceEpoch !== "function" ||
+      getBalanceEpoch() === epoch;
+    const applyBalance = (value) => {
+      if (!isCurrent()) return;
+      if (typeof setBalanceForChain === "function") {
+        setBalanceForChain("btc", value);
+      } else {
+        setBalance(value);
+      }
+    };
 
     // Must have covenant address (publicKeyHash)
     if (!parsedData?.publicKeyHash) {
-      setBalance(null);
+      applyBalance(null);
       return;
     }
 
@@ -603,7 +618,7 @@ class YadaBitcoin {
           data.mempool_stats.funded_txo_sum - data.mempool_stats.spent_txo_sum;
         const total = confirmed + unconfirmed;
 
-        setBalance(total / 1e8);
+        applyBalance(total / 1e8);
       } else {
         throw new Error("Invalid balance response");
       }
@@ -614,7 +629,7 @@ class YadaBitcoin {
         message: "Failed to fetch balance. Using offline mode.",
         color: "yellow",
       });
-      setBalance(null);
+      applyBalance(null);
     } finally {
       setLoading?.(false);
     }

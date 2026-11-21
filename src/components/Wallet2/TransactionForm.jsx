@@ -51,7 +51,7 @@ const TransactionForm = ({
 
   const handleSetMax = (index) => {
     // We usually leave a tiny buffer or use exact spendable amount
-    onUpdateRecipient(index, "amount", balance.original);
+    onUpdateRecipient(index, "amount", balance?.original ?? balance);
   };
 
   return (
@@ -128,7 +128,7 @@ const TransactionForm = ({
       {/* Optional: show available balance for clarity */}
       {balance !== undefined && (
         <Text mt={6} size="xs" color="dimmed">
-          Available: {balance.original} {token?.symbol}
+          Available: {balance?.original ?? balance} {token?.symbol}
         </Text>
       )}
     </Card>

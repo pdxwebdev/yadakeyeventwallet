@@ -1798,6 +1798,9 @@ const Wallet2 = () => {
               <QRScannerModal
                 isOpen={isScannerOpen}
                 onClose={() => {
+                  if (appContext.scanCancelRef) {
+                    appContext.scanCancelRef.current = true;
+                  }
                   setIsScannerOpen(false);
                   setIsTransactionFlow(false);
                 }}

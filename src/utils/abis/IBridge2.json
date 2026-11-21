@@ -1,7 +1,7 @@
 {
   "_format": "hh-sol-artifact-1",
   "contractName": "IBridge2",
-  "sourceName": "contracts/WrappedTokenUpgrade.sol",
+  "sourceName": "contracts/WrappedToken.sol",
   "abi": [
     {
       "inputs": [],

@@ -123,7 +123,7 @@ export async function main() {
     console.log(`Funded ${deployer.address} with 1000 ETH/BNB`);
   }
 
-  // Deploy KeyLogRegistry as a UUPS proxy
+  // Deploy KeyLogRegistry (Ownable constructor)
   const KeyLogRegistry = await ethers.getContractFactory(
     "KeyLogRegistry",
     deployer
@@ -134,25 +134,17 @@ export async function main() {
       deployments.keyLogRegistryAddress
     );
     console.log(
-      "Using existing KeyLogRegistry proxy:",
+      "Using existing KeyLogRegistry:",
       deployments.keyLogRegistryAddress
     );
   } else {
-    keyLogRegistry = await upgrades.deployProxy(
-      KeyLogRegistry,
-      [deployer.address], // Initialize with deployer as owner and bridge
-      {
-        initializer: "initialize",
-        kind: "uups",
-        deployer: deployer,
-      }
-    );
+    keyLogRegistry = await KeyLogRegistry.deploy(deployer.address);
     await keyLogRegistry.waitForDeployment();
     deployments.keyLogRegistryAddress = await keyLogRegistry.getAddress();
-    console.log("KeyLogRegistry proxy:", deployments.keyLogRegistryAddress);
+    console.log("KeyLogRegistry:", deployments.keyLogRegistryAddress);
   }
   const keyLogRegistryAddress = deployments.keyLogRegistryAddress;
-  // Deploy Bridge
+  // Deploy Bridge (Ownable constructor)
   const Bridge = await ethers.getContractFactory("Bridge", deployer);
   let bridge;
   if (deployments.bridgeAddress && !clean) {
@@ -161,20 +153,16 @@ export async function main() {
       deployments.bridgeAddress,
       deployer
     );
-    console.log("Using existing Bridge proxy:", deployments.bridgeAddress);
+    console.log("Using existing Bridge:", deployments.bridgeAddress);
   } else {
-    bridge = await upgrades.deployProxy(
-      Bridge,
-      [keyLogRegistryAddress, ethers.ZeroAddress],
-      {
-        initializer: "initialize",
-        kind: "uups",
-        deployer: deployer,
-      }
+    bridge = await Bridge.deploy(
+      keyLogRegistryAddress,
+      ethers.ZeroAddress,
+      ethers.ZeroAddress
     );
     await bridge.waitForDeployment();
     deployments.bridgeAddress = await bridge.getAddress();
-    console.log("Bridge proxy deployed to:", deployments.bridgeAddress);
+    console.log("Bridge deployed to:", deployments.bridgeAddress);
   }
   const bridgeAddress = deployments.bridgeAddress;
 
@@ -234,8 +222,12 @@ export async function main() {
   // }
   // console.log("Beacon bridge address:", await beacon.bridgeAddress());
   // const beaconAddress = deployments.beaconAddress;
-  await bridge.connect(deployer).setWrappedTokenBeacon(beaconAddress);
-  // console.log("Updated Bridge with WrappedTokenBeacon address:", beaconAddress);
+  if (deployments.beaconAddress) {
+    await bridge
+      .connect(deployer)
+      .setWrappedTokenBeacon(deployments.beaconAddress);
+    // console.log("Updated Bridge with WrappedTokenBeacon address:", deployments.beaconAddress);
+  }
 
   // // Deploy WrappedTokenFactory
   // const WrappedTokenFactory = await ethers.getContractFactory(
@@ -276,6 +268,8 @@ export async function main() {
         ? "0x903DE6eD93C63Ac5bc51e4dAB50ED2D36e2811BA"
         : "0x37B2b1400292Ee6Ee59a4550704D46311FBDc569"
     );
+
+  // AgentRegistry is not in this repo; skip agent wiring for local deploy.
 
   // Register initial key log entry
   console.log("Registering initial key log entry...");
@@ -322,26 +316,28 @@ export async function main() {
   );
   const firstpermits = [permitbnb];
   const tx1 = await bridge.connect(deployer).registerKeyPairWithTransfer(
-    ethers.ZeroAddress,
     {
       token: ethers.ZeroAddress,
-      fee: 0,
-      expires: 0,
-      signature: "0x",
+      fee: {
+        token: ethers.ZeroAddress,
+        fee: 0,
+        expires: 0,
+        signature: "0x",
+      },
+      newTokenPairs: [], // No token pairs in initial registration
+      permits: firstpermits,
+      unconfirmed: unconfirmedKeyData,
+      unconfirmedSignature: unconfirmedSignature,
+      confirming: {
+        amount: 0,
+        publicKey: "0x",
+        prerotatedKeyHash: ethers.ZeroAddress,
+        twicePrerotatedKeyHash: ethers.ZeroAddress,
+        prevPublicKeyHash: ethers.ZeroAddress,
+        outputAddress: ethers.ZeroAddress,
+      },
+      confirmingSignature: "0x",
     },
-    [], // No token pairs in initial registration
-    firstpermits,
-    unconfirmedKeyData,
-    unconfirmedSignature,
-    {
-      amount: 0,
-      publicKey: "0x",
-      prerotatedKeyHash: ethers.ZeroAddress,
-      twicePrerotatedKeyHash: ethers.ZeroAddress,
-      prevPublicKeyHash: ethers.ZeroAddress,
-      outputAddress: ethers.ZeroAddress,
-    },
-    "0x",
     { value: balance - gasCost }
   );
   await tx1.wait();
@@ -522,7 +518,7 @@ export async function main() {
       publicKey: keyData.nextSigner.uncompressedPublicKey,
       prerotatedKeyHash: keyData.nextNextSigner.address,
       twicePrerotatedKeyHash: confirmingPrerotatedKeyHash,
-      prevPublicKeyHash: keyData.currentSigner.address,
+      prevPublicKeyHash: ethers.ZeroAddress, // nextSigner starts its own inception chain
       outputAddress: keyData.nextNextSigner.address,
     };
     const unconfirmedMessageHash = ethers.keccak256(
@@ -558,19 +554,21 @@ export async function main() {
     );
     console.log(confirmingKeyData.prerotatedKeyHash);
     const tx = await bridge.connect(nextDeployer).registerKeyPairWithTransfer(
-      ethers.ZeroAddress, //token
       {
         token: ethers.ZeroAddress,
-        fee: 0,
-        expires: 0,
-        signature: "0x",
-      }, //fee
-      [], //tokenpairs
-      permits,
-      unconfirmedKeyData,
-      unconfirmedSignature,
-      confirmingKeyData,
-      confirmingSignature,
+        fee: {
+          token: ethers.ZeroAddress,
+          fee: 0,
+          expires: 0,
+          signature: "0x",
+        },
+        newTokenPairs: [],
+        permits: permits,
+        unconfirmed: unconfirmedKeyData,
+        unconfirmedSignature: unconfirmedSignature,
+        confirming: confirmingKeyData,
+        confirmingSignature: confirmingSignature,
+      },
       { value: balance - gasCost }
     );
     await tx.wait();

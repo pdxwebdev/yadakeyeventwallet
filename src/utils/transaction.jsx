@@ -106,6 +106,8 @@ export class Transaction {
     this.twice_prerotated_key_hash = options.twice_prerotated_key_hash;
     this.public_key_hash = options.public_key_hash;
     this.prev_public_key_hash = options.prev_public_key_hash || "";
+    this.counter = options.counter;
+    this.inception_public_key_hash = options.inception_public_key_hash || "";
   }
 
   async hashAndSign(selectedBlockchain) {
@@ -121,20 +123,20 @@ export class Transaction {
     const concatenatedString =
       this.public_key +
       String(this.time) +
-      this.dh_public_key +
-      this.rid +
-      this.relationship_hash +
+      (this.dh_public_key || "") +
+      (this.rid || "") +
+      (this.relationship_hash || "") +
       this.fee.toFixed(8) +
       this.masternode_fee.toFixed(8) +
-      this.requester_rid +
-      this.requested_rid +
+      (this.requester_rid || "") +
+      (this.requested_rid || "") +
       this.getInputHashes() +
       this.getOutputHashes() +
       String(this.version) +
-      this.prerotated_key_hash +
-      this.twice_prerotated_key_hash +
-      this.public_key_hash +
-      this.prev_public_key_hash;
+      (this.prerotated_key_hash || "") +
+      (this.twice_prerotated_key_hash || "") +
+      (this.public_key_hash || "") +
+      (this.prev_public_key_hash || "");
 
     this.hash = await generateSHA256(concatenatedString);
   }
@@ -156,14 +158,18 @@ export class Transaction {
         to: output.to,
         value: output.value,
       }))
-      .sort((a, b) => a.to.toLowerCase().localeCompare(b.to.toLowerCase()));
+      .sort((a, b) => {
+        const A = String(a.to).toLowerCase(),
+          B = String(b.to).toLowerCase();
+        return A < B ? -1 : A > B ? 1 : 0;
+      });
     return outputsSorted
       .map((output) => `${output.to}${output.value.toFixed(8)}`)
       .join("");
   }
 
   toJson() {
-    return {
+    const json = {
       public_key: this.public_key,
       time: this.time,
       dh_public_key: this.dh_public_key,
@@ -184,6 +190,13 @@ export class Transaction {
       hash: this.hash,
       id: this.id,
     };
+    if (this.counter !== undefined && this.counter !== null) {
+      json.counter = this.counter;
+    }
+    if (this.inception_public_key_hash) {
+      json.inception_public_key_hash = this.inception_public_key_hash;
+    }
+    return json;
   }
 }
 

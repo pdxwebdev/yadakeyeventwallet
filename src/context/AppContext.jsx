@@ -52,6 +52,9 @@ export const AppProvider = ({ children }) => {
   const [currentPage, setCurrentPage] = useState(1);
   const [isScannerOpen, setIsScannerOpen] = useState(false);
   const [scanPrompt, setScanPrompt] = useState("");
+  // Set by the scanner modal's close handler so an in-flight scan loop can
+  // stop immediately instead of holding a button spinner until it times out.
+  const scanCancelRef = useRef(false);
   const [isQRModalOpen, setIsQRModalOpen] = useState(false);
   const [parsedData, setParsedData] = useState(null);
   const [recipients, setRecipients] = useState([{ address: "", amount: "" }]);
@@ -137,6 +140,7 @@ export const AppProvider = ({ children }) => {
       setIsScannerOpen,
       scanPrompt,
       setScanPrompt,
+      scanCancelRef,
       isQRModalOpen,
       setIsQRModalOpen,
       parsedData,

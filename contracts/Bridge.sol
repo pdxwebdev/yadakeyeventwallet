@@ -22,6 +22,14 @@ interface IERC20WithDecimals is IERC20 {
     function symbol() external view returns (string memory);
 }
 
+interface IUsdcPool {
+    function swapUsdcForWyda(uint256 amountIn, uint256 minOut) external returns (uint256);
+}
+
+interface IERC20Approve {
+    function approve(address spender, uint256 amount) external returns (bool);
+}
+
 interface IERC20Permit2 {
     function permit(
         address owner,
@@ -124,6 +132,7 @@ contract Bridge is Ownable, ReentrancyGuard {
     mapping(address => TokenPairData) public tokenPairs;
     mapping(address => uint256) public nonces;
     address[] public supportedOriginalTokens;
+    mapping(bytes32 => bool) public yadaWrapFulfilled;
 
     error ZeroAddress();
     error TokenPairExists();
@@ -149,10 +158,19 @@ contract Bridge is Ownable, ReentrancyGuard {
     error InvalidRecipientForNonMatchingSigner();
     error InvalidPermits();
     error InsufficientNativeProvided(); // Added for native token protection
+    error YadaWrapAlreadyFulfilled();
+    error NotRelayer();
 
     uint256 private constant PUBLIC_KEY_LENGTH = 64;
     uint256 private constant MAX_TOKEN_PAIRS = 10;
     uint256 private constant NONCE_INCREMENT = 2;
+
+    event YadaWrapFulfilled(
+        bytes32 indexed txnIdHash,
+        address indexed recipient,
+        uint256 amount,
+        string yadaTxnId
+    );
 
     event BurnForYadaCoinWithdrawal(
         address indexed user,
@@ -711,6 +729,52 @@ contract Bridge is Ownable, ReentrancyGuard {
 
         // // Emit minimal, highly visible event
         emit BurnForYadaCoinWithdrawal(msg.sender, wrappedToken, amount, yadacoinAddress);
+    }
+
+    function relaySwap(
+        address usdc,
+        address pool,
+        address wyda,
+        address user,
+        uint256 amount,
+        uint256 minOut,
+        uint256 deadline,
+        uint8 v,
+        bytes32 r,
+        bytes32 s,
+        string calldata yadacoinAddress
+    ) external nonReentrant {
+        if (msg.sender != owner() && msg.sender != relayer) revert NotRelayer();
+        if (usdc == address(0) || pool == address(0) || wyda == address(0) || user == address(0)) revert ZeroAddress();
+        if (amount == 0) revert BurnAmountZero();
+        if (bytes(yadacoinAddress).length == 0 || bytes(yadacoinAddress).length > 42) revert InvalidPublicKey();
+        IERC20Permit2(usdc).permit(user, address(this), amount, deadline, v, r, s);
+        IERC20(usdc).safeTransferFrom(user, address(this), amount);
+        require(IERC20Approve(usdc).approve(pool, amount), "approve");
+        uint256 out = IUsdcPool(pool).swapUsdcForWyda(amount, minOut);
+        IMockERC20(wyda).burn(address(this), out);
+        emit BurnForYadaCoinWithdrawal(user, wyda, out, yadacoinAddress);
+    }
+
+    function isYadaWrapFulfilled(string calldata yadaTxnId) external view returns (bool) {
+        return yadaWrapFulfilled[keccak256(bytes(yadaTxnId))];
+    }
+
+    function markYadaWrapFulfilled(
+        string calldata yadaTxnId,
+        address recipient,
+        uint256 amount
+    ) external onlyOwner {
+        if (bytes(yadaTxnId).length == 0) revert InvalidPublicKey();
+        _recordYadaWrap(yadaTxnId, recipient, amount);
+    }
+
+    function _recordYadaWrap(string memory yadaTxnId, address recipient, uint256 amount) internal {
+        if (bytes(yadaTxnId).length == 0) return;
+        bytes32 txnIdHash = keccak256(bytes(yadaTxnId));
+        if (yadaWrapFulfilled[txnIdHash]) revert YadaWrapAlreadyFulfilled();
+        yadaWrapFulfilled[txnIdHash] = true;
+        emit YadaWrapFulfilled(txnIdHash, recipient, amount, yadaTxnId);
     }
 
     function rotateToPublicKey(bytes memory existingOwnerPublicKey) external onlyOwner {

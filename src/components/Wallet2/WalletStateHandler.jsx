@@ -53,11 +53,14 @@ const WalletStateHandler = ({
       .catch(() => setDeployerBalance(""));
   }, [deployerAddress, selectedBlockchain]);
 
+  const supportsContracts = ["bsc", "base"].includes(selectedBlockchain?.id);
+  const ready = isDeployed || !supportsContracts;
+
   if (!privateKey) {
     return (
       <Card withBorder mt="md" radius="md" p="md" style={styles.card}>
         <Title order={4} mb="md" fw="bold">
-          {isDeployed
+          {ready
             ? "Please scan a QR code for the active key."
             : "Please deploy contracts to initialize the wallet."}
         </Title>
@@ -89,7 +92,7 @@ const WalletStateHandler = ({
             .
           </Text>
         </Collapse>
-        {isDeployed ? (
+        {ready ? (
           <Button onClick={onRotateKey} color="teal" variant="outline" mt="md">
             Scan Key (Rotation: 0)
           </Button>
@@ -116,7 +119,7 @@ const WalletStateHandler = ({
     );
   }
 
-  if (!isDeployed) {
+  if (!ready) {
     return (
       <Stack align="center" spacing="md">
         <Text>
@@ -135,7 +138,7 @@ const WalletStateHandler = ({
     );
   }
 
-  if (isInitialized) {
+  if (isInitialized && parsedData) {
     return (
       log.length !== parsedData.rotation && (
         <Stack align="center" spacing="md">

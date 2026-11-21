@@ -1,7 +1,7 @@
 {
   "_format": "hh-sol-artifact-1",
   "contractName": "IWrappedToken",
-  "sourceName": "contracts/WrappedTokenFactoryUpgrade.sol",
+  "sourceName": "contracts/WrappedTokenFactory.sol",
   "abi": [
     {
       "inputs": [

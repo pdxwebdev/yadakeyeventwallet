@@ -31,7 +31,7 @@ const WalletBalance = ({
         </Text>
       )}
 
-      <TokenSelector styles={styles} />
+      {selectedBlockchain.isBridge && <TokenSelector styles={styles} />}
       {balance ? (
         <>
           {selectedBlockchain.isBridge && (

@@ -80,6 +80,26 @@ export const glossaryTerms = [
       "The difference between the expected price of a trade and the actual executed price (common in low-liquidity pools).",
   },
   {
+    term: "Short",
+    definition:
+      "A bet that WYDA/USDT will fall. Stake USDT; if the PancakeSwap price settles below the strike, shorts split the pot.",
+  },
+  {
+    term: "Strike Price",
+    definition:
+      "The WYDA/USDT spot price locked when a prediction round opens. Shorts win below it; longs win above it.",
+  },
+  {
+    term: "Isolated Margin",
+    definition:
+      "A leveraged position whose only risk is the USDT you posted as collateral. Liquidation cannot take other wallet funds.",
+  },
+  {
+    term: "Mark Price",
+    definition:
+      "The live WYDA/USDT spot from the PancakeSwap pool, used to value open margin positions and trigger liquidation.",
+  },
+  {
     term: "Gas Fee",
     definition:
       "The cost (in native token like BNB) paid to miners/validators to process a transaction on the blockchain.",

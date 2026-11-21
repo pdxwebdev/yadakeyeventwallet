@@ -18,6 +18,7 @@ const BlockchainNav = () => {
     setSelectedBlockchain,
     setTokenPairs,
     setSelectedOriginal,
+    selectedOriginal,
     setLog,
     setBalance,
     setTokenPairsFetched,
@@ -91,6 +92,7 @@ const BlockchainNav = () => {
           label={blockchain.name}
           active={selectedBlockchain.id === blockchain.id}
           onClick={() => {
+            if (selectedBlockchain.id === blockchain.id) return;
             setSelectedBlockchain(blockchain);
             setTokenPairs(tokenLists[blockchain.id] || []);
             setSelectedOriginal("");

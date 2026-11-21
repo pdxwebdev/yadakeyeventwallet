@@ -17,7 +17,7 @@ const QRDisplayModal = ({ isOpen, onClose, parsedData, log, styles }) => {
         <>
           <QRCodeSVG
             value={
-              parsedData.rotation !== log.length
+              (parsedData.rotation ?? 0) !== (log?.length || 0)
                 ? parsedData.prerotatedKeyHash
                 : parsedData.publicKeyHash
             }
@@ -26,7 +26,7 @@ const QRDisplayModal = ({ isOpen, onClose, parsedData, log, styles }) => {
             fgColor={colorScheme === "dark" ? "#FFFFFF" : "#000000"}
           />
           <Text>
-            {parsedData.rotation !== log.length
+            {(parsedData.rotation ?? 0) !== (log?.length || 0)
               ? parsedData.prerotatedKeyHash
               : parsedData.publicKeyHash}
           </Text>
