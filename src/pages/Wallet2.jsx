@@ -46,6 +46,7 @@ import {
   providerForChain,
   PANCAKE_ROUTER_ABI,
   PANCAKE_ROUTER_ADDRESS,
+  tokensForChain,
 } from "../shared/constants";
 import axios from "axios";
 import { ethers } from "ethers";
@@ -128,8 +129,8 @@ const Wallet2 = () => {
     isDeployed,
     setIsDeployed,
     supportedTokens,
+    setSupportedTokens,
     tokenPairs,
-    setTokenPairs,
     setLoading,
     isOwner,
     setIsOwner,
@@ -618,28 +619,48 @@ const Wallet2 = () => {
   useEffect(() => {
     const go = async () => {
       if (tokenPairsFetched || !walletManager.fetchTokenPairs) return;
-      const tp = await walletManager.fetchTokenPairs(appContext);
+      await walletManager.fetchTokenPairs(appContext);
       setTokenPairsFetched(true);
-      if (tp.length === 0) return;
-      setTokenPairs(tp);
     };
     if (!tokenPairsFetched && contractAddresses.bridgeAddress) {
       go();
     }
-    if (tokenPairs.length > 0) {
-      const originalTokens = tokenPairs.map((pair) => ({
-        address: pair.original,
-        symbol: pair.symbol,
+  }, [
+    contractAddresses.bridgeAddress,
+    tokenPairsFetched,
+    walletManager,
+    setTokenPairsFetched,
+  ]);
+
+  useEffect(() => {
+    const mergedTokens = [];
+    const seen = new Set();
+    const addToken = (token) => {
+      if (!token?.address) return;
+      const key = token.address.toLowerCase();
+      if (seen.has(key)) return;
+      seen.add(key);
+      mergedTokens.push({
+        ...token,
+        name: token.name || token.symbol || "Token",
+        symbol: token.symbol || "TOKEN",
+        decimals: token.decimals ?? 18,
+      });
+    };
+
+    tokenPairs.forEach((pair) =>
+      addToken({
+        address: pair.original ?? pair.address,
         name: pair.name,
-        decimals: 18,
-      }));
-      appContext.setSupportedTokens(originalTokens);
-      console.log(
-        "Updated supported tokens with wrapped tokens:",
-        originalTokens
-      );
-    }
-  }, [tokenPairs, contractAddresses]);
+        symbol: pair.symbol,
+        decimals: pair.decimals,
+      })
+    );
+    tokensForChain(selectedBlockchain.id).forEach(addToken);
+
+    setSupportedTokens(mergedTokens);
+    console.log("Updated supported tokens:", mergedTokens);
+  }, [tokenPairs, selectedBlockchain.id, setSupportedTokens]);
 
   useEffect(() => {
     if (privateKey) {

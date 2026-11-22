@@ -212,6 +212,52 @@ export const addresses =
 
 export const deployed = true;
 
+export const nativeTokenForChain = (chainId) => {
+  if (chainId === "bsc") {
+    return {
+      address: ethers.ZeroAddress,
+      name: "Binance Coin",
+      symbol: "BNB",
+      decimals: 18,
+    };
+  }
+  if (chainId === "base") {
+    return {
+      address: ethers.ZeroAddress,
+      name: "Ether",
+      symbol: "ETH",
+      decimals: 18,
+    };
+  }
+  return null;
+};
+
+export const knownTokensForChain = (chainId) => {
+  const tokenAddress =
+    chainId === "base"
+      ? baseAddresses.yadaERC20Address
+      : chainId === "bsc"
+      ? addresses.yadaERC20Address
+      : null;
+  if (!tokenAddress) return [];
+  return [
+    {
+      address: tokenAddress,
+      name: "Wrapped YadaCoin",
+      symbol: "WYDA",
+      decimals: 18,
+    },
+  ];
+};
+
+export const tokensForChain = (chainId) => {
+  if (!["base", "bsc"].includes(chainId)) return [];
+  return [
+    ...(nativeTokenForChain(chainId) ? [nativeTokenForChain(chainId)] : []),
+    ...knownTokensForChain(chainId),
+  ];
+};
+
 export const PANCAKE_ROUTER_ADDRESS =
   "0x10ED43C718714eb63d5aA57B78B54704E256024E"; // PancakeSwap V2 Router
 export const USDT_ADDRESS =

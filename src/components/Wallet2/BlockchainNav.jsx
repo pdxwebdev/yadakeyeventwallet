@@ -4,13 +4,20 @@ import { NavLink, ScrollArea } from "@mantine/core";
 import { IconChevronRight } from "@tabler/icons-react";
 import { ethers } from "ethers";
 import { notifications } from "@mantine/notifications";
-import { BLOCKCHAINS, BRIDGE_ABI } from "../../shared/constants";
-import BridgeArtifact from "../../utils/abis/Bridge.json";
-import KeyLogRegistryArtifact from "../../utils/abis/KeyLogRegistry.json";
-import MockERC20Artifact from "../../utils/abis/MockERC20.json";
-import WrappedTokenArtifact from "../../utils/abis/WrappedToken.json";
+import {
+  BLOCKCHAINS,
+  BRIDGE_ABI,
+  addressesForChain,
+  nativeTokenForChain,
+  providerForChain,
+} from "../../shared/constants";
 import { useAppContext } from "../../context/AppContext";
 import { ThemeContext } from "../../main.jsx"; // Adjust path as needed
+
+const ERC20_METADATA_ABI = [
+  "function symbol() view returns (string)",
+  "function name() view returns (string)",
+];
 
 const BlockchainNav = () => {
   const {
@@ -19,50 +26,80 @@ const BlockchainNav = () => {
     setTokenPairs,
     setSelectedOriginal,
     selectedOriginal,
+    setSelectedToken,
     setLog,
     setBalance,
     setTokenPairsFetched,
-    setBlockchainColor,
   } = useAppContext();
   const [tokenLists, setTokenLists] = useState({});
   const { setPrimaryColor } = useContext(ThemeContext);
 
-  // Fetch supported tokens for each blockchain
   useEffect(() => {
     const fetchTokens = async () => {
       const newTokenLists = {};
       for (const blockchain of BLOCKCHAINS) {
+        if (!blockchain.isBridge || !["base", "bsc"].includes(blockchain.id)) {
+          continue;
+        }
+        const chainAddresses = addressesForChain(blockchain.id);
+        if (!chainAddresses?.bridgeAddress) continue;
+
         try {
-          if (!blockchain.bridgeAddress) return;
-          const provider = new ethers.JsonRpcProvider(blockchain.providerUrl);
+          const provider = providerForChain(blockchain);
           const bridge = new ethers.Contract(
-            blockchain.bridgeAddress,
+            chainAddresses.bridgeAddress,
             BRIDGE_ABI,
             provider
           );
           const supportedTokens = await bridge.getSupportedTokens();
+          const nativeToken = nativeTokenForChain(blockchain.id);
 
-          // Fetch token metadata (e.g., symbol)
-          const tokenDetails = await Promise.all(
-            supportedTokens.map(async (tokenAddress) => {
-              const tokenContract = new ethers.Contract(
-                tokenAddress,
-                [
-                  "function symbol() view returns (string)",
-                  "function name() view returns (string)",
-                ],
-                provider
-              );
-              const symbol = await tokenContract.symbol();
-              const name = await tokenContract.name();
-              return {
-                address: tokenAddress,
-                symbol,
-                name,
-                isCrossChain: false,
-              }; // Adjust isCrossChain as needed
-            })
-          );
+          const tokenDetails = (
+            await Promise.all(
+              supportedTokens.map(async (original) => {
+                try {
+                  const pair = await bridge.tokenPairs(original);
+                  if (pair.wrappedToken === ethers.ZeroAddress) return null;
+
+                  if (
+                    original.toLowerCase() === ethers.ZeroAddress.toLowerCase()
+                  ) {
+                    if (!nativeToken) return null;
+                    return {
+                      original,
+                      wrapped: pair.wrappedToken,
+                      name: nativeToken.name,
+                      symbol: nativeToken.symbol,
+                      decimals: 18,
+                    };
+                  }
+
+                  const wrappedContract = new ethers.Contract(
+                    pair.wrappedToken,
+                    ERC20_METADATA_ABI,
+                    provider
+                  );
+                  const [name, symbol] = await Promise.all([
+                    wrappedContract.name(),
+                    wrappedContract.symbol(),
+                  ]);
+                  return {
+                    original,
+                    wrapped: pair.wrappedToken,
+                    name,
+                    symbol,
+                    decimals: 18,
+                  };
+                } catch (error) {
+                  console.warn(
+                    `Error fetching pair for original token ${original}:`,
+                    error
+                  );
+                  return null;
+                }
+              })
+            )
+          ).filter(Boolean);
 
           newTokenLists[blockchain.id] = tokenDetails;
         } catch (error) {
@@ -75,7 +112,6 @@ const BlockchainNav = () => {
         }
       }
       setTokenLists(newTokenLists);
-      // Update tokenPairs in context for the selected blockchain
       if (newTokenLists[selectedBlockchain.id]) {
         setTokenPairs(newTokenLists[selectedBlockchain.id]);
       }
@@ -105,10 +141,13 @@ const BlockchainNav = () => {
         >
           {tokenLists[blockchain.id]?.map((token) => (
             <NavLink
-              key={token.address}
+              key={token.original}
               label={token.symbol}
-              onClick={() => setSelectedOriginal(token.address)}
-              active={selectedOriginal === token.address}
+              onClick={() => {
+                setSelectedOriginal(token.original);
+                setSelectedToken(token.original);
+              }}
+              active={selectedOriginal === token.original}
               style={{ paddingLeft: 30 }}
             />
           ))}
