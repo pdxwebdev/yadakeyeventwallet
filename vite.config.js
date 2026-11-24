@@ -72,6 +72,10 @@ export default defineConfig({
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/base-rpc/, ""),
       },
+      "/crypto-onramp": {
+        target: "http://localhost:8111",
+        changeOrigin: true,
+      },
     },
   },
 });

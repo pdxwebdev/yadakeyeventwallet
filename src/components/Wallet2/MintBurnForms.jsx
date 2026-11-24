@@ -324,7 +324,7 @@ const TokenManagementForm = ({
 
   const loadPermitRequests = async () => {
     try {
-      const permitRes = await axios.get("http://localhost:8111/crypto-onramp/pending-permits");
+      const permitRes = await axios.get("/crypto-onramp/pending-permits");
       setPermitRequests(Array.isArray(permitRes.data?.permits) ? permitRes.data.permits : []);
     } catch {
       setPermitRequests([]);
@@ -380,7 +380,7 @@ const TokenManagementForm = ({
     );
     const receipt = await tx.wait();
     if (receipt.status !== 1) throw new Error("relaySwap failed");
-    await axios.post("http://localhost:8111/crypto-onramp/pending-swap", {
+    await axios.post("/crypto-onramp/pending-swap", {
       session_id: request.session_id,
       status: "fulfilled",
     });
@@ -435,7 +435,7 @@ const TokenManagementForm = ({
       for (const request of ordered) {
         const wallet = String(request.wallet_address || "").toLowerCase();
         if (used.has(wallet + ":" + (request.nonce || request.value))) {
-          await axios.post("http://localhost:8111/crypto-onramp/pending-swap", {
+          await axios.post("/crypto-onramp/pending-swap", {
             session_id: request.session_id,
             status: "fulfilled",
           });
