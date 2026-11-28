@@ -157,7 +157,16 @@ const TokenManagementForm = ({
   const [swapLoading, setSwapLoading] = React.useState(false);
   const [unwrapLoading, setUnwrapLoading] = React.useState(false);
   const [unwrappingId, setUnwrappingId] = React.useState(null);
+  const [unwrappingAll, setUnwrappingAll] = React.useState(false);
   const [permitBusyId, setPermitBusyId] = React.useState(null);
+
+  // Keep the latest context available to long-running loops (the unwrap flow
+  // advances the stored key/log on every submission, and the closure captured
+  // at click time would otherwise go stale after the first row).
+  const appContextRef = React.useRef(appContext);
+  React.useEffect(() => {
+    appContextRef.current = appContext;
+  }, [appContext]);
 
   const [burnEntries, setBurnEntries] = React.useState([
     { id: "1", address: "", amount: "" },
@@ -350,8 +359,11 @@ const TokenManagementForm = ({
     if (!request.yadacoin_address) {
       throw new Error("Missing Yadacoin address");
     }
+    if (!request.payout_sig) {
+      throw new Error("Permit has no payout binding");
+    }
     const code = await localProvider.getCode(baseAddresses.bridgeAddress);
-    const selector = ethers.id("relaySwap(address,address,address,address,uint256,uint256,uint256,uint8,bytes32,bytes32,string)").slice(2, 10);
+    const selector = ethers.id("relaySwap((address,address,address,address,uint256,uint256,uint256,uint8,bytes32,bytes32,string,bytes))").slice(2, 10);
     if (!code.toLowerCase().includes(selector)) {
       throw new Error("Deployed bridge has no relaySwap. These permits can only be spent by that bridge.");
     }
@@ -361,23 +373,25 @@ const TokenManagementForm = ({
     );
     const bridge = new ethers.Contract(
       baseAddresses.bridgeAddress,
-      ["function relaySwap(address,address,address,address,uint256,uint256,uint256,uint8,bytes32,bytes32,string)"],
+      ["function relaySwap((address usdc,address pool,address wyda,address user,uint256 amount,uint256 minOut,uint256 deadline,uint8 v,bytes32 r,bytes32 s,string yadacoinAddress,bytes payoutSig))"],
       signer
     );
     const amount = BigInt(request.value);
-    const tx = await bridge.relaySwap(
-      baseAddresses.usdcAddress,
-      baseAddresses.poolAddress,
-      baseAddresses.yadaERC20Address,
-      request.wallet_address,
+    const tx = await bridge.relaySwap({
+      usdc: baseAddresses.usdcAddress,
+      pool: baseAddresses.poolAddress,
+      wyda: baseAddresses.yadaERC20Address,
+      user: request.wallet_address,
       amount,
-      await quoteMinOut(amount),
-      request.deadline,
-      request.v,
-      request.r,
-      request.s,
-      request.yadacoin_address
-    );
+      minOut: await quoteMinOut(amount),
+      deadline: request.deadline,
+      v: request.v,
+      r: request.r,
+      s: request.s,
+      yadacoinAddress: request.yadacoin_address,
+      payoutSig: request.payout_sig,
+    });
+
     const receipt = await tx.wait();
     if (receipt.status !== 1) throw new Error("relaySwap failed");
     await axios.post("/crypto-onramp/pending-swap", {
@@ -735,6 +749,85 @@ const TokenManagementForm = ({
     loadWrapRequests();
     loadUnwrapRequests();
   }, []);
+
+  const submitUnwrap = async (request, context) => {
+    const yada = new YadaCoin();
+    const result = await yada.unwrapPair(context, webcamRef, {
+      destination: request.destination,
+      amount: request.amount,
+      relationship: request.txHash,
+    });
+    saveUnwrapAttempt(request.txHash, {
+      actionId: result.action.id,
+      actionHash: result.action.hash,
+      confirmingId: result.confirming.id,
+      submittedAt: Date.now(),
+    });
+    return result;
+  };
+
+  const pendingUnwraps = unwrapRequests.filter(
+    (request) => !request.fulfilled && !request.inMempool
+  );
+
+  const unwrapAllPending = async () => {
+    if (appContext.selectedBlockchain?.id !== "yda") {
+      notifications.show({
+        title: "Unwrap failed",
+        message:
+          "Select YadaCoin, scan the current payout key, then click Unwrap all.",
+        color: "red",
+      });
+      return;
+    }
+    if (pendingUnwraps.length === 0) {
+      notifications.show({
+        title: "Nothing to unwrap",
+        message: "All pending unwrap requests are already fulfilled or in the mempool.",
+        color: "blue",
+      });
+      return;
+    }
+
+    setUnwrappingAll(true);
+    let succeeded = 0;
+    const failures = [];
+    try {
+      for (const request of pendingUnwraps) {
+        setUnwrappingId(request.id);
+        try {
+          await submitUnwrap(request, appContextRef.current);
+          succeeded += 1;
+          // Let React commit the rotated key and refreshed log before the next
+          // unwrap reads them from the context.
+          await new Promise((resolve) => setTimeout(resolve, 500));
+        } catch (error) {
+          if (error.message === "Scan cancelled") {
+            failures.push("Scan cancelled");
+            break;
+          }
+          failures.push(
+            `${String(request.txHash).slice(0, 10)}…: ${
+              error.shortMessage || error.message
+            }`
+          );
+        }
+      }
+      notifications.show({
+        title: failures.length
+          ? "Unwrap all finished with errors"
+          : "Unwrap all finished",
+        message: `${succeeded} submitted${
+          failures.length ? `, ${failures.length} failed: ${failures[0]}` : ""
+        }`,
+        color: failures.length ? "yellow" : "green",
+      });
+    } finally {
+      setUnwrappingId(null);
+      setUnwrappingAll(false);
+      void loadUnwrapRequests();
+    }
+  };
 
   const handleMint = async () => {
     const validEntries = mintEntries.filter(
@@ -1138,9 +1231,28 @@ const TokenManagementForm = ({
           <Text size="xs" c="dimmed">
             Burn already happened. A payout is fulfilled when its YadaCoin relationship is the Base tx id.
           </Text>
-          <Button variant="outline" onClick={loadUnwrapRequests} loading={unwrapLoading}>
-            Refresh
-          </Button>
+          <Group gap="xs">
+            <Button
+              variant="light"
+              onClick={unwrapAllPending}
+              loading={unwrappingAll}
+              disabled={
+                unwrapLoading ||
+                pendingUnwraps.length === 0 ||
+                (unwrappingId !== null && !unwrappingAll)
+              }
+            >
+              Unwrap all{pendingUnwraps.length ? ` (${pendingUnwraps.length})` : ""}
+            </Button>
+            <Button
+              variant="outline"
+              onClick={loadUnwrapRequests}
+              loading={unwrapLoading}
+              disabled={unwrappingAll}
+            >
+              Refresh
+            </Button>
+          </Group>
         </Group>
         <Table striped highlightOnHover mb="md">
           <Table.Thead>
@@ -1229,7 +1341,10 @@ const TokenManagementForm = ({
                         <Button
                           size="xs"
                           loading={unwrappingId === request.id}
-                          disabled={unwrappingId !== null && unwrappingId !== request.id}
+                          disabled={
+                            unwrappingAll ||
+                            (unwrappingId !== null && unwrappingId !== request.id)
+                          }
                           onClick={async () => {
                             if (appContext.selectedBlockchain?.id !== "yda") {
                               notifications.show({
@@ -1242,22 +1357,7 @@ const TokenManagementForm = ({
                             }
                             setUnwrappingId(request.id);
                             try {
-                              const yada = new YadaCoin();
-                              const result = await yada.unwrapPair(
-                                appContext,
-                                webcamRef,
-                                {
-                                  destination: request.destination,
-                                  amount: request.amount,
-                                  relationship: request.txHash,
-                                }
-                              );
-                              saveUnwrapAttempt(request.txHash, {
-                                actionId: result.action.id,
-                                actionHash: result.action.hash,
-                                confirmingId: result.confirming.id,
-                                submittedAt: Date.now(),
-                              });
+                              await submitUnwrap(request, appContext);
                               notifications.show({
                                 title: "Unwrap submitted",
                                 message: request.txHash,

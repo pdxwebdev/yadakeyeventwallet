@@ -168,10 +168,10 @@ export const providerForChain = (chainOrId) => {
 
 export const baseAddresses = {
   keyLogRegistryAddress: "0x9E47882d784c17cD7b91dad45F2A97e461DEE117",
-  bridgeAddress: "0xae07D13f34987832f6C6bE572616E17d6FEc94Bb",
+  bridgeAddress: "0x762D33a4cc7cCd3102028eab25D1Fb73Beae5cB2",
   wrappedTokenImplementation: "0x6CAD92725F3DD4E12108DEa5144Dbc0B2a3e30F6",
-  beaconAddress: "0x42CF9fa8740D1FaD129e00EA2fC5022AA2b790E9",
-  factoryAddress: "0xFb75e22F830b5F73107079AD927D77E7fDC22159",
+  beaconAddress: "0xca975e5bE160Fe9a793914B7cea98B44DeDa3B67",
+  factoryAddress: "0x73F5185DE87d0761a1eD6b1CfF92a1F02CB21f2e",
   yadaERC20Address: "0x1E9c172610b6251A1e3Bf916b9Ea47f506072651",
   poolAddress: "0x7beCd9Bbe91DE47eD60da5DE70eb280f947Dd44B",
   usdcAddress: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",

@@ -160,6 +160,7 @@ contract Bridge is Ownable, ReentrancyGuard {
     error InsufficientNativeProvided(); // Added for native token protection
     error YadaWrapAlreadyFulfilled();
     error NotRelayer();
+    error InvalidPayoutBinding();
 
     uint256 private constant PUBLIC_KEY_LENGTH = 64;
     uint256 private constant MAX_TOKEN_PAIRS = 10;
@@ -731,29 +732,69 @@ contract Bridge is Ownable, ReentrancyGuard {
         emit BurnForYadaCoinWithdrawal(msg.sender, wrappedToken, amount, yadacoinAddress);
     }
 
-    function relaySwap(
-        address usdc,
-        address pool,
-        address wyda,
-        address user,
-        uint256 amount,
-        uint256 minOut,
-        uint256 deadline,
-        uint8 v,
-        bytes32 r,
-        bytes32 s,
-        string calldata yadacoinAddress
-    ) external nonReentrant {
+    struct RelaySwapRequest {
+        address usdc;
+        address pool;
+        address wyda;
+        address user;
+        uint256 amount;
+        uint256 minOut;
+        uint256 deadline;
+        uint8 v;
+        bytes32 r;
+        bytes32 s;
+        string yadacoinAddress;
+        bytes payoutSig;
+    }
+
+    function relaySwap(RelaySwapRequest calldata req) external nonReentrant {
         if (msg.sender != owner() && msg.sender != relayer) revert NotRelayer();
-        if (usdc == address(0) || pool == address(0) || wyda == address(0) || user == address(0)) revert ZeroAddress();
-        if (amount == 0) revert BurnAmountZero();
-        if (bytes(yadacoinAddress).length == 0 || bytes(yadacoinAddress).length > 42) revert InvalidPublicKey();
-        IERC20Permit2(usdc).permit(user, address(this), amount, deadline, v, r, s);
-        IERC20(usdc).safeTransferFrom(user, address(this), amount);
-        require(IERC20Approve(usdc).approve(pool, amount), "approve");
-        uint256 out = IUsdcPool(pool).swapUsdcForWyda(amount, minOut);
-        IMockERC20(wyda).burn(address(this), out);
-        emit BurnForYadaCoinWithdrawal(user, wyda, out, yadacoinAddress);
+        if (req.usdc == address(0) || req.pool == address(0) || req.wyda == address(0) || req.user == address(0)) revert ZeroAddress();
+        if (req.amount == 0) revert BurnAmountZero();
+        if (bytes(req.yadacoinAddress).length == 0 || bytes(req.yadacoinAddress).length > 42) revert InvalidPublicKey();
+        _verifyPayoutBinding(req.user, req.yadacoinAddress, req.r, req.payoutSig);
+        uint256 out = _pullSwapBurn(req);
+        emit BurnForYadaCoinWithdrawal(req.user, req.wyda, out, req.yadacoinAddress);
+    }
+
+    function _pullSwapBurn(RelaySwapRequest calldata req) private returns (uint256 out) {
+        IERC20Permit2(req.usdc).permit(req.user, address(this), req.amount, req.deadline, req.v, req.r, req.s);
+        IERC20(req.usdc).safeTransferFrom(req.user, address(this), req.amount);
+        require(IERC20Approve(req.usdc).approve(req.pool, req.amount), "approve");
+        out = IUsdcPool(req.pool).swapUsdcForWyda(req.amount, req.minOut);
+        IMockERC20(req.wyda).burn(address(this), out);
+    }
+
+    function _verifyPayoutBinding(
+        address user,
+        string calldata yadacoinAddress,
+        bytes32 permitR,
+        bytes calldata payoutSig
+    ) private pure {
+        bytes memory message = bytes.concat(
+            "Yada payout binding\nwallet: ",
+            _toHexLower(abi.encodePacked(user)),
+            "\nyadacoin: ",
+            bytes(yadacoinAddress),
+            "\npermit: ",
+            _toHexLower(abi.encodePacked(permitR))
+        );
+        (address signer, ECDSA.RecoverError err, ) = ECDSA.tryRecover(
+            MessageHashUtils.toEthSignedMessageHash(message),
+            payoutSig
+        );
+        if (err != ECDSA.RecoverError.NoError || signer != user) revert InvalidPayoutBinding();
+    }
+
+    function _toHexLower(bytes memory data) private pure returns (bytes memory out) {
+        bytes memory alphabet = "0123456789abcdef";
+        out = new bytes(2 + data.length * 2);
+        out[0] = "0";
+        out[1] = "x";
+        for (uint256 i = 0; i < data.length; i++) {
+            out[2 + i * 2] = alphabet[uint8(data[i]) >> 4];
+            out[3 + i * 2] = alphabet[uint8(data[i]) & 0x0f];
+        }
     }
 
     function isYadaWrapFulfilled(string calldata yadaTxnId) external view returns (bool) {
