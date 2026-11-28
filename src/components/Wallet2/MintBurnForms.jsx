@@ -60,6 +60,16 @@ function permitAmount(value) {
   }
 }
 
+// A combined unwrap pays several Base burns in one YadaCoin transaction, so its
+// relationship is a delimited list of the burn tx ids it settles.
+function relationshipKeys(relationship) {
+  if (typeof relationship !== "string") return [];
+  return relationship
+    .split(/[\s,;]+/)
+    .map((part) => part.trim().toLowerCase())
+    .filter(Boolean);
+}
+
 const WRAP_ADDRESS = "16U1gAmHazqqEkbRE9KFPShAperjJreMRA";
 const WRAP_START_HEIGHT = 620273;
 const BASE_BRIDGE_START_BLOCK = 56248238;
@@ -431,9 +441,9 @@ const TokenManagementForm = ({
     });
   };
 
-  const swapPermits = async (requests) => {
-    setSwapLoading(true);
+  const performSwaps = async (requests) => {
     const failed = [];
+    const payouts = [];
     let swapped = 0;
     const used = new Set();
     const ordered = [...requests].sort((a, b) => {
@@ -445,24 +455,41 @@ const TokenManagementForm = ({
         return 0;
       }
     });
-    try {
-      for (const request of ordered) {
-        const wallet = String(request.wallet_address || "").toLowerCase();
-        if (used.has(wallet + ":" + (request.nonce || request.value))) {
-          await axios.post("/crypto-onramp/pending-swap", {
-            session_id: request.session_id,
-            status: "fulfilled",
-          });
-          continue;
-        }
-        try {
-          await swapPermit(request);
-          swapped += 1;
-          if (request.nonce) used.add(wallet + ":" + request.nonce);
-        } catch (error) {
-          failed.push(error.shortMessage || error.message);
-        }
+    for (const request of ordered) {
+      const wallet = String(request.wallet_address || "").toLowerCase();
+      if (used.has(wallet + ":" + (request.nonce || request.value))) {
+        await axios.post("/crypto-onramp/pending-swap", {
+          session_id: request.session_id,
+          status: "fulfilled",
+        });
+        continue;
       }
+      try {
+        const result = await swapPermit(request);
+        swapped += 1;
+        if (
+          request.yadacoin_address &&
+          result?.hash &&
+          Number(result.ydaAmount) > 0
+        ) {
+          payouts.push({
+            destination: request.yadacoin_address,
+            amount: result.ydaAmount,
+            relationship: result.hash,
+          });
+        }
+        if (request.nonce) used.add(wallet + ":" + request.nonce);
+      } catch (error) {
+        failed.push(error.shortMessage || error.message);
+      }
+    }
+    return { swapped, failed, payouts };
+  };
+
+  const swapPermits = async (requests) => {
+    setSwapLoading(true);
+    try {
+      const { swapped, failed } = await performSwaps(requests);
       await loadPermitRequests();
       notifications.show({
         title: failed.length ? "Swap finished with errors" : "Swap finished",
@@ -471,6 +498,85 @@ const TokenManagementForm = ({
       });
     } finally {
       setSwapLoading(false);
+    }
+  };
+
+  // Each permit needs its own Base relaySwap transaction, but the YadaCoin
+  // payouts for all successful swaps are combined into one transaction.
+  const swapPermitsAndUnwrap = async (requests) => {
+    if (
+      !localStorage.getItem("walletWif_yda") ||
+      !localStorage.getItem("walletParsedData_yda")
+    ) {
+      notifications.show({
+        title: "YadaCoin payout key required",
+        message:
+          "Scan the YadaCoin payout key on the YadaCoin chain before running Swap all & Unwrap.",
+        color: "red",
+      });
+      return;
+    }
+    setSwapLoading(true);
+    try {
+      const { swapped, failed, payouts } = await performSwaps(requests);
+      await loadPermitRequests();
+      let actionId = null;
+      let unwrapError = null;
+      if (payouts.length) {
+        try {
+          const yada = new YadaCoin();
+          const result = await yada.unwrapPair(appContext, webcamRef, {
+            requests: payouts,
+            useStoredYadaKey: true,
+          });
+          actionId = result.action.id;
+          for (const payout of payouts) {
+            saveUnwrapAttempt(payout.relationship, {
+              actionId: result.action.id,
+              actionHash: result.action.hash,
+              confirmingId: result.confirming.id,
+              submittedAt: Date.now(),
+            });
+          }
+        } catch (error) {
+          unwrapError = error;
+        }
+      }
+      const summary = `${swapped} swapped${
+        failed.length ? `, ${failed.length} failed: ${failed[0]}` : ""
+      }`;
+      if (unwrapError) {
+        notifications.show({
+          title: "Swap finished; payout not submitted",
+          message: `${summary}. ${payouts.length} payout${
+            payouts.length === 1 ? "" : "s"
+          } remain pending and can be unwrapped later: ${
+            unwrapError.shortMessage || unwrapError.message
+          }`,
+          color: "yellow",
+        });
+      } else {
+        notifications.show({
+          title: failed.length ? "Swap finished with errors" : "Swap finished",
+          message: `${summary}${
+            payouts.length
+              ? `, ${payouts.length} payout${
+                  payouts.length === 1 ? "" : "s"
+                } combined into one YadaCoin transaction`
+              : ""
+          }${actionId ? ` (${actionId.slice(0, 12)}...)` : ""}`,
+          color: failed.length ? "yellow" : "green",
+        });
+      }
+    } catch (error) {
+      notifications.show({
+        title: "Swap and unwrap failed",
+        message: error.shortMessage || error.message,
+        color: "red",
+      });
+    } finally {
+      setSwapLoading(false);
+      void loadUnwrapRequests();
     }
   };
 
@@ -542,11 +648,12 @@ const TokenManagementForm = ({
           const failedRelationships = new Set();
           const reportedRelationships = new Set();
           const setPaid = (bucket, relationship, txnId) => {
-            const key = String(relationship).toLowerCase();
-            if (txnId) {
-              bucket.set(key, txnId);
-            } else if (!bucket.has(key)) {
-              bucket.set(key, null);
+            for (const key of relationshipKeys(relationship)) {
+              if (txnId) {
+                bucket.set(key, txnId);
+              } else if (!bucket.has(key)) {
+                bucket.set(key, null);
+              }
             }
           };
           const addPaid = (txn, bucket) => {
@@ -560,7 +667,9 @@ const TokenManagementForm = ({
           const addFailed = (row) => {
             const txn = row?.txn || row;
             if (txn?.relationship) {
-              failedRelationships.add(String(txn.relationship).toLowerCase());
+              relationshipKeys(txn.relationship).forEach((key) =>
+                failedRelationships.add(key)
+              );
             }
           };
           await Promise.all(
@@ -570,7 +679,9 @@ const TokenManagementForm = ({
                   `${base}/unwrap-fulfillment?address=${encodeURIComponent(address)}`
                 );
                 (res.data?.relationships || []).forEach((rel) => {
-                  if (rel) reportedRelationships.add(String(rel).toLowerCase());
+                  relationshipKeys(rel).forEach((key) =>
+                    reportedRelationships.add(key)
+                  );
                 });
               } catch {
                 // endpoint is not deployed on this node
@@ -790,38 +901,38 @@ const TokenManagementForm = ({
     }
 
     setUnwrappingAll(true);
-    let succeeded = 0;
-    const failures = [];
     try {
+      const yada = new YadaCoin();
+      const result = await yada.unwrapPair(appContextRef.current, webcamRef, {
+        requests: pendingUnwraps.map((request) => ({
+          destination: request.destination,
+          amount: request.amount,
+          relationship: request.txHash,
+        })),
+      });
       for (const request of pendingUnwraps) {
-        setUnwrappingId(request.id);
-        try {
-          await submitUnwrap(request, appContextRef.current);
-          succeeded += 1;
-          // Let React commit the rotated key and refreshed log before the next
-          // unwrap reads them from the context.
-          await new Promise((resolve) => setTimeout(resolve, 500));
-        } catch (error) {
-          if (error.message === "Scan cancelled") {
-            failures.push("Scan cancelled");
-            break;
-          }
-          failures.push(
-            `${String(request.txHash).slice(0, 10)}…: ${
-              error.shortMessage || error.message
-            }`
-          );
-        }
+        saveUnwrapAttempt(request.txHash, {
+          actionId: result.action.id,
+          actionHash: result.action.hash,
+          confirmingId: result.confirming.id,
+          submittedAt: Date.now(),
+        });
       }
       notifications.show({
-        title: failures.length
-          ? "Unwrap all finished with errors"
-          : "Unwrap all finished",
-        message: `${succeeded} submitted${
-          failures.length ? `, ${failures.length} failed: ${failures[0]}` : ""
-        }`,
-        color: failures.length ? "yellow" : "green",
+        title: "Unwrap all submitted",
+        message: `${pendingUnwraps.length} payout${
+          pendingUnwraps.length === 1 ? "" : "s"
+        } combined into one transaction (${result.action.id.slice(0, 12)}...).`,
+        color: "green",
       });
+    } catch (error) {
+      if (error.message !== "Scan cancelled") {
+        notifications.show({
+          title: "Unwrap all failed",
+          message: error.shortMessage || error.message,
+          color: "red",
+        });
+      }
     } finally {
       setUnwrappingId(null);
       setUnwrappingAll(false);
@@ -1116,14 +1227,25 @@ const TokenManagementForm = ({
           <Text size="sm" fw={500}>
             Signed swap permits
           </Text>
-          <Button
-            size="xs"
-            disabled={permitRequests.length === 0}
-            loading={swapLoading}
-            onClick={() => swapPermits(permitRequests)}
-          >
-            Swap all
-          </Button>
+          <Group gap="xs">
+            <Button
+              size="xs"
+              variant="light"
+              disabled={permitRequests.length === 0}
+              loading={swapLoading}
+              onClick={() => swapPermitsAndUnwrap(permitRequests)}
+            >
+              Swap all &amp; Unwrap
+            </Button>
+            <Button
+              size="xs"
+              disabled={permitRequests.length === 0}
+              loading={swapLoading}
+              onClick={() => swapPermits(permitRequests)}
+            >
+              Swap all
+            </Button>
+          </Group>
         </Group>
         <Table striped highlightOnHover mb="md">
           <Table.Thead>

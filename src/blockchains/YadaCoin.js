@@ -1322,7 +1322,14 @@ class YadaCoin {
     }
   }
 
-  async unwrapPair(appContext, webcamRef, { destination, amount, relationship }) {
+  async unwrapPair(
+    appContext,
+    webcamRef,
+    { destination, amount, relationship, requests, useStoredYadaKey = false }
+  ) {
+    if (useStoredYadaKey && appContext.selectedBlockchain?.id !== "yda") {
+      appContext = this._storedYadaContext(appContext);
+    }
     const {
       privateKey,
       parsedData,
@@ -1335,6 +1342,33 @@ class YadaCoin {
       setParsedData,
       setLog,
     } = appContext;
+
+    // A single destination or a batch of requests; duplicate destinations are
+    // summed into one output so the batch can be paid in one transaction.
+    const batch =
+      Array.isArray(requests) && requests.length
+        ? requests
+        : [{ destination, amount, relationship }];
+    const round8 = (value) => Math.round((value + Number.EPSILON) * 1e8) / 1e8;
+    const outputsByAddress = new Map();
+    const transactionRelationships = [];
+    let totalAmount = 0;
+    for (const request of batch) {
+      const value = Number(request.amount);
+      if (!Number.isFinite(value) || value <= 0) {
+        throw new Error(`Invalid unwrap amount: ${request.amount}`);
+      }
+      const to = validateBitcoinAddress(request.destination);
+      if (!to) {
+        throw new Error(`Invalid unwrap destination: ${request.destination}`);
+      }
+      outputsByAddress.set(to, round8((outputsByAddress.get(to) || 0) + value));
+      totalAmount = round8(totalAmount + value);
+      if (request.relationship != null && request.relationship !== "") {
+        transactionRelationships.push(String(request.relationship));
+      }
+    }
+    const transactionRelationship = transactionRelationships.join(",");
 
     const { isValidKey, log } = await this.getKeyLog(appContext, privateKey);
     if (!isValidKey) {
@@ -1385,10 +1419,6 @@ class YadaCoin {
       feeEstimate?.status === "congested"
         ? feeEstimate.fee_estimate.median_fee
         : feeEstimate?.recommended_fee || 0.0;
-    const totalAmount = Number(amount);
-    if (!Number.isFinite(totalAmount) || totalAmount <= 0) {
-      throw new Error(`Invalid unwrap amount: ${amount}`);
-    }
     const needed = totalAmount + transactionFee;
 
     const { utxos } = await this._spendableUtxosForAddresses(
@@ -1609,7 +1639,10 @@ class YadaCoin {
 
     const changeValue = Math.max(0, inputsTotal - needed);
     const outputs = [
-      { to: validateBitcoinAddress(destination), value: totalAmount },
+      ...Array.from(outputsByAddress.entries()).map(([to, value]) => ({
+        to,
+        value,
+      })),
       { to: actionKey.parsed.prerotatedKeyHash, value: changeValue },
     ];
 
@@ -1624,8 +1657,8 @@ class YadaCoin {
       prerotated_key_hash: actionKey.parsed.prerotatedKeyHash,
       inputs: selectedInputs,
       outputs,
-      relationship: relationship || "",
-      relationship_hash: await generateSHA256(relationship || ""),
+      relationship: transactionRelationship,
+      relationship_hash: await generateSHA256(transactionRelationship),
       public_key_hash: actionKey.pkh,
       prev_public_key_hash: tip.public_key_hash,
       fee: transactionFee,
@@ -1674,8 +1707,10 @@ class YadaCoin {
 
     // The change is now held by the confirming key, so refresh the displayed
     // balance against that key instead of the previous (now spent) rotation.
+    // Skip this when unwrapping from another chain's context, where the state
+    // setters belong to that chain's balance.
     try {
-      if (typeof appContext.setBalance === "function") {
+      if (!useStoredYadaKey && typeof appContext.setBalance === "function") {
         await this.fetchBalance(
           {
             ...appContext,
@@ -1689,7 +1724,12 @@ class YadaCoin {
       console.warn("Failed to refresh YadaCoin balance after unwrap:", error);
     }
 
-    return { action, confirming, parsed: confirmingKey.parsed };
+    return {
+      action,
+      confirming,
+      parsed: confirmingKey.parsed,
+      relationship: transactionRelationship,
+    };
   }
 
   async transferBalanceToLatestKey(appContext, previousSigner, qrdata) {
